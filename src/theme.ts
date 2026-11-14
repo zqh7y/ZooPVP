@@ -17,7 +17,7 @@ export const FONT = '"Barlow Condensed", "Arial Narrow", "Helvetica Neue", Arial
  */
 export const COLOR = {
   page: '#0c1016', // behind the canvas
-  ink: '#2b1f33', // every outline
+  ink: '#14181f', // every outline: a neutral slate-black, so the art sits with the interface
   white: '#ffffff',
   textDim: '#8a94a3',
   textInk: '#4a3a52', // text on paper
@@ -111,25 +111,28 @@ export const UI = {
   /** a see-through slate, for plates that float over the pitch */
   glass: 'rgba(12, 16, 22, 0.9)',
   scrim: 'rgba(8, 11, 16, 0.8)',
-  /** class line colours, E..SSS (SSS is drawn as a rainbow) and the lighter ones for letters */
-  tier: ['#5d6878', '#38b653', '#2f86f6', '#9a52f5', '#f5a417', '#ff3b5c', '#ff4fd8'],
-  tierText: ['#aab3c0', '#6fd27a', '#6fb1fb', '#bb93f7', '#ffc94f', '#ff5c77', '#f2a6ff'],
-  /** one muted colour per league, Sprout..Legend */
-  league: ['#8fb59a', '#c58f62', '#c3cad4', '#e8c35a', '#9ed3df', '#86b6f2', '#d7a7f0'],
+  /** class line colours E..SSS (greys, silver, then gold: see TIER) and the lighter ones for letters */
+  tier: ['#5d6878', '#7c8796', '#a0aab7', '#cfd6de', '#d9a52e', '#ffd21f', '#fff3c4'],
+  tierText: ['#8f99a7', '#a5afbc', '#c3cbd5', '#eef1f4', '#f0c75a', '#ffd21f', '#fff6dc'],
+  /** one colour per league, Sprout..Legend: metals, ending in the main gold */
+  league: ['#7d8794', '#a37a52', '#b9c1cb', '#e0b84a', '#d8dee6', '#eef3f7', '#ffd21f'],
 };
 
-/** Colours per class: index 0 = E (gray), D green, C blue, B purple, A gold, S crimson, 6 = SSS (prismatic). */
+/**
+ * Colours per class, E..SSS. One main colour runs through the game, so rarity climbs from cool greys (E, D, C)
+ * through silver (B) into gold (A), the full floodlight gold (S) and white-gold (SSS). Never a rainbow.
+ */
 export const TIER = {
-  metal: ['#8f99a8', '#38b653', '#2f86f6', '#9a52f5', '#f5a417', '#ff3b5c', '#ff4fd8'],
-  metalLight: ['#d2d8e1', '#9bf0a8', '#a3cdff', '#dcb8ff', '#ffe08a', '#ffb3c0', '#ffd1f6'],
-  tile: ['#c9cfd9', '#7fd77c', '#7db9fb', '#c09af7', '#ffc94f', '#ff8a9c', '#f2a6ff'],
-  tileLight: ['#eef1f5', '#c9f3c4', '#cfe6ff', '#ead9ff', '#fff0bf', '#ffdbe1', '#fff0ff'],
-  tileDark: ['#7d8696', '#3a9a45', '#3a78cc', '#7b47c9', '#c98712', '#c4243f', '#9b2fd0'],
+  metal: ['#6b7480', '#848e9a', '#a3adb9', '#c9d0d8', '#d9a52e', '#ffcc1a', '#fff0b8'],
+  metalLight: ['#a9b1bb', '#bcc4cd', '#d5dbe2', '#f1f4f7', '#ffe08a', '#fff0a0', '#ffffff'],
+  tile: ['#4b535e', '#5c6571', '#727c89', '#8d97a3', '#b8892a', '#e0b21a', '#f3dc8a'],
+  tileLight: ['#7a838e', '#8c95a0', '#a3acb7', '#c2c9d1', '#f0c75a', '#ffe066', '#fff6d6'],
+  tileDark: ['#2f353d', '#3a414a', '#4a525d', '#5d6672', '#7f5e17', '#a37f0c', '#b99a3e'],
 };
-/** The rainbow rim of an SSS piece. */
-export const RAINBOW = ['#ff6b6b', '#ffd84a', '#5ad66c', '#5aa8ff', '#c48bff'];
+/** The slow white-gold shimmer of an SSS piece (the name stays from when it was a rainbow). */
+export const RAINBOW = ['#fff6d6', '#ffe27a', '#ffffff', '#ffd21f', '#fff0b8'];
 /** The S-class aura and the sparkle colour. */
-export const CLASS_FX = { s: '#ff4664', sss: '#ff7af5', spark: '#fff6d8' };
+export const CLASS_FX = { s: '#ffd21f', sss: '#fff3c4', spark: '#fffbe8' };
 
 /** Type sizes (px), by role. */
 export const TYPE = {
@@ -158,10 +161,11 @@ export const S = {
 export const TOPBAR = { y: 14, h: S.barH };
 
 /**
- * The battlefield on screen: one arena pixel is one screen pixel. The opponent holds the top, you the
- * bottom. The frame and the crowd are drawn around it.
+ * The box the pitch fills on screen: the opponent's end at the top, yours at the bottom. The pitch is drawn
+ * through the match camera (draw/camera.ts), so it is a trapezoid inside this box, narrower at the far end, and
+ * an arena point is never just FIELD.x + x: use project() from the camera. Kept equal to camera.ts PITCH.
  */
-export const FIELD = { x: (W - ARENA.w) / 2, y: 190, w: ARENA.w, h: ARENA.h };
+export const FIELD = { x: 40, y: 295, w: 460, h: 657 };
 
 /** The strip of the field in the lobby where your army stands idle. */
 export const STAGE = { x: 0, y: 104, w: W, h: 250 };
