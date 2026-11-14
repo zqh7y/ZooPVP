@@ -525,7 +525,6 @@ function drawAnt(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw: 
   const hx = tx + 0.66 * hd - 0.16 * bw + 0.24 * bs;
   const hy = ty - 0.75 * hd - 0.06 * bw + 0.12 * bs + L * 0.45;
 
-  if (k >= 5 && !stony) glow(ctx, -0.12, ty - 0.2, 1.75, 1.45, k === 6 ? CLASS_FX.sss : CLASS_FX.s, t);
 
   // one walking leg added to the current path; blown up, it sticks straight out of the ball
   const leg = (i: number, hip: number, foot: number, off: number, a: number) => {
@@ -587,6 +586,8 @@ function drawAnt(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw: 
 
   // abdomen and thorax, with the class on them
   const body = (c: Ctx) => {
+    // S and SSS shine: the glow is kept in the body's picture, so it costs nothing extra
+    if (k >= 5 && !stony) glow(c, tx - 0.17, ty - 0.23, 1.35, 1.15, k === 6 ? CLASS_FX.sss : CLASS_FX.s, cached ? 0 : t);
     blob(c, ax, ay, arx, ary, -0.3, P, lw, det);
     if (k === 1 || k === 2) {
       // D and C: one or two clean stripes in a lighter tone of the shell
@@ -628,7 +629,10 @@ function drawAnt(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw: 
     }
   };
   const rb = bucket(r);
-  if (cached) piece(ctx, `ab${look.team}${k}|${rb}`, rb, -1.55, -1.6, 2.1, 1.65, 0, ty - ANT_TY, body);
+  if (cached) {
+    if (k >= 5) piece(ctx, `ab${look.team}${k}|${rb}`, rb, -1.55, -2.12, 2.8, 2.22, 0, ty - ANT_TY, body);
+    else piece(ctx, `ab${look.team}${k}|${rb}`, rb, -1.55, -1.6, 2.1, 1.65, 0, ty - ANT_TY, body);
+  }
   else body(ctx);
 
   // near legs
@@ -842,11 +846,11 @@ function drawFrog(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw:
   const my = by - 0.26 * bry;
   const mmx = (m0x + m1x) / 2 + 0.1;
 
-  if (k >= 5 && !stony) glow(ctx, 0, by, brx * 1.65, bry * 1.7, k === 6 ? CLASS_FX.sss : CLASS_FX.s, t);
   // far foot peeking out in front
   if (!q) limb(ctx, 0.2, -0.07 + air * 0.3, 0.52 - air * 0.3, -0.07 + air * 0.5, 0.16, P.shade, lw, P.ink);
 
   const body = (c: Ctx) => {
+    if (k >= 5 && !stony) glow(c, 0, by, brx * 1.6, bry * 1.62, k === 6 ? CLASS_FX.sss : CLASS_FX.s, cached ? 0 : t);
     // eye domes: the far one stays behind the head, the near one is joined to it below
     const fierce = (k >= 5 || angry) && e === 'open';
     circle(c, dfx, dfy, 0.27 * es);
@@ -1105,34 +1109,21 @@ function drawPet(ctx: Ctx, look: PetLook, pose: PetPose, r: number): void {
   ctx.restore();
 }
 
-let SHADOW: HTMLCanvasElement | null = null;
-/** The contact shadow, made once: a soft dark oval with a darker core. */
-function shadowPic(): HTMLCanvasElement {
-  if (!SHADOW) {
-    SHADOW = document.createElement('canvas');
-    SHADOW.width = 96;
-    SHADOW.height = 32;
-    const g = SHADOW.getContext('2d')!;
-    g.scale(1, 32 / 96);
-    const gr = g.createRadialGradient(48, 48, 0, 48, 48, 48);
-    gr.addColorStop(0, 'rgba(6, 10, 14, 0.62)');
-    gr.addColorStop(0.32, 'rgba(6, 10, 14, 0.46)');
-    gr.addColorStop(0.7, 'rgba(6, 10, 14, 0.2)');
-    gr.addColorStop(1, 'rgba(6, 10, 14, 0)');
-    g.fillStyle = gr;
-    g.fillRect(0, 0, 96, 96);
-  }
-  return SHADOW;
-}
+/** the contact shadow's ink */
+const SHADE = 'rgb(6, 10, 14)';
 
 function drawShadow(ctx: Ctx, look: PetLook, r: number, lift: number): void {
   const k = 1 / (1 + Math.max(0, lift) * 0.7);
   const a = ctx.globalAlpha;
-  ctx.globalAlpha = a * (0.35 + 0.65 * k);
+  ctx.globalAlpha = a * (0.08 + 0.17 * k);
   const rx = r * (look.pet === 'frog' ? 1.2 : 1.12) * k;
   const ry = r * 0.36 * k;
-  // a touch to the lower right, away from the floodlights
-  ctx.drawImage(shadowPic(), -rx + r * 0.08, -ry + r * 0.03, rx * 2, ry * 2);
+  // a soft oval and a darker core, a touch to the lower right, away from the floodlights
+  ctx.fillStyle = SHADE;
+  ellipse(ctx, r * 0.06, r * 0.02, rx, ry);
+  ctx.fill();
+  ellipse(ctx, r * 0.1, r * 0.03, rx * 0.62, ry * 0.6);
+  ctx.fill();
   ctx.globalAlpha = a;
 }
 

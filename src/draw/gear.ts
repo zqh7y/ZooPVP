@@ -58,19 +58,27 @@ function helmet(ctx: Ctx, k: number, t: number, lw: number) {
     ctx.lineWidth = lw * 1.1;
     ctx.strokeStyle = '#6f4a2a';
     ctx.stroke();
-    shadedDome(ctx, 0.42, 0.36, 0.16, '#9a6b3f', '#6f4a2a', '#d0a273', lw);
-    ctx.lineWidth = lw * 0.55;
-    ctx.strokeStyle = '#5e3d22';
-    ctx.beginPath();
-    for (const x of [-0.18, 0.04, 0.25]) {
-      ctx.moveTo(x - 0.09, -0.01);
-      ctx.arc(x, 0.04, 0.1, Math.PI * 1.2, Math.PI * 1.8);
-    }
+    shadedDome(ctx, 0.4, 0.42, 0.13, '#9a6b3f', '#6f4a2a', '#d0a273', lw);
+    // the cap's little scales: a fine cross-hatch
+    dome(ctx, 0.4, 0.42, 0.13);
+    inside(ctx, () => {
+      ctx.beginPath();
+      for (let i = -5; i <= 5; i++) {
+        ctx.moveTo(i * 0.13 - 0.5, 0.2);
+        ctx.lineTo(i * 0.13 + 0.1, -0.45);
+        ctx.moveTo(i * 0.13 + 0.5, 0.2);
+        ctx.lineTo(i * 0.13 - 0.1, -0.45);
+      }
+      ctx.lineWidth = lw * 0.45;
+      ctx.strokeStyle = '#6a4528';
+      ctx.stroke();
+    });
+    dome(ctx, 0.4, 0.42, 0.13);
+    ctx.lineWidth = lw;
+    ctx.strokeStyle = COLOR.ink;
     ctx.stroke();
-    rr(ctx, -0.45, 0.1, 0.9, 0.1, 0.05);
+    rr(ctx, -0.42, 0.09, 0.84, 0.08, 0.04);
     fillStroke(ctx, '#7d5636', lw);
-    ctx.fillStyle = '#a97c52';
-    ctx.fillRect(-0.4, 0.11, 0.42, 0.03);
     return;
   }
   if (k === 1) {
@@ -128,12 +136,18 @@ function helmet(ctx: Ctx, k: number, t: number, lw: number) {
   if (k === 3) {
     // a raised comb from the nape over the crown
     ctx.beginPath();
-    ctx.moveTo(-0.3, -0.18);
-    ctx.quadraticCurveTo(-0.12, -0.44, 0.1, -0.4);
-    ctx.quadraticCurveTo(0.2, -0.36, 0.24, -0.26);
-    ctx.quadraticCurveTo(0.0, -0.32, -0.3, -0.18);
+    ctx.moveTo(-0.32, -0.02);
+    ctx.quadraticCurveTo(-0.2, -0.4, 0.06, -0.38);
+    ctx.quadraticCurveTo(0.2, -0.3, 0.24, -0.1);
+    ctx.quadraticCurveTo(0.02, -0.3, -0.32, -0.02);
     ctx.closePath();
     fillStroke(ctx, trimOf(k, t), lw * 0.8);
+    ctx.beginPath();
+    ctx.moveTo(-0.26, -0.08);
+    ctx.quadraticCurveTo(-0.16, -0.34, 0.04, -0.35);
+    ctx.lineWidth = lw * 0.8;
+    ctx.strokeStyle = TIER.metalLight[k];
+    ctx.stroke();
   }
   // the brow band in the class metal, its rivets
   band(ctx, -0.43, 0.06, 0.86, 0.1, k, t, lw);
@@ -147,10 +161,13 @@ function helmet(ctx: Ctx, k: number, t: number, lw: number) {
   if (k === 4) {
     // a gold crescent on the brow
     ctx.beginPath();
-    ctx.arc(0.27, -0.12, 0.16, Math.PI * 0.05, Math.PI * 0.95, true);
-    ctx.quadraticCurveTo(0.27, -0.05, 0.43, -0.1);
-    ctx.closePath();
-    fillStroke(ctx, trimOf(k, t), lw);
+    ctx.arc(0.27, -0.14, 0.13, Math.PI * 0.02, Math.PI * 0.98);
+    ctx.lineWidth = 0.06 + lw * 2;
+    ctx.strokeStyle = COLOR.ink;
+    ctx.stroke();
+    ctx.lineWidth = 0.06;
+    ctx.strokeStyle = trimOf(k, t);
+    ctx.stroke();
   }
   if (k >= 4) stud(ctx, 0.27, 0.0, 0.07, k, t, lw);
   if (k === 6) sparkle(ctx, -0.16, -0.22, 0.2, t, 5);
