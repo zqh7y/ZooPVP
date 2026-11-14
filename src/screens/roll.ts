@@ -1,18 +1,18 @@
 import type { App, Screen } from '../screen';
 import type { Ctx, Rect } from '../util';
 import type { PieceType, RollResult } from '../types';
-import { W, H, S, TYPE, COLOR, TOPBAR, UI } from '../theme';
+import { W, H, S, TYPE, COLOR, UI } from '../theme';
 import { clamp, easeOutCubic, label, inRect, rr } from '../util';
 import { MAX_LEVEL, PIECE_NAME, PIECE_TYPES, cls, classOf } from '../data';
-import { button, classBadge, classColor, panel, pill } from '../draw/ui';
+import { button, classBadge, classColor, panel, veil } from '../draw/ui';
 import type { ButtonOpts } from '../draw/ui';
-import { rollToken, trophy } from '../draw/icons';
+import { rollToken } from '../draw/icons';
 import { drawPiece } from '../draw/pieces';
 import { Fx } from '../draw/fx';
 import { classOdds, rollOnce } from '../logic/rolls';
 import { hashSeed, makeRng, frand, fpick, fchance } from '../rng';
 import { sfx, music } from '../audio/engine';
-import { benchSlotRect, CELL } from './lobby';
+import { benchSlotRect, CELL, drawTopPills } from './lobby';
 
 // ------------------------------------------------------------------ layout and timing
 
@@ -259,9 +259,9 @@ export function createRoll(app: App): Screen {
         ctx.fillRect(ODDS_RECT.x + 1, y - rowH / 2, 3, rowH);
       }
       classBadge(ctx, o.lv, ODDS_RECT.x + 22, y, 1, t);
-      label(ctx, cls(o.lv).toUpperCase(), ODDS_RECT.x + 64, y + 1, TYPE.small + 1, { align: 'left', track: 1.5, color: hit ? UI.text : UI.textDim });
+      label(ctx, cls(o.lv).toUpperCase(), ODDS_RECT.x + 64, y + 1, TYPE.caption, { align: 'left', track: 1.5, color: hit ? UI.text : UI.textDim });
       const n = Math.max(1, Math.round(100 / o.p));
-      label(ctx, n <= 1 ? 'EVERY ROLL' : `1 IN ${n}`, ODDS_RECT.x + ODDS_RECT.w - 22, y + 1, TYPE.small + 1, { align: 'right', track: 1.5, color: hit ? UI.text : UI.textDim });
+      label(ctx, n <= 1 ? 'EVERY ROLL' : `1 IN ${n}`, ODDS_RECT.x + ODDS_RECT.w - 22, y + 1, TYPE.caption, { align: 'right', track: 1.5, color: hit ? UI.text : UI.textDim });
     });
   }
 
@@ -271,7 +271,7 @@ export function createRoll(app: App): Screen {
 
   function drawButtons(ctx: Ctx) {
     if (!buttonsOn()) {
-      if (!done && tt > OPEN + 0.5) label(ctx, 'TAP TO SKIP', W / 2, BTN_Y + S.btnH / 2, TYPE.small + 1, { color: UI.textDim, track: 2.5 });
+      if (!done && tt > OPEN + 0.5) label(ctx, 'TAP TO SKIP', W / 2, BTN_Y + S.btnH / 2, TYPE.caption, { color: UI.textDim, track: 2.5 });
       return;
     }
     const k = easeOutCubic(clamp((tt - doneAt - 0.3) / 0.25, 0, 1));
@@ -329,13 +329,13 @@ export function createRoll(app: App): Screen {
       if (!done && tt >= lastLand().at + SETTLE) collect();
     },
     render(ctx) {
-      app.arena.drawLobbyBack(ctx, t);
-      ctx.fillStyle = UI.bg; // the roll happens on flat slate
-      ctx.fillRect(0, 0, W, H);
+      // the stadium after dark, veiled, as on match and result: the prize is the only lit thing
+      app.arena.drawDusk(ctx, app.t);
+      veil(ctx, 1);
       ctx.save();
       ctx.translate(fx.camera.x, fx.camera.y);
-      pill(ctx, { x: S.pad, y: TOPBAR.y, w: 160, h: TOPBAR.h }, { icon: rollToken, text: String(app.state.rolls) });
-      pill(ctx, { x: W - S.pad - 160, y: TOPBAR.y, w: 160, h: TOPBAR.h }, { icon: trophy, text: String(app.state.trophies) });
+      // the same top bar as the lobby, in the same places, so the counters do not jump between the two
+      drawTopPills(ctx, app.state);
       label(ctx, done ? 'NEW PIECE' : 'ROLLING', W / 2, TITLE_Y, TYPE.body, { color: done ? UI.text : UI.textDim, weight: 700, track: 5 });
       fx.drawUnder(ctx);
       drawToken(ctx);

@@ -53,6 +53,13 @@ function mix(a: string, b: string, k: number) {
   return `#${hex2(lerp(x[0], y[0], k))}${hex2(lerp(x[1], y[1], k))}${hex2(lerp(x[2], y[2], k))}`;
 }
 
+/** The same colour without its hue, a touch lighter (Rec. 601 luma). */
+function grey(h: string) {
+  const [r, g, b] = rgb(h);
+  const y = hex2(Math.min(255, (r * 0.299 + g * 0.587 + b * 0.114) * 1.08));
+  return `#${y}${y}${y}`;
+}
+
 const RIM = '#c4d8ee';
 const EYE = '#f3f0e8';
 const PUPIL = '#141820';
@@ -76,6 +83,20 @@ function pal(main: string, shade: string, light: string, spec: string, limb: str
 const BASE: Record<PetType, readonly [Pal, Pal]> = {
   ant: [pal('#2f5193', '#1c3468', '#5a80c4', '#dbe7ff', '#22396a'), pal('#a5303c', '#6c1b26', '#cd5965', '#ffe1dc', '#5a1922')],
   frog: [pal('#4a86c4', '#2d5d93', '#80b0e2', '#f0f6ff', '#2d5d93'), pal('#c25540', '#883427', '#e2806a', '#fff1ea', '#883427')],
+};
+/**
+ * The body colours of each pet and team as [main, light, shade], for anything that shows a piece of a pet
+ * (the shreds of a pop, a burst of its colour). Yours first, then the opponent's.
+ */
+export const PET_COLORS: Record<PetType, readonly [readonly [string, string, string], readonly [string, string, string]]> = {
+  ant: [
+    [BASE.ant[0].main, BASE.ant[0].light, BASE.ant[0].shade],
+    [BASE.ant[1].main, BASE.ant[1].light, BASE.ant[1].shade],
+  ],
+  frog: [
+    [BASE.frog[0].main, BASE.frog[0].light, BASE.frog[0].shade],
+    [BASE.frog[1].main, BASE.frog[1].light, BASE.frog[1].shade],
+  ],
 };
 const STONE: Pal = {
   main: '#9ca2aa',
@@ -111,7 +132,9 @@ function palette(look: PetLook, pose: PetPose): Pal {
   if (!p) {
     const k = st ? st / 5 : (hu / 4) * 0.8;
     const q = {} as Pal;
-    for (const c of KEYS) q[c] = mix(base[c], st ? STONE[c] : WHITE, k);
+    // the hurt flash drains the hue faster than it lightens, so a red pet goes pale, never pink
+    const drain = Math.min(1, k * 1.7);
+    for (const c of KEYS) q[c] = st ? mix(base[c], STONE[c], k) : mix(mix(base[c], grey(base[c]), drain), WHITE, k);
     if (!st) q.ink = base.ink;
     p = q;
     PALS.set(key, p);
@@ -600,7 +623,8 @@ function drawAnt(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw: 
         c.moveTo(ax + arx * 0.28, ay - ary * 0.95);
         c.ellipse(ax + arx * 0.05, ay - ary * 0.02, arx * 0.3, ary * 0.95, -0.3, -1.6, 1.6);
       }
-      c.lineWidth = lt * 1.5;
+      // never thinner than about two pixels, or a small ant's class is lost
+      c.lineWidth = Math.max(lt * 1.5, 2.2 / r);
       c.strokeStyle = P.light;
       c.stroke();
       c.restore();
@@ -885,15 +909,17 @@ function drawFrog(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw:
     c.restore();
     if (k === 1 || k === 2) {
       // D and C: clean marks in a lighter tone of the skin
+      // a small frog gets bigger marks, so its class still shows at a fight size
+      const mk = clamp(11 / r, 1, 1.8);
       c.fillStyle = P.light;
-      circle(c, bx - 0.52 * brx, by - 0.4 * bry, 0.11);
+      circle(c, bx - 0.52 * brx, by - 0.4 * bry, 0.11 * mk);
       c.fill();
-      circle(c, bx - 0.72 * brx, by - 0.04 * bry, 0.075);
+      circle(c, bx - 0.72 * brx, by - 0.04 * bry, 0.075 * mk);
       c.fill();
       if (k === 2) {
-        circle(c, bx - 0.24 * brx, by - 0.66 * bry, 0.08);
+        circle(c, bx - 0.24 * brx, by - 0.66 * bry, 0.08 * mk);
         c.fill();
-        circle(c, bx - 0.36 * brx, by - 0.14 * bry, 0.06);
+        circle(c, bx - 0.36 * brx, by - 0.14 * bry, 0.06 * mk);
         c.fill();
       }
     }

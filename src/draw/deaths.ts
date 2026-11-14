@@ -7,7 +7,7 @@ import { clamp, easeOutCubic, lerp, smooth, type Ctx } from '../util';
 import { PITCH, project, TILT } from './camera';
 import type { Fx } from './fx';
 import { restPose, type PetLook, type PetPose } from './petTypes';
-import { petArt } from './pets';
+import { PET_COLORS, petArt } from './pets';
 
 /*
  * The eight ways a fighter goes. No blood and no comic words: each one is a little joke told with shape,
@@ -42,14 +42,11 @@ const OWN: Record<PetType, readonly DeathKind[]> = {
   frog: ['pop', 'pop', 'pop', 'deflate', 'deflate', 'deflate', 'petals', 'spin'],
   ant: ['squish', 'squish', 'squish', 'squish', 'petals', 'pop', 'spin', 'deflate'],
 };
-/** body tones of the two teams, as the pets are painted: [main, light, shade] */
-const BODY: Record<PetType, readonly (readonly [string, string, string])[]> = {
-  ant: [['#3a5fd6', '#86a6ff', '#27409e'], ['#f04a30', '#ffa184', '#b82c22']],
-  frog: [['#25b9cf', '#9cf0fa', '#1787a6'], ['#ff8038', '#ffc994', '#d6541f']],
-};
+/** body tones of the two teams, exactly as the pets are painted: [main, light, shade] */
+const BODY = PET_COLORS;
 const STONES = ['#a9aeb6', '#80868f', '#d3d7dd'];
-/** mostly white, with a pale blossom pink as the one soft accent this death is allowed */
-const PETALS = [COLOR.white, '#fff6f8', '#f7d3de', COLOR.white, '#fbe6ec'];
+/** white and off-white, with a breath of floodlight gold: no extra hue */
+const PETALS = [COLOR.white, '#fbf7ee', '#efe9dc', COLOR.white, '#fff0c4'];
 const SPARK = [UI.accent, COLOR.white];
 const INFLATE = DEATH_PAYOFF.pop;
 const ZIP = 0.8; // the let-go balloon zips about this long
@@ -290,8 +287,8 @@ export class Deaths {
         if (t >= INFLATE && !b.fired) {
           b.fired = 1;
           p.alpha = 0;
-          fx.impact(x, cy - r * 0.3, r * 1.6 + 5 * s, COLOR.white, 0.14);
-          fx.ring(x, cy, COLOR.white, r, r * 3.6 + 8 * s, 0.28);
+          fx.impact(x, cy - r * 0.3, r * 1.25 + 4 * s, COLOR.white, 0.12);
+          fx.ring(x, cy, COLOR.white, r * 0.8, r * 2.5 + 5 * s, 0.24);
           fx.burst(x, cy, {
             colors: [main, light, shade, main], n: Math.round(10 * few), speed: (330 + 90 * b.power) * s, size: r * 0.4 + 2.2, life: 0.9, gravity: 560 * s, shape: 'shard', drag: 2.6, ink: true,
             floor: y, depth: r * 0.9, shadow: true,
@@ -501,7 +498,7 @@ export class Deaths {
             dir: -Math.PI / 2, spread: 1.7, scatter: r * 0.7, floor: y + 2, depth: r * 0.8, shadow: true,
           });
           fx.dust(x, y - r * 0.5, Math.round(5 * few), r * 0.5 + 3 * s);
-          fx.ring(x, cy, COLOR.white, r * 0.6, r * 2.4 + 5 * s, 0.22);
+          fx.ring(x, cy, COLOR.white, r * 0.5, r * 1.8 + 4 * s, 0.2);
           fx.shake(1.8, 0.15);
         }
         break;
@@ -515,7 +512,7 @@ export class Deaths {
         if (k >= 1 && !b.fired) {
           b.fired = 1;
           p.alpha = 0;
-          fx.ring(x, cy, COLOR.white, r * 0.6, r * 2.8 + 7 * s, 0.4);
+          fx.ring(x, cy, COLOR.white, r * 0.6, r * 2.1 + 5 * s, 0.3);
           fx.burst(x, cy, { colors: PETALS, n: Math.round(16 * few), speed: 210 * s, size: Math.max(3, r * 0.4), life: 1.3, gravity: 70, shape: 'petal', scatter: r * 0.6, floor: y + 1, depth: r * 1.2, shadow: true });
           fx.burst(x, cy, { colors: [COLOR.white], n: 4, speed: 80 * s, size: r * 0.5 + 3, life: 0.4, gravity: -20, shape: 'puff' });
         }

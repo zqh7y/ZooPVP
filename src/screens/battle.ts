@@ -369,7 +369,7 @@ export function createBattleScreen(app: App): BattleScreen {
       fx.slowMo(0.2, 0.85);
       fx.flash(UI.accent, 0.14, 0.5);
       fx.flash(COLOR.white, 0.3, 0.16);
-      fx.speedLines(x, y - u.r * p.s, COLOR.white, 1);
+      fx.speedLines(x, y - u.r * p.s, COLOR.white, 1, METER.y + METER.h + 8);
       fx.shake(9, 0.9);
       fx.ring(x, y - u.r * p.s, UI.accent, u.r * p.s, 130, 0.6);
       fx.ring(x, y, COLOR.white, u.r * p.s, 90, 0.7, 0);

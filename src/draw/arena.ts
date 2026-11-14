@@ -107,8 +107,8 @@ const TOWER_Z = 290;
 const TOWER_AT: P[] = [
   [-52, -56],
   [AW + 52, -56],
-  [-2, AH + 58],
-  [AW + 2, AH + 58],
+  [12, AH + 58],
+  [AW - 12, AH + 58],
 ];
 const TOWER_BOX = { w: 150, h: 270, dx: 75, dy: 80 };
 // the near stand, in screen px
@@ -127,7 +127,8 @@ const S_ROWS = [40, 55, 70, 85, 100, 115];
 const S_BACK_H = 122;
 const S_FRONT_Y = 114;
 
-const WORDS = ['ZOOPVP', 'GO PETS', 'ZOO CUP', 'ROAR!', 'PAWS UP', 'HOP HOP'];
+/** The LED boards carry the league's own plain marks: no slogans, no exclamation marks. */
+const WORDS = ['ZOOPVP', 'ZOO CUP', 'LEAGUE', 'NIGHT CUP', 'SEASON 1', 'FINALS'];
 
 // ------------------------------------------------------------------ small helpers
 
@@ -187,7 +188,7 @@ function rod(c: Ctx, a: P, b: P, w: number) {
 }
 
 /** A net over a four-cornered patch: a faint veil and a fine mesh. */
-function net(c: Ctx, q: P[], nu: number, nv: number) {
+function net(c: Ctx, q: P[], nu: number, nv: number, mesh = 0.38) {
   shape(c, q);
   c.fillStyle = 'rgba(230, 236, 242, 0.07)';
   c.fill();
@@ -203,7 +204,7 @@ function net(c: Ctx, q: P[], nu: number, nv: number) {
     c.moveTo(p0[0] + (p3[0] - p0[0]) * k, p0[1] + (p3[1] - p0[1]) * k);
     c.lineTo(p1[0] + (p2[0] - p1[0]) * k, p1[1] + (p2[1] - p1[1]) * k);
   }
-  c.strokeStyle = 'rgba(232, 238, 244, 0.38)';
+  c.strokeStyle = `rgba(232, 238, 244, ${mesh})`;
   c.lineWidth = 0.7;
   c.stroke();
 }
@@ -381,13 +382,27 @@ function paintFan(c: Ctx, f: Fan, pose: number) {
   if (f.phone) {
     const px = f.x + s * 0.46;
     const py = hy - hr * 1.05 - s * 0.2;
+    const pw = s * 0.15;
+    const ph = s * 0.24;
     if (f.back) {
-      circle(c, px, py, s * 0.24);
-      c.fillStyle = 'rgba(220, 232, 255, 0.14)';
+      // held up to film the match: we see its screen over their shoulder, and on it, the pitch
+      circle(c, px, py, s * 0.3);
+      c.fillStyle = 'rgba(190, 230, 200, 0.08)';
       c.fill();
+      c.fillStyle = '#0a0d11';
+      c.fillRect(px - pw / 2 - 0.6, py - ph / 2 - 0.6, pw + 1.2, ph + 1.2);
+      const g = c.createLinearGradient(0, py - ph / 2, 0, py + ph / 2);
+      g.addColorStop(0, '#1d2731');
+      g.addColorStop(0.3, '#5f8f6a');
+      g.addColorStop(1, '#8fc29a');
+      c.fillStyle = g;
+      c.fillRect(px - pw / 2, py - ph / 2, pw, ph);
+      c.fillStyle = 'rgba(240, 248, 242, 0.85)';
+      c.fillRect(px - pw / 2, py + ph * 0.12, pw, Math.max(0.5, ph * 0.05));
+    } else {
+      c.fillStyle = '#05070a';
+      c.fillRect(px - pw / 2, py - ph / 2, pw, ph);
     }
-    c.fillStyle = f.back ? '#e6eef8' : '#05070a';
-    c.fillRect(px - s * 0.07, py - s * 0.1, s * 0.14, s * 0.2);
   }
   c.restore();
 }
@@ -426,11 +441,17 @@ function goal(c: Ctx, near: boolean) {
     ])
       seg(c, a, b, 'rgba(170, 180, 192, 0.85)', 1.3);
   };
+  // the far goal is small on screen: its mesh is drawn firmer, over a shaded inside, so it still reads as a net
+  const m = near ? 0.38 : 0.55;
   const nets = () => {
-    net(c, [B1, C1, C0, B0], 18, 5);
-    net(c, [L0, L1, B1, B0], 4, 6);
-    net(c, [R0, R1, C1, C0], 4, 6);
-    net(c, [L1, R1, C1, B1], 18, 4);
+    if (!near) {
+      fillShape(c, [L0, R0, C0, B0], 'rgba(6, 12, 9, 0.22)');
+      fillShape(c, [B1, C1, C0, B0], 'rgba(6, 10, 14, 0.2)');
+    }
+    net(c, [B1, C1, C0, B0], 18, 5, m);
+    net(c, [L0, L1, B1, B0], 4, 6, m);
+    net(c, [R0, R1, C1, C0], 4, 6, m);
+    net(c, [L1, R1, C1, B1], 18, 4, m);
   };
   if (near) {
     frame();
@@ -807,7 +828,6 @@ export class Arena {
 
   private drawStrips(ctx: Ctx, strips: Strip[], t: number) {
     const ch = this.cheerAmt;
-    const q = this.ratio;
     for (let i = 0; i < strips.length; i++) {
       const st = strips[i];
       let dy = Math.sin(t * 1.3 + st.ph * 2.3) * 0.7;
@@ -819,7 +839,8 @@ export class Arena {
           if (k > 0.25) img = st.cheer;
         }
       }
-      ctx.drawImage(img, st.x, Math.round((st.y + dy) * q) / q, st.w, st.h);
+      // drawn at the exact sub-pixel height, so the idle sway glides instead of ticking a pixel at a time
+      ctx.drawImage(img, st.x, st.y + dy, st.w, st.h);
     }
   }
 
@@ -1167,7 +1188,7 @@ export class Arena {
       for (let i = 0; i < n; i++) {
         const m = pt(x0 + pw * (i + 0.5), a - 2, top / 2);
         const s = i === 2 ? 'ZOOPVP' : WORDS[[1, 2, 0, 3, 4][i]];
-        word(c, s, m[0], m[1], 10, i === 2 || i === 0 ? GOLD : WHITE);
+        word(c, s, m[0], m[1], 10, s === 'ZOOPVP' ? GOLD : WHITE);
         if (i) seg(c, pt(x0 + pw * i, a, 0), pt(x0 + pw * i, a - 4, top), '#1d242d', 1.2);
       }
       scanlines(c, face, face[3][1], face[0][1]);
@@ -1328,10 +1349,11 @@ export class Arena {
     c.fillRect(0, b0 - 2.5, W, 0.8);
     c.fillStyle = LED;
     c.fillRect(0, b0, W, b1 - b0);
+    // the gold mark first, clear of the army in the middle; the last board, behind the goal, is left dark
     const pw = W / 5;
     for (let i = 0; i < 5; i++) {
-      const s = WORDS[[1, 2, 0, 3, 4][i]];
-      word(c, s, pw * (i + 0.5), (b0 + b1) / 2, 15, s === 'ZOOPVP' ? GOLD : WHITE);
+      const s = i < 4 ? WORDS[i] : '';
+      if (s) word(c, s, pw * (i + 0.5), (b0 + b1) / 2, 15, s === 'ZOOPVP' ? GOLD : WHITE);
       if (i) {
         c.fillStyle = '#1d242d';
         c.fillRect(pw * i - 0.6, b0, 1.2, b1 - b0);

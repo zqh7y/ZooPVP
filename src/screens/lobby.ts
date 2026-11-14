@@ -1,11 +1,11 @@
 import type { App, Screen } from '../screen';
 import type { Ctx, Rect } from '../util';
-import type { LinkEdge, Piece, PetType, SquadSpec } from '../types';
+import type { LinkEdge, Piece, PetType, SaveState, SquadSpec } from '../types';
 import type { Target } from '../logic/inventory';
-import { W, H, S, TYPE, COLOR, TOPBAR, STAGE, UI } from '../theme';
+import { W, H, S, TYPE, TOPBAR, STAGE, UI } from '../theme';
 import { clamp, easeOutCubic, easeOutElastic, inRect, label, rr } from '../util';
 import { BENCH_SLOTS, GRID, PIECE_DESC, PIECE_NAME, TROPHY_ROAD, TUTORIAL_DONE, cls, gearPct, isGear, isPet, leagueOf, squadPower } from '../data';
-import { button, cell, classColor, fitLabel, gridFrame, hint, panel, pill, progressBar, toast } from '../draw/ui';
+import { button, cell, classColor, fitLabel, gridFrame, hint, panel, pill, powerChip, progressBar, toast } from '../draw/ui';
 import type { ButtonOpts, IconFn } from '../draw/ui';
 import { leagueBadge, rollToken, speaker, trash, trophy, wand } from '../draw/icons';
 import { drawPiece } from '../draw/pieces';
@@ -38,27 +38,44 @@ const BTN = {
 } satisfies Record<string, Rect>;
 type BtnId = keyof typeof BTN;
 
-const PILL = {
+/** The top bar's three pills: name, trophies, rolls. Every screen that shows them uses these places, so they never jump. */
+export const TOP_PILLS = {
   name: { x: S.pad, y: TOPBAR.y, w: 236, h: TOPBAR.h },
   trophies: { x: S.pad + 236 + S.gap, y: TOPBAR.y, w: 134, h: TOPBAR.h },
   rolls: { x: S.pad + 236 + S.gap + 134 + S.gap, y: TOPBAR.y, w: W - S.pad * 2 - 236 - 134 - S.gap * 2, h: TOPBAR.h },
-};
-const ROAD_BAR: Rect = { x: S.pad, y: TOPBAR.y + TOPBAR.h + S.gap + 6, w: W - S.pad * 2 - 84, h: 4 };
+} satisfies Record<string, Rect>;
+const PILL = TOP_PILLS;
+
+/** The player's name (with the league badge), trophies and rolls, in the TOP_PILLS places. */
+export function drawTopPills(ctx: Ctx, state: SaveState) {
+  const lg = leagueOf(state.trophies);
+  pill(ctx, PILL.name, { icon: (c, x, y, s) => leagueBadge(c, x, y, s, lg), text: state.name });
+  pill(ctx, PILL.trophies, { icon: trophy, text: String(state.trophies) });
+  pill(ctx, PILL.rolls, { icon: rollToken, text: String(state.rolls) });
+}
+
+const ROAD_BAR: Rect = { x: S.pad, y: TOPBAR.y + TOPBAR.h + S.gap * 2, w: W - S.pad * 2 - 84, h: 4 };
 const POWER_PILL: Rect = { x: W - S.pad - 150, y: STAGE.y + STAGE.h - 44, w: 150, h: 36 };
-const CARD: Rect = { x: S.pad, y: STAGE.y + 10, w: W - S.pad * 2, h: 104 };
+/** The card over the stage while a piece is held: flush with the stage's top edge, so nothing of the stage peeks over it. */
+const CARD: Rect = { x: S.pad, y: STAGE.y, w: W - S.pad * 2, h: 108 };
 const HINT_W = W - 80;
 const HINT_H = 56;
-/** The guide's callout sits close to what it points at: just above the bench, just above the buttons, or at the top. */
+/**
+ * Where the guide's callout sits. Over a button: just above it, on the bench's empty lower row. Over a bench
+ * piece: in the grid's top rows (empty at that point of the guide), clear of the cell the piece should go to,
+ * so it never covers the rows next to the bench; else at the top of the stage.
+ */
 const hintRect = (at: Rect, to?: Rect): Rect => {
   const x = (W - HINT_W) / 2;
-  const avoid = (r: Rect) => !to || to.y > r.y + r.h + 8 || to.y + to.h < r.y - 8;
-  const overBench = { x, y: GRID_RECT.y + GRID_RECT.h - HINT_H - 24, w: HINT_W, h: HINT_H };
-  const overButtons = { x, y: BENCH_RECT.y + CELL + 4, w: HINT_W, h: HINT_H };
+  const avoid = (r: Rect) => !to || to.y > r.y + r.h + S.gap || to.y + to.h < r.y - S.gap;
+  const gridTop = { x, y: GRID_RECT.y + S.gap, w: HINT_W, h: HINT_H };
+  const overButtons = { x, y: BENCH_RECT.y + CELL + S.base, w: HINT_W, h: HINT_H };
   if (at.y >= BTN_Y && avoid(overButtons)) return overButtons;
-  if (at.y >= BENCH_RECT.y && avoid(overBench)) return overBench;
-  return { x, y: STAGE.y + 12, w: HINT_W, h: HINT_H };
+  if (at.y >= BENCH_RECT.y && avoid(gridTop)) return gridTop;
+  return { x, y: STAGE.y + S.pad, w: HINT_W, h: HINT_H };
 };
-const ARMY_CAP = 16;
+/** At most this many fighters stand on the stage: fewer, larger and better spaced than the whole army. */
+const ARMY_CAP = 11;
 const DRAG_LIFT = 1.25; // the lifted piece is drawn this much larger
 const DRAG_UP = 26; // and this far above the finger
 const SLIDE_BACK = 0.2;
@@ -173,8 +190,8 @@ export function createLobby(app: App): Screen {
       const p = find('helmet');
       return p ? { text: 'Now the helmet next to the ant too', at: homeRect(p), to: beside() } : null;
     }
-    if (step === 3) return { text: 'Ready! Press BATTLE', at: BTN.battle };
-    if (step === 4) return { text: 'You won rolls! Press ROLL', at: BTN.roll };
+    if (step === 3) return { text: 'Ready. Press BATTLE', at: BTN.battle };
+    if (step === 4) return { text: 'You won rolls. Press ROLL', at: BTN.roll };
     if (step === 5) {
       const p = inv.pieces.find((q) => q.type === 'ant' && q.slot >= 0);
       return p ? { text: 'Drop the new ant onto your ant to double it', at: homeRect(p), to: ant ? homeRect(ant) : undefined } : null;
@@ -252,7 +269,7 @@ export function createLobby(app: App): Screen {
 
   function discard(p: Piece) {
     if (isPet(p.type) && pets().length <= 1) {
-      say('Keep at least one pet!');
+      say('Keep at least one pet');
       sfx.play('denied');
       slide = { piece: p, x: BTN.trash.x + BTN.trash.w / 2, y: BTN.trash.y, age: 0 };
       return;
@@ -331,10 +348,7 @@ export function createLobby(app: App): Screen {
   // -------------------------------------------------------------- drawing
 
   function drawTopBar(ctx: Ctx) {
-    const lg = leagueOf(app.state.trophies);
-    pill(ctx, PILL.name, { icon: (c, x, y, s) => leagueBadge(c, x, y, s, lg), text: app.state.name });
-    pill(ctx, PILL.trophies, { icon: trophy, text: String(app.state.trophies) });
-    pill(ctx, PILL.rolls, { icon: rollToken, text: String(app.state.rolls) });
+    drawTopPills(ctx, app.state);
     // the road toward the next reward
     const i = Math.min(app.state.claimed, TROPHY_ROAD.length - 1);
     const next = TROPHY_ROAD[i];
@@ -353,10 +367,10 @@ export function createLobby(app: App): Screen {
     for (const s of squads) for (let i = 0; i < s.count && fighters.length < ARMY_CAP; i++) fighters.push({ s, i });
     const n = fighters.length;
     if (!n) {
-      label(ctx, 'YOUR ARMY STANDS HERE', W / 2, STAGE_GROUND_Y - 40, TYPE.small + 1, { onPitch: true, track: 1.5 });
+      label(ctx, 'YOUR ARMY STANDS HERE', W / 2, STAGE_GROUND_Y - 40, TYPE.caption, { onPitch: true, track: 1.5 });
       return;
     }
-    const step = Math.min(64, (W - 80) / Math.max(1, n - 1));
+    const step = Math.min(72, (W - 96) / Math.max(1, n - 1));
     // biggest in the middle: slot order 0, +1, -1, +2, -2 ...
     const spots = fighters.map((f, k) => {
       const off = k === 0 ? 0 : (k % 2 ? 1 : -1) * Math.ceil(k / 2);
@@ -367,7 +381,7 @@ export function createLobby(app: App): Screen {
     for (const { f, x, back } of spots) {
       const s = f.s;
       const big = 1 + (s.level - 1) * 0.06;
-      const r = (s.pet === 'frog' ? 21 : 18) * big * (back ? 0.9 : 1) * (n > 10 ? 1 : n > 5 ? 1.15 : 1.35);
+      const r = (s.pet === 'frog' ? 21 : 18) * big * (back ? 0.9 : 1) * (n > 8 ? 1.1 : n > 5 ? 1.2 : 1.35);
       const look: PetLook = { pet: s.pet as PetType, level: s.level, team: 0, weapon: s.weapon, weaponLevel: s.weaponLevel, helmet: s.helmet, sneakers: s.sneakers, chili: s.chili, seed: s.key * 5 + f.i };
       const pose = restPose();
       const ph = s.key * 1.7 + f.i * 0.9;
@@ -481,22 +495,22 @@ export function createLobby(app: App): Screen {
   function drawCard(ctx: Ctx, p: Piece) {
     panel(ctx, CARD);
     const k = p.level;
-    const x0 = CARD.x + S.pad + 4;
-    label(ctx, PIECE_NAME[p.type].toUpperCase(), x0, CARD.y + 27, TYPE.h2 - 3, { align: 'left', weight: 700, track: 1.5 });
-    label(ctx, cls(k).toUpperCase(), CARD.x + CARD.w - S.pad - 4, CARD.y + 27, TYPE.small + 1, { align: 'right', color: classColor(k, t), weight: 700, track: 1.5 });
+    const x0 = CARD.x + S.pad + S.base;
+    label(ctx, PIECE_NAME[p.type].toUpperCase(), x0, CARD.y + 28, TYPE.h3, { align: 'left', weight: 700, track: 1.5 });
+    label(ctx, cls(k).toUpperCase(), CARD.x + CARD.w - S.pad - S.base, CARD.y + 28, TYPE.caption, { align: 'right', color: classColor(k, t), weight: 700, track: 1.5 });
     let desc = PIECE_DESC[p.type];
     if (isGear(p.type)) desc = desc.replace('{v}', String(gearPct(p.type, k)));
     if (isPet(p.type) && p.count > 1) desc = `${p.count} of them. ${desc}`;
-    fitLabel(ctx, desc, x0, CARD.y + 58, TYPE.body - 1, CARD.w - S.pad * 2 - 8, { align: 'left' });
+    fitLabel(ctx, desc, x0, CARD.y + 60, TYPE.body, CARD.w - (S.pad + S.base) * 2, { align: 'left' });
     // what the drop would do
     const d = drag ? dropPoint(drag) : null;
     const tg = d ? targetAt(d.x, d.y) : null;
     const pv = tg ? inv.preview(p, tg) : null;
     let tip = 'Drop on an identical piece to fuse';
-    if (pv?.kind === 'fused') tip = pv.fuse === 'stack' ? `FUSE: x${p.count * 2} ${PIECE_NAME[p.type]}s!` : `FUSE: ${cls(k + 1)}!`;
+    if (pv?.kind === 'fused') tip = pv.fuse === 'stack' ? `Fuses into ${p.count * 2} ${PIECE_NAME[p.type]}s` : `Fuses to ${cls(k + 1)}`;
     else if (isPet(p.type) && pv && !('slot' in tg!)) tip = 'Touch weapons and gear to power up';
     else if (!isPet(p.type)) tip = 'Put it right next to a pet';
-    fitLabel(ctx, tip, x0, CARD.y + 84, TYPE.small + 1, CARD.w - S.pad * 2 - 8, { align: 'left', color: pv?.kind === 'fused' ? UI.accent : UI.textDim });
+    fitLabel(ctx, tip, x0, CARD.y + 88, TYPE.caption, CARD.w - (S.pad + S.base) * 2, { align: 'left', color: pv?.kind === 'fused' ? UI.accent : UI.textDim });
   }
 
   function drawGuide(ctx: Ctx) {
@@ -564,7 +578,7 @@ export function createLobby(app: App): Screen {
       ctx.translate(fx.camera.x, fx.camera.y);
       app.arena.drawStage(ctx, t);
       drawArmy(ctx);
-      pill(ctx, POWER_PILL, { text: `POWER ${inv.power()}` });
+      powerChip(ctx, POWER_PILL, inv.power());
       drawBoard(ctx);
       fx.drawUnder(ctx);
       drawButtons(ctx);

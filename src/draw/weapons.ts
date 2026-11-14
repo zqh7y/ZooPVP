@@ -90,8 +90,8 @@ export function glow(ctx: Ctx, x: number, y: number, rx: number, ry: number, col
     c.width = c.height = 64;
     const g = c.getContext('2d')!;
     const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-    gr.addColorStop(0, rgba(color, 0.42));
-    gr.addColorStop(0.45, rgba(color, 0.2));
+    gr.addColorStop(0, rgba(color, 0.34));
+    gr.addColorStop(0.45, rgba(color, 0.15));
     gr.addColorStop(1, rgba(color, 0));
     g.fillStyle = gr;
     g.fillRect(0, 0, 64, 64);

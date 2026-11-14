@@ -94,7 +94,7 @@ interface Streak { x: number; y: number; ang: number; len: number; w: number; co
 interface Impact { x: number; y: number; size: number; color: string; age: number; life: number; rot: number }
 interface Mark { x: number; y: number; size: number; sprite: number; age: number; life: number; fade: number; flip: boolean }
 interface Rays { x: number; y: number; level: number; age: number; life: number }
-interface Lines { x: number; y: number; color: string; age: number; life: number }
+interface Lines { x: number; y: number; color: string; age: number; life: number; top: number }
 
 const newParticle = (): Particle => ({
   x: 0, y: 0, vx: 0, vy: 0, size: 1, life: 1, age: 0, color: '#fff', shape: 'dot', rot: 0, vr: 0, grav: 0, drag: 0, floor: Infinity, layer: OVER, ink: false, shadow: false, ph: 0,
@@ -349,6 +349,17 @@ export class Fx {
    * darker flattened patch where a body was squished. x, y on the ground, size = its width in screen px.
    */
   groundMark(kind: MarkKind, x: number, y: number, size: number, life = 14): void {
+    const base = kind === 'scuff' ? 0 : kind === 'divot' ? 3 : 6;
+    // a mark on top of a fresh one of its kind (a frog hopping in place) only freshens it: they never pile up
+    for (const m of this.marks) {
+      if (m.sprite - (m.sprite % 3) !== base || m.life - m.age < 1) continue;
+      const near = Math.max(m.size, size) * 0.45;
+      if (Math.abs(m.x - x) < near && Math.abs(m.y - y) < near * 0.6) {
+        m.age = Math.max(Math.min(m.age, 0.08), Math.min(m.age, m.life - m.fade));
+        m.size = Math.min(Math.max(m.size, size) * 1.04, Math.max(m.size, size) + 2);
+        return;
+      }
+    }
     // past the cap the oldest ones fade out quickly rather than vanish
     let live = 0;
     for (const m of this.marks) if (m.life - m.age > 0.7) live++;
@@ -362,13 +373,12 @@ export class Fx {
       }
     }
     if (this.marks.length >= MARKS + 16) this.marks.shift();
-    const base = kind === 'scuff' ? 0 : kind === 'divot' ? 3 : 6;
     this.marks.push({ x, y, size, sprite: base + Math.floor(frand(0, 3)), age: 0, life, fade: life * 0.45, flip: fchance(0.5) });
   }
 
-  /** speed lines from the screen's edges toward a point (the deciding blow) */
-  speedLines(x: number, y: number, color: string = COLOR.white, life = 0.9): void {
-    this.lines.push({ x, y, color, age: 0, life });
+  /** speed lines from the screen's edges toward a point (the deciding blow); top: they stay below this y (a HUD) */
+  speedLines(x: number, y: number, color: string = COLOR.white, life = 0.9, top = 0): void {
+    this.lines.push({ x, y, color, age: 0, life, top });
   }
 
   /** a soft cloud of dust */
@@ -556,6 +566,12 @@ export class Fx {
     }
     for (const l of this.lines) {
       const k = l.age / l.life;
+      ctx.save();
+      if (l.top > 0) {
+        ctx.beginPath();
+        ctx.rect(0, l.top, W, H - l.top);
+        ctx.clip();
+      }
       ctx.globalAlpha = 0.32 * (1 - k) * clamp(k / 0.08, 0, 1);
       ctx.fillStyle = l.color;
       ctx.beginPath();
@@ -570,6 +586,7 @@ export class Fx {
         ctx.closePath();
       }
       ctx.fill();
+      ctx.restore();
     }
     ctx.globalAlpha = 1;
     this.drawLayer(ctx, SCREEN);

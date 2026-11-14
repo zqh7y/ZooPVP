@@ -4,7 +4,7 @@ import { label, type Ctx, type Rect } from '../src/util';
 import * as I from '../src/draw/icons';
 import * as U from '../src/draw/ui';
 
-const H = 2040;
+const H = 2230;
 const r = (x: number, y: number, w: number, h: number): Rect => ({ x, y, w, h });
 const head = (c: Ctx, s: string, y: number) => label(c, s.toUpperCase(), 16, y, TYPE.small, { align: 'left', color: UI.textDim, track: 1.5 });
 const tokenIcon = (c: Ctx, x: number, y: number, z: number) => I.rollToken(c, x, y, z);
@@ -25,10 +25,10 @@ stage({
     head(c, 'buttons: primary / roll / secondary / quiet', y);
     y += 14;
     U.button(c, r(16, y, 250, S.btnH), { variant: 'roll', text: 'ROLL', icon: tokenIcon, badge: 3 });
-    U.button(c, r(274, y, 250, S.btnH), { variant: 'primary', text: 'BATTLE', icon: I.swords, pulse: (t * 1.2) % 1 });
+    U.button(c, r(274, y, 250, S.btnH), { variant: 'primary', text: 'BATTLE', pulse: (t * 1.2) % 1 });
     y += 100;
     U.button(c, r(16, y, 250, S.btnSmallH), { variant: 'secondary', text: 'Auto', icon: I.wand });
-    U.button(c, r(274, y, 250, S.btnSmallH), { variant: 'quiet', text: 'Sell', icon: I.trash });
+    U.button(c, r(274, y, 250, S.btnSmallH), { variant: 'quiet', text: 'Trash', icon: I.trash });
     y += 66;
     U.button(c, r(16, y, 160, S.btnSmallH + 8), { variant: 'primary', text: 'Pressed', pressed: true });
     U.button(c, r(190, y, 160, S.btnSmallH + 8), { variant: 'roll', text: 'Disabled', disabled: true });
@@ -75,8 +75,13 @@ stage({
     U.namePlate(c, r(274, y, 250, 40), { name: 'Hana_bot42', trophies: 1301, team: 1, bot: true, align: 'right' });
     y += 56;
     // the broadcast score bug, for the battle HUD
-    U.scoreBug(c, r(12, y, 516, 44), { home: { name: 'Kenji', score: 17 }, away: { name: 'Hana_bot42', score: 18, bot: true }, clock: '0:54', flash: 0 });
-    y += 62;
+    U.scoreBug(c, r(12, y, 516, U.SCORE_BUG.h), { home: { name: 'Kenji', score: 17 }, away: { name: 'Hana_bot42', score: 18, bot: true }, clock: '0:54', flash: 0 });
+    y += U.SCORE_BUG.h + 12;
+    U.scoreBug(c, r(12, y, 516, U.SCORE_BUG.h), { home: { name: 'Kenji', score: 3 }, away: { name: 'Hana_bot42', score: 3, bot: true }, clock: '+0:12', hot: true });
+    y += U.SCORE_BUG.h + 20;
+    U.powerChip(c, r(16, y, 150, 36), 3314);
+    U.botTag(c, 190, y + 18);
+    y += 56;
 
     head(c, 'bars: progress, tug, meter', y);
     y += 14;
@@ -91,18 +96,19 @@ stage({
 
     head(c, 'ribbons and toast', y);
     y += 48;
-    U.ribbon(c, 270, y, 400, 'VICTORY', { color: 'gold' });
-    y += 90;
-    U.ribbon(c, 140, y, 230, 'DEFEAT', { color: 'indigo', size: 36 });
-    U.ribbon(c, 400, y, 200, '+1 ROLL', { color: 'jade', size: 30 });
+    U.ribbon(c, 270, y, 400, 'VICTORY', { color: 'accent', sub: 'Won in 0:07  ·  none of yours knocked out' });
+    y += 120;
+    U.ribbon(c, 140, y, 230, 'DEFEAT', { color: 'muted', size: 36 });
+    U.ribbon(c, 400, y, 200, '+1 ROLL', { color: 'accent', size: 30 });
     y += 62;
-    U.ribbon(c, 270, y, 240, 'FIGHT!', { color: 'red', size: 44 });
+    U.ribbon(c, 270, y, 240, 'FIGHT', { color: 'plain', size: 44 });
     U.toast(c, '+12 trophies', 270, y + 80, 0.5);
     y += 130;
 
-    head(c, 'hint with hand', y);
-    U.hint(c, r(100, y + 20, 340, 70), 'Drag a piece onto the grid', { x: 270, y: y + 160 }, t);
-    y += 200;
+    head(c, 'hint (a tail when near, an arrow over a far target)', y);
+    U.hint(c, r(40, y + 20, 220, 70), 'Press BATTLE', { x: 150, y: y + 130 }, t);
+    U.hint(c, r(280, y + 20, 220, 70), 'Drag a piece onto the grid', { x: 390, y: y + 190 }, t);
+    y += 210;
 
     head(c, 'icons at 40 px', y);
     const names = [

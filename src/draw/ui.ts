@@ -102,9 +102,9 @@ export function tickTo(key: string, value: number, speed = 9): number {
 export type ButtonVariant = 'primary' | 'roll' | 'secondary' | 'quiet' | 'danger';
 const VARIANT = {
   primary: { top: UI.accent, side: '#a8860a', hi: 'rgba(255, 255, 255, 0.5)', border: '', text: UI.accentText },
-  roll: { top: '#242c37', side: '#151a21', hi: 'rgba(255, 255, 255, 0.08)', border: UI.border, text: UI.text },
-  secondary: { top: '#242c37', side: '#151a21', hi: 'rgba(255, 255, 255, 0.08)', border: UI.border, text: UI.text },
-  quiet: { top: '#1a2029', side: '#11151b', hi: 'rgba(255, 255, 255, 0.05)', border: UI.border, text: UI.textDim },
+  roll: { top: '#262e3a', side: '#0a0d12', hi: 'rgba(255, 255, 255, 0.12)', border: UI.border, text: UI.text },
+  secondary: { top: '#262e3a', side: '#0a0d12', hi: 'rgba(255, 255, 255, 0.12)', border: UI.border, text: UI.text },
+  quiet: { top: '#1b222b', side: '#080a0e', hi: 'rgba(255, 255, 255, 0.07)', border: UI.border, text: UI.textDim },
   danger: { top: '#e9ecef', side: '#8b949e', hi: 'rgba(255, 255, 255, 0.6)', border: '', text: UI.accentText },
 };
 const DISABLED = { top: '#141920', side: '#0b0e12', hi: 'rgba(255, 255, 255, 0.03)', border: UI.border, text: UI.textMute };
@@ -201,7 +201,7 @@ export function button(ctx: Ctx, r: Rect, o: ButtonOpts = {}) {
   hline(ctx, r.x + rad, fy + 1, r.w - rad * 2, v.hi);
   const cy = fy + fh / 2;
   const big = r.h >= S.btnH - 8;
-  const size = big ? TYPE.h1 - 4 : r.h >= 44 ? TYPE.body + 2 : TYPE.body - 2;
+  const size = big ? TYPE.button : r.h >= 44 ? TYPE.lead : TYPE.label;
   const weight: FontWeight = big ? 700 : 600;
   const track = size * 0.07;
   const ty = o.sub ? cy - size * 0.24 : cy;
@@ -221,12 +221,12 @@ export function button(ctx: Ctx, r: Rect, o: ButtonOpts = {}) {
   if (o.sub) {
     ctx.save();
     ctx.globalAlpha *= 0.7;
-    fitLabel(ctx, o.sub.toUpperCase(), r.x + r.w / 2, cy + size * 0.58, TYPE.small - 2, r.w - pad * 2, { color: v.text, track: 1 });
+    fitLabel(ctx, o.sub.toUpperCase(), r.x + r.w / 2, cy + size * 0.58, TYPE.tag, r.w - pad * 2, { color: v.text, track: 1 });
     ctx.restore();
   }
   if (o.badge !== undefined && o.badge !== 0) {
     const s = String(o.badge);
-    const bw = Math.max(24, 14 + textWidth(ctx, s, TYPE.small + 1, 700));
+    const bw = Math.max(24, 14 + textWidth(ctx, s, TYPE.caption, 700));
     const bx = Math.round(r.x + r.w - bw + 6);
     const by = Math.round(fy - 8);
     const onGold = !o.disabled && (o.variant ?? 'primary') === 'primary';
@@ -236,7 +236,7 @@ export function button(ctx: Ctx, r: Rect, o: ButtonOpts = {}) {
     rr(ctx, bx, by, bw, 22, S.radius.s);
     ctx.fillStyle = o.disabled ? UI.borderStrong : onGold ? UI.text : UI.accent;
     ctx.fill();
-    label(ctx, s, bx + bw / 2, by + 12, TYPE.small + 1, { color: UI.accentText, weight: 700 });
+    label(ctx, s, bx + bw / 2, by + 12, TYPE.caption, { color: UI.accentText, weight: 700 });
   }
   return cy;
 }
@@ -289,7 +289,7 @@ export function pill(ctx: Ctx, r: Rect, o: PillOpts) {
   }
   const cy = r.y + r.h / 2;
   const pad = Math.min(16, r.h * 0.32);
-  const size = Math.min(TYPE.body + 3, r.h * 0.5);
+  const size = Math.min(TYPE.h3, r.h * 0.5);
   const color = bump > 0.4 ? UI.accent : UI.text;
   const parts = /^([A-Za-z ]+) ([\d.,]+[KMB]?)$/.exec(text);
   const iconSize = o.icon ? Math.min(r.h - 22, 24) : 0;
@@ -312,6 +312,11 @@ export function pill(ctx: Ctx, r: Rect, o: PillOpts) {
   else fitLabel(ctx, text, r.x + r.w / 2, cy + 1, size, r.w - pad * 2, { color, weight: 700 });
 }
 
+/** POWER and its number: the one chip every screen shows an army's strength with (the lobby's stage, each side in match). */
+export function powerChip(ctx: Ctx, r: Rect, power: number) {
+  pill(ctx, r, { text: `POWER ${Math.round(power)}` });
+}
+
 // ------------------------------------------------------------------ panels and cells
 
 /** A flat slate panel with a 1 px top highlight; 'dark' is see-through slate for panels over the pitch. A title sits on the top edge. */
@@ -320,7 +325,7 @@ export function panel(ctx: Ctx, r: Rect, o: { title?: string; tone?: 'paper' | '
   if (o.title) {
     const s = o.title.toUpperCase();
     const w = Math.min(r.w - 40, textWidth(ctx, s, TYPE.small, 600, 2) + 28);
-    plate(ctx, { x: Math.round(r.x + r.w / 2 - w / 2), y: Math.round(r.y - 12), w: Math.round(w), h: 24 }, '#1d242e', S.radius.s);
+    plate(ctx, { x: Math.round(r.x + r.w / 2 - w / 2), y: Math.round(r.y - 12), w: Math.round(w), h: 24 }, UI.surfaceAlt, S.radius.s);
     fitLabel(ctx, s, r.x + r.w / 2, r.y + 1, TYPE.small, w - 16, { color: UI.textDim, track: 2 });
   }
 }
@@ -450,6 +455,15 @@ export function tileFrame(ctx: Ctx, r: Rect, level: number, o: { idle?: boolean;
   rr(ctx, r.x, fy, r.w, fh, rad);
   ctx.fillStyle = o.lifted ? UI.tileHi : UI.tile;
   ctx.fill();
+  // a faint pool of the key light on the top face, up and left of centre, so a dark picture still lifts off it
+  const lx = r.x + r.w * 0.42;
+  const ly = fy + fh * 0.4;
+  const spot = ctx.createRadialGradient(lx, ly, 0, lx, ly, r.w * 0.62);
+  spot.addColorStop(0, 'rgba(255, 255, 255, 0.075)');
+  spot.addColorStop(1, 'rgba(255, 255, 255, 0)');
+  rr(ctx, r.x, fy, r.w, fh, rad);
+  ctx.fillStyle = spot;
+  ctx.fill();
   // the key light: a faint highlight along the top and left edges (gold on A and above)
   ctx.beginPath();
   ctx.moveTo(r.x + 0.5, fy + fh - rad);
@@ -463,7 +477,7 @@ export function tileFrame(ctx: Ctx, r: Rect, level: number, o: { idle?: boolean;
   rr(ctx, r.x + 1, fy + 1, r.w - 2, fh - 2, rad - 1);
   ctx.lineWidth = i >= 5 ? 2 : i >= 3 ? 1.5 : 1;
   ctx.strokeStyle = i === 6 ? rainbow(ctx, r.x, fy, r.x + r.w, fy + fh, o.t ?? 0) : UI.tier[i];
-  ctx.globalAlpha *= i <= 1 ? 0.75 : 1;
+  ctx.globalAlpha *= i === 0 ? 0.8 : 1;
   ctx.stroke();
   ctx.restore();
 }
@@ -514,39 +528,48 @@ export function classFx(ctx: Ctx, r: Rect, level: number, t: number) {
 export function classBadge(ctx: Ctx, level: number, x: number, y: number, k: number, t = 0) {
   const i = clamp(Math.round(level) - 1, 0, 6);
   const letter = CLASSES[i];
-  const h = 16 * k;
-  const w = letter.length > 1 ? 30 * k : 16 * k;
-  rr(ctx, x, y - h / 2, w, h, 3 * k);
-  ctx.fillStyle = 'rgba(8, 11, 15, 0.82)';
+  const size = Math.max(TYPE.tiny, TYPE.tag * k);
+  const q = size / TYPE.tag; // the chip follows its letter, so a small tile still gets a readable one
+  const h = 16 * q;
+  const w = letter.length > 1 ? 30 * q : 16 * q;
+  rr(ctx, x, y - h / 2, w, h, 3 * q);
+  ctx.fillStyle = UI.scrim;
   ctx.fill();
   const color = i === 6 ? rainbow(ctx, x, y, x + w, y, t) : UI.tierText[i];
-  label(ctx, letter, x + w / 2, y + 0.8 * k, 12.5 * k, { color, weight: 700, track: letter.length > 1 ? 0.6 * k : 0 });
+  label(ctx, letter, x + w / 2, y + 0.8 * q, size, { color, weight: 700, track: letter.length > 1 ? 0.6 * q : 0 });
 }
 
 /** "×4" on a small dark chip, centred on x, y. */
 export function countBadge(ctx: Ctx, count: number, x: number, y: number, k = 1) {
   const s = `×${count}`;
-  const size = TYPE.small * 0.93 * k;
-  const w = textWidth(ctx, s, size, 700, 0) + 9 * k;
-  const h = 16 * k;
-  rr(ctx, x - w / 2, y - h / 2, w, h, 3 * k);
-  ctx.fillStyle = 'rgba(8, 11, 15, 0.82)';
+  const size = Math.max(TYPE.tiny, TYPE.tag * k);
+  const q = size / TYPE.tag;
+  const w = textWidth(ctx, s, size, 700, 0) + 9 * q;
+  const h = 16 * q;
+  rr(ctx, x - w / 2, y - h / 2, w, h, 3 * q);
+  ctx.fillStyle = UI.scrim;
   ctx.fill();
-  label(ctx, s, x, y + 0.8 * k, size, { color: UI.text, weight: 700, track: 0 });
+  label(ctx, s, x, y + 0.8 * q, size, { color: UI.text, weight: 700, track: 0 });
 }
 
 // ------------------------------------------------------------------ battle bars
 
-/** The opponent's or your own name plate: a team bar on the outer edge, the name, the trophies. The opponent's always shows a BOT tag. */
-export function namePlate(ctx: Ctx, r: Rect, o: { name: string; trophies: number; team: 0 | 1; bot?: boolean; align?: 'left' | 'right' }) {
+/**
+ * The opponent's or your own name plate: a team bar on the outer edge, the name, the trophies. The opponent's
+ * always shows a BOT tag. body: the plate goes on this many px below r as one panel (r is its header row, a
+ * hairline divides them, the team bar runs the whole height), for what belongs to that player.
+ */
+export function namePlate(ctx: Ctx, r: Rect, o: { name: string; trophies: number; team: 0 | 1; bot?: boolean; align?: 'left' | 'right'; body?: number }) {
   const right = o.align === 'right';
-  plate(ctx, r, UI.glass);
+  const full = { x: r.x, y: r.y, w: r.w, h: r.h + Math.max(0, o.body ?? 0) };
+  plate(ctx, full, UI.glass, full.h > r.h ? S.radius.l : S.radius.m);
   ctx.save();
-  rr(ctx, r.x, r.y, r.w, r.h, S.radius.m);
+  rr(ctx, full.x, full.y, full.w, full.h, full.h > r.h ? S.radius.l : S.radius.m);
   ctx.clip();
   ctx.fillStyle = TEAM[o.team].main;
-  ctx.fillRect(Math.round(right ? r.x + r.w - 4 : r.x), r.y, 4, r.h);
+  ctx.fillRect(Math.round(right ? r.x + r.w - 4 : r.x), r.y, 4, full.h);
   ctx.restore();
+  if (full.h > r.h) hline(ctx, r.x + 16, r.y + r.h - 1, r.w - 32, UI.border);
   const pad = 16;
   const dir = right ? -1 : 1;
   const ax = right ? r.x + r.w - pad : r.x + pad;
@@ -555,20 +578,20 @@ export function namePlate(ctx: Ctx, r: Rect, o: { name: string; trophies: number
   const mid = r.y + r.h / 2;
   const two = r.h > 44;
   const nameY = two ? mid - 10 : mid;
-  fitLabel(ctx, o.name, ax, nameY + 1, TYPE.body + 2, r.w - pad * 2 - (tag ? tag + 8 : 0), { align: al, weight: 700 });
+  fitLabel(ctx, o.name, ax, nameY + 1, TYPE.lead, r.w - pad * 2 - (tag ? tag + 8 : 0), { align: al, weight: 700 });
   if (two) {
     trophy(ctx, ax + dir * 7, mid + 13, 14);
-    label(ctx, shortNumber(o.trophies), ax + dir * 20, mid + 14, TYPE.small + 1, { align: al, color: UI.textDim });
+    label(ctx, shortNumber(o.trophies), ax + dir * 20, mid + 14, TYPE.caption, { align: al, color: UI.textDim });
   }
   if (o.bot) botTag(ctx, right ? r.x + pad - 4 : r.x + r.w - pad - tag + 4, nameY, tag);
 }
 
-/** The BOT tag: a small grey chip, left edge at x, centred on y. */
-function botTag(ctx: Ctx, x: number, y: number, w = 36) {
+/** The BOT tag the opponent's name always carries: a small grey chip, left edge at x, centred on y. */
+export function botTag(ctx: Ctx, x: number, y: number, w = 36) {
   rr(ctx, Math.round(x), Math.round(y - 9), w, 19, S.radius.s);
   ctx.fillStyle = UI.borderStrong;
   ctx.fill();
-  label(ctx, 'BOT', x + w / 2, y + 1.5, TYPE.small - 1, { weight: 700, track: 1.5 });
+  label(ctx, 'BOT', x + w / 2, y + 1.5, TYPE.tag, { weight: 700, track: 1.5 });
 }
 
 export interface ScoreSide {
@@ -578,11 +601,15 @@ export interface ScoreSide {
   bot?: boolean;
 }
 
+/** The score bug's size: pass SCORE_BUG.h as its rect's height, wherever it is drawn. */
+export const SCORE_BUG = { h: 40 };
+
 /**
  * A broadcast score bug: [team bar | NAME | score | clock | score | NAME BOT | team bar], in one slate strip.
- * home is your side (blue), away the opponent (red). flash 0..1 lights the clock in gold (overtime).
+ * home is your side (blue), away the opponent (red). flash 0..1 lights the clock in gold for a moment; hot keeps
+ * it gold with a gold line under it (overtime).
  */
-export function scoreBug(ctx: Ctx, r: Rect, o: { home: ScoreSide; away: ScoreSide; clock: string; flash?: number }) {
+export function scoreBug(ctx: Ctx, r: Rect, o: { home: ScoreSide; away: ScoreSide; clock: string; flash?: number; hot?: boolean }) {
   const rad = S.radius.m;
   softShadow(ctx, r.x, r.y + 2, r.w, r.h, rad, 4, 0.35);
   plate(ctx, r, UI.surface);
@@ -598,14 +625,18 @@ export function scoreBug(ctx: Ctx, r: Rect, o: { home: ScoreSide; away: ScoreSid
   ctx.fillStyle = TEAM[1].main;
   ctx.fillRect(Math.round(r.x + r.w - 4), r.y, 4, r.h);
   // the score cells, a shade lighter, and the clock in the middle
-  ctx.fillStyle = '#1f2630';
+  ctx.fillStyle = UI.surfaceAlt;
   ctx.fillRect(Math.round(cx - clockW / 2 - scoreW), r.y, scoreW, r.h);
   ctx.fillRect(Math.round(cx + clockW / 2), r.y, scoreW, r.h);
   ctx.fillStyle = UI.bg;
   ctx.fillRect(Math.round(cx - clockW / 2), r.y, clockW, r.h);
+  if (o.hot) {
+    ctx.fillStyle = UI.accent;
+    ctx.fillRect(Math.round(cx - clockW / 2), Math.round(r.y + r.h - 2), clockW, 2);
+  }
   ctx.restore();
   const f = clamp(o.flash ?? 0, 0, 1);
-  label(ctx, o.clock, cx, cy + 1, TYPE.body + 2, { color: f > 0.4 ? UI.accent : UI.text, weight: 700, track: 1 });
+  label(ctx, o.clock, cx, cy + 1, TYPE.lead, { color: o.hot || f > 0.4 ? UI.accent : UI.text, weight: 700, track: 1 });
   const size = TYPE.h2;
   label(ctx, String(o.home.score), cx - clockW / 2 - scoreW / 2, cy + 1, size, { weight: 700 });
   label(ctx, String(o.away.score), cx + clockW / 2 + scoreW / 2, cy + 1, size, { weight: 700 });
@@ -694,17 +725,24 @@ export function meter(ctx: Ctx, r: Rect, value: number, o: { ticks?: number; col
 
 // ------------------------------------------------------------------ banners, toasts, hints
 
+/** A title slab's tone: accent is the gold (a win, a reward), plain off-white, muted grey (a loss). */
+export type RibbonTone = 'accent' | 'plain' | 'muted';
+/** The tone names from the old palette, still read: gold and jade are accent, red plain, indigo muted. */
+type OldRibbonTone = 'red' | 'gold' | 'indigo' | 'jade';
+const RIBBON_TONE: Record<RibbonTone | OldRibbonTone, RibbonTone> = { accent: 'accent', plain: 'plain', muted: 'muted', gold: 'accent', jade: 'accent', red: 'plain', indigo: 'muted' };
+
 /**
- * A title slab (VICTORY, DEFEAT, FIGHT!, +1 ROLL): a flat dark plate with a thin rule under big letters.
- * gold and jade are the gold (a win, a reward); red and indigo stay neutral.
+ * A title slab (VICTORY, DEFEAT, FIGHT!, +1 ROLL): a flat dark plate with a thin rule under big letters, centred
+ * on cx, cy. sub: a quiet caption line inside the plate under the title (the plate grows down for it).
  */
-export function ribbon(ctx: Ctx, cx: number, cy: number, w: number, text: string, o: { color?: 'red' | 'gold' | 'indigo' | 'jade'; size?: number } = {}) {
-  const tone = o.color ?? 'red';
-  const hot = tone === 'gold' || tone === 'jade';
+export function ribbon(ctx: Ctx, cx: number, cy: number, w: number, text: string, o: { color?: RibbonTone | OldRibbonTone; size?: number; sub?: string } = {}) {
+  const tone = RIBBON_TONE[o.color ?? 'plain'];
+  const hot = tone === 'accent';
   const size = o.size ?? TYPE.title;
-  const h = Math.round(size * 1.3);
+  const subH = o.sub ? TYPE.caption + S.pad + S.base : 0;
+  const h = Math.round(size * 1.3) + subH;
   const x0 = cx - w / 2;
-  const y0 = cy - h / 2;
+  const y0 = cy - Math.round(size * 1.3) / 2;
   ctx.save();
   rr(ctx, x0, y0, w, h, S.radius.s);
   ctx.fillStyle = UI.glass;
@@ -712,10 +750,11 @@ export function ribbon(ctx: Ctx, cx: number, cy: number, w: number, text: string
   ctx.clip();
   ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
   ctx.fillRect(x0, y0, w, 1);
-  ctx.fillStyle = hot ? UI.accent : tone === 'red' ? UI.text : UI.textDim;
+  ctx.fillStyle = hot ? UI.accent : tone === 'plain' ? UI.text : UI.textDim;
   ctx.fillRect(x0, y0 + h - 3, w, 3);
   ctx.restore();
   fitLabel(ctx, text.toUpperCase(), cx, cy + 1, size, w - 32, { color: hot ? UI.accent : UI.text, weight: 700, track: size * 0.06 });
+  if (o.sub) fitLabel(ctx, o.sub.toUpperCase(), cx, y0 + h - 3 - subH / 2 - 2, TYPE.caption, w - 32, { color: UI.textDim, track: 1.5 });
 }
 
 /** A floating line of text that rises and fades; age in seconds (about 0..1.4). */
@@ -724,22 +763,53 @@ export function toast(ctx: Ctx, text: string, x: number, y: number, age: number)
   if (a <= 0) return;
   ctx.save();
   ctx.globalAlpha *= a;
-  label(ctx, text, x, y - age * 30, TYPE.h2 - 3, { color: UI.accent, weight: 700, onPitch: true });
+  label(ctx, text, x, y - age * 30, TYPE.h3, { color: UI.accent, weight: 700, onPitch: true });
   ctx.restore();
 }
 
-/** A callout inside rect r with a small arrow toward (pointAt.x, pointAt.y), and a gold marker bobbing at the target. */
+/** A rounded rect with a small tail on its top (dir -1) or bottom (dir 1) edge at tipX; dir 0 for none. */
+function calloutPath(ctx: Ctx, x: number, y: number, w: number, h: number, rad: number, tipX: number, dir: number) {
+  const tail = 8;
+  ctx.beginPath();
+  ctx.moveTo(x + rad, y);
+  if (dir < 0) {
+    ctx.lineTo(tipX - tail, y);
+    ctx.lineTo(tipX, y - tail);
+    ctx.lineTo(tipX + tail, y);
+  }
+  ctx.lineTo(x + w - rad, y);
+  ctx.arcTo(x + w, y, x + w, y + rad, rad);
+  ctx.lineTo(x + w, y + h - rad);
+  ctx.arcTo(x + w, y + h, x + w - rad, y + h, rad);
+  if (dir > 0) {
+    ctx.lineTo(tipX + tail, y + h);
+    ctx.lineTo(tipX, y + h + tail);
+    ctx.lineTo(tipX - tail, y + h);
+  }
+  ctx.lineTo(x + rad, y + h);
+  ctx.arcTo(x, y + h, x, y + h - rad, rad);
+  ctx.lineTo(x, y + rad);
+  ctx.arcTo(x, y, x + rad, y, rad);
+  ctx.closePath();
+}
+
+/**
+ * A callout inside rect r that points at (pointAt.x, pointAt.y) one way only: with a small tail when the target
+ * is just past its edge, else with a gold arrow bobbing over the target. A slate plate with a gold hairline.
+ */
 export function hint(ctx: Ctx, r: Rect, text: string, pointAt: { x: number; y: number }, t = 0) {
   const below = pointAt.y > r.y + r.h / 2;
   const dir = below ? 1 : -1;
-  const tipX = clamp(pointAt.x, r.x + 24, r.x + r.w - 24);
-  const ty = below ? r.y + r.h : r.y;
+  const gap = below ? pointAt.y - (r.y + r.h) : r.y - pointAt.y;
+  const near = gap <= 72 && pointAt.x > r.x && pointAt.x < r.x + r.w;
+  const tipX = Math.round(clamp(pointAt.x, r.x + 24, r.x + r.w - 24)) + 0.5;
   softShadow(ctx, r.x, r.y + 3, r.w, r.h, S.radius.m, 6, 0.45);
-  ctx.fillStyle = UI.text;
-  rr(ctx, r.x, r.y, r.w, r.h, S.radius.m);
+  calloutPath(ctx, Math.round(r.x) + 0.5, Math.round(r.y) + 0.5, Math.round(r.w) - 1, Math.round(r.h) - 1, S.radius.m, tipX, near ? dir : 0);
+  ctx.fillStyle = UI.surface;
   ctx.fill();
-  poly(ctx, [tipX - 9, ty - dir, tipX + 9, ty - dir, tipX, ty + dir * 9]);
-  ctx.fill();
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = UI.accent;
+  ctx.stroke();
   const size = TYPE.body;
   const lines: string[] = [];
   let cur = '';
@@ -751,8 +821,9 @@ export function hint(ctx: Ctx, r: Rect, text: string, pointAt: { x: number; y: n
   }
   lines.push(cur);
   const lh = size + 4;
-  lines.forEach((l, i) => fitLabel(ctx, l, r.x + r.w / 2, r.y + r.h / 2 + 1 + (i - (lines.length - 1) / 2) * lh, size, r.w - 24, { color: UI.accentText }));
-  // the marker at the target: a small gold arrow, pointing at it from the callout's side
+  lines.forEach((l, i) => fitLabel(ctx, l, r.x + r.w / 2, r.y + r.h / 2 + 1 + (i - (lines.length - 1) / 2) * lh, size, r.w - 24, { color: UI.text }));
+  if (near) return;
+  // the target is further off: a small gold arrow bobs over it, pointing at it from the callout's side
   const bob = Math.sin(t * 5) * 3;
   const my = pointAt.y - dir * (30 - bob);
   ctx.fillStyle = UI.bg;

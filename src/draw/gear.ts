@@ -132,7 +132,29 @@ function helmet(ctx: Ctx, k: number, t: number, lw: number) {
   // the peak in front
   poly(ctx, [0.26, 0.06, 0.52, 0.15, 0.26, 0.19]);
   fillStroke(ctx, k >= 4 ? trimOf(k, t) : lo, lw);
+  if (k === 2) {
+    // a cheek guard hanging below the brow, so the plain bowl reads as a soldier's helmet
+    poly(ctx, [0.06, 0.12, 0.3, 0.12, 0.27, 0.33, 0.12, 0.38]);
+    fillStroke(ctx, lo, lw);
+    ctx.fillStyle = hi;
+    ctx.fillRect(0.1, 0.17, 0.035, 0.13);
+  }
   shadedDome(ctx, 0.4, 0.37, 0.14, base, lo, hi, lw);
+  if (k === 2) {
+    // a raised ridge over the crown, nape to brow
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(-0.5, -0.5, 1, 0.42);
+    ctx.clip();
+    dome(ctx, 0.4, 0.37, 0.14);
+    ctx.lineWidth = lw * 3.6;
+    ctx.strokeStyle = COLOR.ink;
+    ctx.stroke();
+    ctx.lineWidth = lw * 1.6;
+    ctx.strokeStyle = TIER.metalLight[2];
+    ctx.stroke();
+    ctx.restore();
+  }
   if (k === 3) {
     // a raised comb from the nape over the crown
     ctx.beginPath();
@@ -245,7 +267,14 @@ function sneaker(ctx: Ctx, k: number, t: number, lw: number) {
   if (k === 6) sparkle(ctx, 0.3, -0.06, 0.2, t, 6);
 }
 
-// ------------------------------------------------------------------ chili: one glossy red pepper
+// ------------------------------------------------------------------ chili: one glossy pepper in the class metal
+
+/** The pepper's body per class: gunmetal (E) through steel and silver (B), then gold (A, S) and white-gold (SSS). */
+const CHILI_BODY = ['#7e8893', '#949ea9', '#adb7c2', '#d3d9e0', '#d9a52e', '#ffcc1a', '#fff0b8'];
+const CHILI_SHADE = ['#4f5862', '#5e6873', '#717c88', '#8e98a4', '#8a6414', '#a8800c', '#c9a447'];
+/** its cap and stalk: a dark slate, so the shape reads on any tile */
+const CAP = '#39414b';
+const CAP_HI = '#66717d';
 
 function chili(ctx: Ctx, k: number, t: number, lw: number) {
   const s = 0.76 + k * 0.035;
@@ -254,66 +283,76 @@ function chili(ctx: Ctx, k: number, t: number, lw: number) {
   if (k >= 4) heat(ctx, 0.0, -0.3 * s, 0.62, t, Math.max(lw * 1.2, 0.035), k >= 5 ? 3 : 2);
   ctx.save();
   ctx.scale(s, s);
-  // the curled stalk
+  // the bent stalk, standing up out of the cap
   ctx.beginPath();
-  ctx.moveTo(-0.2, -0.3);
-  ctx.quadraticCurveTo(-0.26, -0.48, -0.1, -0.5);
-  ctx.lineWidth = lw * 2.6;
+  ctx.moveTo(-0.16, -0.34);
+  ctx.quadraticCurveTo(-0.2, -0.52, -0.02, -0.58);
+  ctx.lineWidth = lw * 3.4;
   ctx.strokeStyle = COLOR.ink;
   ctx.stroke();
-  ctx.lineWidth = lw * 1.1;
-  ctx.strokeStyle = '#5b8f3e';
+  ctx.lineWidth = lw * 1.6;
+  ctx.strokeStyle = CAP_HI;
   ctx.stroke();
-  // the pepper: deep red, its shade low on the curve, a crisp wet gloss on top
-  ctx.beginPath();
-  ctx.moveTo(-0.36, -0.2);
-  ctx.bezierCurveTo(-0.46, 0.24, 0.02, 0.56, 0.42, 0.42);
-  ctx.bezierCurveTo(0.14, 0.3, 0.12, -0.02, 0.02, -0.28);
-  ctx.closePath();
-  ctx.fillStyle = '#c9352a';
+  // the pepper: the class metal, its shade low on the curve, a crisp gloss on top; the tip hooks up
+  const pod = () => {
+    ctx.beginPath();
+    ctx.moveTo(-0.38, -0.2);
+    ctx.bezierCurveTo(-0.5, 0.26, 0.0, 0.6, 0.48, 0.3);
+    ctx.bezierCurveTo(0.16, 0.32, 0.12, -0.02, 0.06, -0.26);
+    ctx.closePath();
+  };
+  pod();
+  ctx.fillStyle = CHILI_BODY[k];
   ctx.fill();
   inside(ctx, () => {
     ctx.beginPath();
-    ctx.moveTo(-0.5, 0.05);
-    ctx.bezierCurveTo(-0.2, 0.36, 0.1, 0.4, 0.5, 0.36);
-    ctx.lineTo(0.5, 0.6);
-    ctx.lineTo(-0.5, 0.6);
+    ctx.moveTo(-0.52, 0.05);
+    ctx.bezierCurveTo(-0.2, 0.36, 0.1, 0.4, 0.52, 0.3);
+    ctx.lineTo(0.52, 0.62);
+    ctx.lineTo(-0.52, 0.62);
     ctx.closePath();
-    ctx.fillStyle = '#8f1d18';
+    ctx.fillStyle = CHILI_SHADE[k];
     ctx.fill();
+    // a fine crease along the curve, then the gloss
     ctx.beginPath();
-    ctx.moveTo(-0.26, -0.1);
-    ctx.quadraticCurveTo(-0.27, 0.14, -0.1, 0.27);
-    ctx.lineWidth = 0.065;
-    ctx.strokeStyle = '#f2b2a6';
+    ctx.moveTo(-0.1, -0.16);
+    ctx.bezierCurveTo(-0.14, 0.12, 0.08, 0.3, 0.34, 0.33);
+    ctx.lineWidth = lw * 0.6;
+    ctx.strokeStyle = CHILI_SHADE[k];
     ctx.stroke();
-    circle(ctx, -0.13, -0.17, 0.035);
+    ctx.beginPath();
+    ctx.moveTo(-0.28, -0.06);
+    ctx.quadraticCurveTo(-0.29, 0.16, -0.12, 0.28);
+    ctx.lineWidth = 0.065;
+    ctx.strokeStyle = TIER.metalLight[k];
+    ctx.stroke();
+    circle(ctx, -0.25, -0.12, 0.03);
     ctx.fillStyle = COLOR.white;
     ctx.fill();
   });
-  ctx.beginPath();
-  ctx.moveTo(-0.36, -0.2);
-  ctx.bezierCurveTo(-0.46, 0.24, 0.02, 0.56, 0.42, 0.42);
-  ctx.bezierCurveTo(0.14, 0.3, 0.12, -0.02, 0.02, -0.28);
-  ctx.closePath();
+  pod();
   ctx.lineWidth = lw;
   ctx.strokeStyle = COLOR.ink;
   ctx.stroke();
-  // the green cap
+  // the cap: a wide calyx over the shoulders, its three sepals pointing down the pod
   ctx.beginPath();
-  ctx.moveTo(-0.4, -0.16);
-  ctx.quadraticCurveTo(-0.28, -0.4, -0.02, -0.36);
-  ctx.quadraticCurveTo(0.1, -0.3, 0.06, -0.2);
-  ctx.quadraticCurveTo(-0.04, -0.26, -0.12, -0.16);
-  ctx.quadraticCurveTo(-0.22, -0.24, -0.4, -0.16);
+  ctx.moveTo(-0.45, -0.15);
+  ctx.quadraticCurveTo(-0.34, -0.44, -0.08, -0.42);
+  ctx.quadraticCurveTo(0.12, -0.38, 0.13, -0.24);
+  ctx.quadraticCurveTo(0.12, -0.12, 0.07, -0.1);
+  ctx.quadraticCurveTo(0.02, -0.15, -0.03, -0.2);
+  ctx.quadraticCurveTo(-0.08, -0.08, -0.13, -0.07);
+  ctx.quadraticCurveTo(-0.18, -0.14, -0.22, -0.2);
+  ctx.quadraticCurveTo(-0.28, -0.1, -0.34, -0.09);
+  ctx.quadraticCurveTo(-0.42, -0.1, -0.45, -0.15);
   ctx.closePath();
-  fillStroke(ctx, '#4d8238', lw);
-  ellipse(ctx, -0.2, -0.3, 0.1, 0.03, -0.3);
-  ctx.fillStyle = '#7fb062';
+  fillStroke(ctx, CAP, lw);
+  ellipse(ctx, -0.22, -0.33, 0.12, 0.035, -0.3);
+  ctx.fillStyle = CAP_HI;
   ctx.fill();
   // a ring of the class metal around the stalk from D
   if (k >= 1) {
-    ellipse(ctx, -0.2, -0.37, 0.085, 0.04, -0.2);
+    ellipse(ctx, -0.15, -0.41, 0.085, 0.04, -0.2);
     fillStroke(ctx, trimOf(k, t), lw * 0.8);
   }
   ctx.restore();

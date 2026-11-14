@@ -1,34 +1,40 @@
 import { music, sfx } from '../audio/engine';
 import { Fx } from '../draw/fx';
-import { swords } from '../draw/icons';
 import { petArt } from '../draw/pets';
 import { restPose, type PetLook } from '../draw/petTypes';
-import { classBadge, countBadge, namePlate, panel, pill, veil } from '../draw/ui';
+import { classBadge, countBadge, namePlate, powerChip, veil } from '../draw/ui';
 import { makeOpponent } from '../logic/bots';
 import { frand, hashSeed, makeRng } from '../rng';
 import type { App, Screen } from '../screen';
 import { COLOR, S, TEAM, TYPE, UI, W } from '../theme';
-import type { ArmySpec, Opponent } from '../types';
+import type { ArmySpec, Opponent, SquadSpec } from '../types';
 import { armyPower } from '../data';
 import { circle, clamp, easeOutCubic, label, rr, textWidth, type Ctx, type Rect } from '../util';
 
-// layout
-const PLATE_W = W - S.pad * 4; // as wide as the army panels, so the screen is one column
-const PLATE_H = 64;
-const OPP_PLATE: Rect = { x: (W - PLATE_W) / 2, y: 150, w: PLATE_W, h: PLATE_H };
-const OPP_ARMY_Y = 236;
-const ME_ARMY_Y = 706;
-const ME_PLATE: Rect = { x: (W - PLATE_W) / 2, y: 972, w: PLATE_W, h: PLATE_H };
-const SLOT_W = 58; // one squad's place in its row
-const SLOT_H = 76;
-const PET_R = 17;
-const PER_ROW = 8;
-const MAX_TILES = 16;
-const POWER_W = 200;
+// layout: one panel per side (the name plate is its header row, the army below it), mirrored about VS
+const PANEL_X = S.pad * 2;
+const PANEL_W = W - S.pad * 4;
+const HEAD_H = 64;
 const VS = { x: W / 2, y: 585, r: 64, w: 96, h: 64 };
-const RADAR = { x: W / 2, y: 520, r: 140 };
-const SEARCH_TEXT_Y = 720;
-const TAP_Y = 1090;
+const SIDE_GAP = 56; // from VS to the near edge of each panel
+const ME_TOP = VS.y + SIDE_GAP;
+const MAX_TILES = 16;
+const POWER = { w: 160, h: 36 };
+const RADAR = { x: W / 2, y: 330, r: 136 };
+const SEARCH_TEXT_Y = 530;
+const TAP_Y = 1090; // at most this low: it sits a little under your panel
+
+/** How an army is laid out: a small squad list gets fewer, larger fighters (lobby tile size), a big one two rows of eight. */
+function armyGrid(n: number) {
+  const big = n <= 4;
+  const perRow = big ? 4 : 8;
+  const slotW = big ? 104 : 58;
+  const slotH = big ? 104 : 76;
+  const rows = Math.max(1, Math.ceil(n / perRow));
+  const bodyH = S.pad + rows * slotH + S.gap + POWER.h + S.pad + S.base;
+  return { big, perRow, slotW, slotH, rows, bodyH, petR: big ? 30 : 17 };
+}
+const sortSquads = (a: ArmySpec): SquadSpec[] => [...a.squads].sort((x, y) => y.level - x.level || y.count - x.count).slice(0, MAX_TILES);
 
 // timing
 const SEARCH_MIN = 1.5;
@@ -67,6 +73,13 @@ export function createMatch(app: App): Screen {
   function drawRadar(ctx: Ctx) {
     const { x, y, r } = RADAR;
     ctx.save();
+    // a pool of dark under the scope, so the pitch's lines never cross its rings
+    const pool = ctx.createRadialGradient(x, y, r * 0.75, x, y, r * 1.45);
+    pool.addColorStop(0, UI.bg);
+    pool.addColorStop(1, 'rgba(12, 16, 22, 0)');
+    ctx.fillStyle = pool;
+    circle(ctx, x, y, r * 1.45);
+    ctx.fill();
     ctx.lineWidth = S.line.thin;
     ctx.strokeStyle = UI.borderStrong;
     for (const k of [0.34, 0.67, 1]) {
@@ -119,46 +132,57 @@ export function createMatch(app: App): Screen {
     label(ctx, '.'.repeat(1 + (Math.floor(t * 2.5) % 3)), W / 2 + (W / 2 - x0) + 4, SEARCH_TEXT_Y, size, { align: 'left', color: UI.textDim, track: 2 });
   }
 
-  /** One army on a dark panel: up to two rows of its squads as idle pets, and its power. */
-  function drawArmy(ctx: Ctx, army: ArmySpec, y0: number, team: 0 | 1, age: number) {
-    const squads = [...army.squads].sort((a, b) => b.level - a.level || b.count - a.count).slice(0, MAX_TILES);
-    const rows = Math.max(1, Math.ceil(squads.length / PER_ROW));
-    const dir = team === 1 ? -1 : 1;
+  /**
+   * One side: its name plate as the header of one panel, the army in the panel's body (idle pets with their class
+   * and head count) and its power. The opponent's is mirrored (team edge and name on the right) and sits above VS.
+   */
+  function drawSide(ctx: Ctx, army: ArmySpec, team: 0 | 1, age: number) {
+    const squads = sortSquads(army);
+    const g = armyGrid(squads.length);
     const pk = easeOutCubic(clamp(age / SLIDE, 0, 1));
-    const ph = rows * SLOT_H + S.barH + S.section;
+    const top = team === 1 ? VS.y - SIDE_GAP - HEAD_H - g.bodyH : ME_TOP;
+    const dir = team === 1 ? -1 : 1;
+    const header: Rect = { x: PANEL_X, y: top, w: PANEL_W, h: HEAD_H };
     ctx.save();
-    ctx.globalAlpha = pk;
-    panel(ctx, { x: S.pad * 2, y: y0 - S.pad, w: W - S.pad * 4, h: ph }, { tone: 'dark' });
-    ctx.restore();
+    // the opponent's panel drops in from above; yours was already there, its body opens downward
+    if (team === 1) ctx.translate(0, -(1 - pk) * 160);
+    const who = team === 1 && opponent ? { name: opponent.name, trophies: opponent.trophies, bot: true } : { name: app.state.name, trophies: app.state.trophies, bot: false };
+    namePlate(ctx, header, { ...who, team, align: team === 1 ? 'right' : 'left', body: Math.round(g.bodyH * (team === 1 ? 1 : pk)) });
+    const y0 = top + HEAD_H + S.pad;
     for (let i = 0; i < squads.length; i++) {
-      const row = Math.floor(i / PER_ROW);
-      const inRow = Math.min(PER_ROW, squads.length - row * PER_ROW);
-      const col = i % PER_ROW;
+      const row = Math.floor(i / g.perRow);
+      const inRow = Math.min(g.perRow, squads.length - row * g.perRow);
+      const col = i % g.perRow;
       const k = easeOutCubic(clamp((age - i * ROW_STAGGER) / SLIDE, 0, 1));
       if (k <= 0) continue;
-      const s = squads[i];
-      const x = W / 2 + (col - (inRow - 1) / 2) * SLOT_W;
-      const y = y0 + row * SLOT_H + SLOT_H - S.pad * 2 + dir * (1 - k) * 24;
-      const look: PetLook = { pet: s.pet, level: s.level, team, weapon: s.weapon, weaponLevel: s.weaponLevel, helmet: s.helmet, sneakers: s.sneakers, chili: s.chili, seed: i * 1.7 };
+      const sq = squads[i];
+      const x = W / 2 + (col - (inRow - 1) / 2) * g.slotW;
+      const y = y0 + row * g.slotH + g.slotH - (g.big ? 30 : 22) + dir * (1 - k) * 16;
+      const look: PetLook = { pet: sq.pet, level: sq.level, team, weapon: sq.weapon, weaponLevel: sq.weaponLevel, helmet: sq.helmet, sneakers: sq.sneakers, chili: sq.chili, seed: i * 1.7 };
       const pose = restPose();
       pose.t = app.t + i * 0.37;
       pose.face = team === 1 ? -1 : 1;
       ctx.save();
-      ctx.globalAlpha = clamp(k, 0, 1);
-      ctx.translate(x, y);
-      petArt.drawShadow(ctx, look, PET_R, 0);
-      petArt.drawPet(ctx, look, pose, PET_R);
-      ctx.restore();
-      classBadge(ctx, s.level, x - SLOT_W / 2 + 12, y + 10, 0.8, app.t);
-      if (s.count > 1) countBadge(ctx, s.count, x + SLOT_W / 2 - 12, y + 10, 1);
-    }
-    const py = y0 + rows * SLOT_H + S.gap;
-    if (pk > 0) {
+      ctx.globalAlpha *= clamp(k, 0, 1);
       ctx.save();
-      ctx.globalAlpha = pk;
-      pill(ctx, { x: (W - POWER_W) / 2, y: py + 4, w: POWER_W, h: S.barH - 8 }, { icon: (c, x, y, sz) => swords(c, x, y, sz, TEAM[team].main), text: `POWER ${armyPower(army.squads)}` });
+      ctx.translate(x, y);
+      petArt.drawShadow(ctx, look, g.petR, 0);
+      petArt.drawPet(ctx, look, pose, g.petR);
+      ctx.restore();
+      // the class (and the head count) on one small row centred under the fighter's feet
+      const by = y + (g.big ? 16 : 12);
+      const bw = sq.level >= 7 ? 30 : 16;
+      const cw = sq.count > 1 ? 28 : 0;
+      const bx = x - (bw + (cw ? S.base + cw : 0)) / 2;
+      classBadge(ctx, sq.level, bx, by, 1, app.t);
+      if (cw) countBadge(ctx, sq.count, bx + bw + S.base + cw / 2, by, 1);
       ctx.restore();
     }
+    if (pk > 0) {
+      ctx.globalAlpha *= pk;
+      powerChip(ctx, { x: (W - POWER.w) / 2, y: y0 + g.rows * g.slotH + S.gap, w: POWER.w, h: POWER.h }, armyPower(army.squads));
+    }
+    ctx.restore();
   }
 
   /** VS: a small plate on a hairline between the two armies. */
@@ -177,14 +201,14 @@ export function createMatch(app: App): Screen {
     // a small block lit from the upper left: side face, top face, a highlight along the top edge
     const D = 5;
     rr(ctx, -VS.w / 2, -VS.h / 2 + D, VS.w, VS.h - D, S.radius.m);
-    ctx.fillStyle = '#8b949e';
+    ctx.fillStyle = UI.textDim;
     ctx.fill();
     rr(ctx, -VS.w / 2, -VS.h / 2, VS.w, VS.h - D, S.radius.m);
     ctx.fillStyle = UI.text;
     ctx.fill();
     ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
     ctx.fillRect(-VS.w / 2 + S.radius.m, -VS.h / 2 + 1, VS.w - S.radius.m * 2, 1);
-    label(ctx, 'VS', 0, -D / 2 + 2, TYPE.h1 + 2, { color: UI.accentText, weight: 700, track: 3 });
+    label(ctx, 'VS', 0, -D / 2 + 2, TYPE.h1, { color: UI.accentText, weight: 700, track: 3 });
     ctx.restore();
   }
 
@@ -236,25 +260,17 @@ export function createMatch(app: App): Screen {
       fx.drawUnder(ctx);
       if (found < 0) {
         drawRadar(ctx);
-        namePlate(ctx, ME_PLATE, { name: app.state.name, trophies: app.state.trophies, team: 0 });
+        // your plate waits where your side's panel will open
+        namePlate(ctx, { x: PANEL_X, y: ME_TOP, w: PANEL_W, h: HEAD_H }, { name: app.state.name, trophies: app.state.trophies, team: 0 });
       } else if (opponent) {
         const age = t - found;
-        const k = easeOutCubic(clamp(age / SLIDE, 0, 1));
-        ctx.save();
-        ctx.translate(0, -(1 - k) * 160);
-        namePlate(ctx, OPP_PLATE, { name: opponent.name, trophies: opponent.trophies, team: 1, bot: true });
-        ctx.restore();
-        drawArmy(ctx, opponent.army, OPP_ARMY_Y, 1, age);
-        drawArmy(ctx, mine, ME_ARMY_Y, 0, age);
-        ctx.save();
-        ctx.translate(0, (1 - k) * 160);
-        namePlate(ctx, ME_PLATE, { name: app.state.name, trophies: app.state.trophies, team: 0 });
-        ctx.restore();
+        drawSide(ctx, opponent.army, 1, age);
+        drawSide(ctx, mine, 0, age);
         drawVs(ctx, age);
         if (age > TAP_AFTER) {
           ctx.save();
           ctx.globalAlpha = 0.7 + 0.3 * Math.sin(app.t * 3);
-          label(ctx, 'TAP TO FIGHT', W / 2, TAP_Y, TYPE.small + 1, { color: UI.text, track: 2.5, onPitch: true });
+          label(ctx, 'TAP TO FIGHT', W / 2, Math.min(TAP_Y, ME_TOP + HEAD_H + armyGrid(sortSquads(mine).length).bodyH + S.section * 2), TYPE.caption, { color: UI.text, track: 2.5, onPitch: true });
           ctx.restore();
         }
       }

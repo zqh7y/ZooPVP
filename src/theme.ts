@@ -112,8 +112,8 @@ export const UI = {
   glass: 'rgba(12, 16, 22, 0.9)',
   scrim: 'rgba(8, 11, 16, 0.8)',
   /** class line colours E..SSS (greys, silver, then gold: see TIER) and the lighter ones for letters */
-  tier: ['#5d6878', '#7c8796', '#a0aab7', '#cfd6de', '#d9a52e', '#ffd21f', '#fff3c4'],
-  tierText: ['#8f99a7', '#a5afbc', '#c3cbd5', '#eef1f4', '#f0c75a', '#ffd21f', '#fff6dc'],
+  tier: ['#4f5968', '#7f8a99', '#a0aab7', '#cfd6de', '#d9a52e', '#ffd21f', '#fff3c4'],
+  tierText: ['#838d9b', '#aeb7c3', '#c3cbd5', '#eef1f4', '#f0c75a', '#ffd21f', '#fff6dc'],
   /** one colour per league, Sprout..Legend: metals, ending in the main gold */
   league: ['#7d8794', '#a37a52', '#b9c1cb', '#e0b84a', '#d8dee6', '#eef3f7', '#ffd21f'],
 };
@@ -134,14 +134,23 @@ export const RAINBOW = ['#fff6d6', '#ffe27a', '#ffffff', '#ffd21f', '#fff0b8'];
 /** The S-class aura and the sparkle colour. */
 export const CLASS_FX = { s: '#ffd21f', sss: '#fff3c4', spark: '#fffbe8' };
 
-/** Type sizes (px), by role. */
+/**
+ * Type sizes (px), by role. A screen takes a step from here and never does arithmetic on it: when a size is
+ * missing, it is added here with its role.
+ */
 export const TYPE = {
   title: 60, // VICTORY, FIGHT!
   h1: 40, // a screen's main number or name
-  h2: 27, // buttons, panel titles
+  button: 36, // the word on a main button
+  h2: 27, // panel titles, the big score
+  h3: 24, // a card's title, a toast, a pill's number
+  lead: 22, // a name on a plate, a medium button, the clock
   body: 20, // pills, cards
+  label: 18, // a small button
+  caption: 16, // a caption beside or under a value
   small: 15, // captions
-  tiny: 12, // badges on tiles
+  tag: 13, // the BOT tag, a button's second line, a class letter at full size
+  tiny: 12, // badges on tiles (the smallest text the game draws)
 };
 
 /** Spacing stands on a base of 4. */

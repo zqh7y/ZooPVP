@@ -6,19 +6,34 @@ import { button, panel, ribbon, veil, type IconFn } from '../draw/ui';
 import { claimRoad, applyMatch } from '../logic/progress';
 import { hashSeed, makeRng } from '../rng';
 import type { App, Screen } from '../screen';
-import { S, TYPE, UI, W } from '../theme';
+import { H, S, TYPE, UI, W } from '../theme';
 import type { MatchResult } from '../types';
 import { clamp, easeOutCubic, inRect, label, type Ctx, type Rect } from '../util';
 
-// layout
-const RIBBON = { y: 210, w: 420 };
-const SUB_Y = 278;
-const PANEL: Rect = { x: S.pad * 3, y: 330, w: W - S.pad * 6, h: 520 };
+// layout: one column (title, score sheet, standing, CONTINUE) centred on the screen, a little above the middle,
+// so a short sheet leaves no hole above the button
+const RIBBON_W = 440;
+const TITLE_H = Math.round(TYPE.title * 1.3); // the ribbon's title row; its caption row adds SUB_H under it
+const SUB_H = TYPE.caption + S.pad + S.base;
+const PANEL_X = S.pad * 3;
+const PANEL_W = W - S.pad * 6;
 const LINE_H = 76;
-const LINE_X = PANEL.x + S.pad * 2;
+const LINE_X = PANEL_X + S.pad * 2;
 const ICON = 26;
-const STANDING_GAP = 64; // the league line under the panel
-const CONTINUE: Rect = { x: (W - 320) / 2, y: 930, w: 320, h: S.btnH };
+const GAP = S.section + S.pad + S.base; // 40, between the blocks
+const STANDING_H = 40; // the league line under the panel
+const BTN_W = 320;
+
+/** Where everything sits for a sheet of n lines. */
+function layout(n: number) {
+  const panelH = LINE_H * n + S.pad * 2;
+  const total = TITLE_H + SUB_H + GAP + panelH + GAP + STANDING_H + GAP + S.btnH;
+  const top = Math.max(S.section * 4, Math.round((H - total) * 0.45));
+  const panel: Rect = { x: PANEL_X, y: top + TITLE_H + SUB_H + GAP, w: PANEL_W, h: panelH };
+  const standY = panel.y + panelH + GAP + STANDING_H / 2;
+  const cont: Rect = { x: (W - BTN_W) / 2, y: standY + STANDING_H / 2 + GAP, w: BTN_W, h: S.btnH };
+  return { titleY: top + TITLE_H / 2, panel, standY, cont };
+}
 
 // timing
 const RIBBON_POP = 0.35;
@@ -52,6 +67,7 @@ export function createResult(app: App): Screen {
   let buttonAt = 0;
   let pressed = false;
   let left = false;
+  let L = layout(3);
 
   function build(r: MatchResult, roadRolls: number) {
     lines = [];
@@ -61,17 +77,19 @@ export function createResult(app: App): Screen {
       at += len + LINE_GAP;
     };
     add({
-      icon: trophy, text: 'Trophies', value: r.trophies, sign: true, color: r.trophies >= 0 ? UI.accent : UI.danger,
-      done: () => (r.trophies >= 0 ? sfx.play('trophyUp', r.trophies) : sfx.play('trophyDown')),
+      // gold only for a gain: a loss in the danger red, no change in plain grey
+      icon: trophy, text: 'Trophies', value: r.trophies, sign: true, color: r.trophies > 0 ? UI.accent : r.trophies < 0 ? UI.danger : UI.textDim,
+      done: () => (r.trophies > 0 ? sfx.play('trophyUp', r.trophies) : r.trophies < 0 ? sfx.play('trophyDown') : sfx.play('count')),
     });
     add({ icon: koStar, text: 'Knock-outs', value: r.kills, sign: false, color: UI.text });
     add({ icon: rollToken, text: 'Rolls earned', value: r.rolls, sign: true, color: UI.text, done: () => r.rolls > 0 && sfx.play('rollEarned') });
     if (r.leagueUp >= 0) {
       const li = r.leagueUp;
-      add({ icon: (c, x, y, s) => leagueBadge(c, x, y, s, li), text: `${LEAGUES[li].name} League!`, value: NaN, sign: false, color: UI.accent, done: () => sfx.play('leagueUp', li) }, 0.4);
+      add({ icon: (c, x, y, s) => leagueBadge(c, x, y, s, li), text: `Promoted to ${LEAGUES[li].name}`, value: NaN, sign: false, color: UI.accent, done: () => sfx.play('leagueUp', li) }, 0.4);
     }
     if (roadRolls > 0) add({ icon: rollToken, text: 'Trophy road', value: roadRolls, sign: true, color: UI.text, done: () => sfx.play('rollEarned') });
     buttonAt = at - LINE_GAP + BUTTON_AFTER;
+    L = layout(lines.length);
   }
 
   function skip() {
@@ -92,7 +110,7 @@ export function createResult(app: App): Screen {
     if (!plain) {
       const shown = Math.round(l.value * easeOutCubic(clamp(age / COUNT_FOR, 0, 1)));
       const s = l.sign && shown > 0 ? `+${shown}` : `${shown}`;
-      label(ctx, s, PANEL.x + PANEL.w - S.pad * 2, y + 1, TYPE.h1, { align: 'right', color: l.color, weight: 700 });
+      label(ctx, s, L.panel.x + L.panel.w - S.pad * 2, y + 1, TYPE.h1, { align: 'right', color: l.color, weight: 700 });
     }
     ctx.restore();
   }
@@ -116,7 +134,7 @@ export function createResult(app: App): Screen {
       build(res, roadRolls);
       if (res.won) {
         // a win is marked by one quiet burst behind the title, in the accent
-        fx.burst(W / 2, RIBBON.y, { colors: [UI.accent, UI.text], n: 22, speed: 340, size: 4, life: 0.8, gravity: 260 });
+        fx.burst(W / 2, L.titleY, { colors: [UI.accent, UI.text], n: 22, speed: 340, size: 4, life: 0.8, gravity: 260 });
         sfx.play('victory');
         music.set('victory');
       } else {
@@ -149,7 +167,7 @@ export function createResult(app: App): Screen {
           if (l.done && age >= 0.2) {
             l.done();
             l.done = undefined;
-            fx.burst(LINE_X + ICON / 2, PANEL.y + S.pad + LINE_H / 2 + lines.indexOf(l) * LINE_H, { colors: [UI.accent, UI.text], n: 10, speed: 240, size: 4, life: 0.5, gravity: 300 });
+            fx.burst(LINE_X + ICON / 2, L.panel.y + S.pad + LINE_H / 2 + lines.indexOf(l) * LINE_H, { colors: [UI.accent, UI.text], n: 10, speed: 240, size: 4, life: 0.5, gravity: 300 });
           }
           continue;
         }
@@ -175,35 +193,35 @@ export function createResult(app: App): Screen {
         const k = clamp(t / RIBBON_POP, 0, 1);
         const s = k < 1 ? 1.25 - 0.25 * easeOutCubic(k) : 1;
         ctx.save();
-        ctx.translate(W / 2, RIBBON.y);
+        ctx.translate(W / 2, L.titleY);
         ctx.scale(s, s);
         ctx.globalAlpha = Math.min(1, k * 2);
-        ribbon(ctx, 0, 0, RIBBON.w, res.won ? 'VICTORY' : 'DEFEAT', { color: res.won ? 'gold' : 'indigo' });
+        // the fight in one line, inside the title's plate (so the stadium's boards never run behind it)
+        const secs = Math.max(0, Math.round(res.time));
+        const clock = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+        const lost = res.losses === 0 ? 'NONE OF YOURS KNOCKED OUT' : `${res.losses} OF YOURS KNOCKED OUT`;
+        ribbon(ctx, 0, 0, RIBBON_W, res.won ? 'VICTORY' : 'DEFEAT', { color: res.won ? 'accent' : 'muted', sub: `${res.won ? 'WON' : 'LOST'} IN ${clock}  ·  ${lost}` });
         ctx.restore();
-        if (t > RIBBON_POP) {
-          const secs = Math.round(res.time);
-          label(ctx, `${res.won ? 'WON' : 'LOST'} IN ${secs} S  ·  ${res.losses} OF YOURS KNOCKED OUT`, W / 2, SUB_Y, TYPE.small + 1, { color: UI.textDim, track: 1.5 });
-        }
         const pk = easeOutCubic(clamp((t - 0.5) / 0.3, 0, 1));
         if (pk > 0) {
           ctx.save();
           ctx.globalAlpha = pk;
-          const h = LINE_H * lines.length + S.pad * 2;
-          panel(ctx, { ...PANEL, h }, { tone: 'dark' });
+          const P = L.panel;
+          panel(ctx, P, { tone: 'dark' });
           ctx.fillStyle = UI.border;
-          for (let i = 1; i < lines.length; i++) if (t >= lines[i].at) ctx.fillRect(LINE_X, PANEL.y + S.pad + i * LINE_H, PANEL.w - S.pad * 4, 1);
-          lines.forEach((l, i) => drawLine(ctx, l, PANEL.y + S.pad + LINE_H / 2 + i * LINE_H));
+          for (let i = 1; i < lines.length; i++) if (t >= lines[i].at) ctx.fillRect(LINE_X, P.y + S.pad + i * LINE_H, P.w - S.pad * 4, 1);
+          lines.forEach((l, i) => drawLine(ctx, l, P.y + S.pad + LINE_H / 2 + i * LINE_H));
           ctx.restore();
           // where you stand now: league badge and trophies
           const sk = clamp((t - buttonAt + 0.2) / 0.3, 0, 1);
           if (sk > 0) {
-            const y = PANEL.y + h + STANDING_GAP;
+            const y = L.standY;
             const li = leagueOf(app.state.trophies);
             ctx.save();
             ctx.globalAlpha = sk;
             leagueBadge(ctx, LINE_X + 18, y, 40, li);
             label(ctx, `${LEAGUES[li].name} League`.toUpperCase(), LINE_X + 50, y - 11, TYPE.body, { align: 'left', weight: 700, track: 1.5 });
-            label(ctx, `${app.state.trophies} TROPHIES`, LINE_X + 50, y + 13, TYPE.small + 1, { align: 'left', color: UI.textDim, track: 1.5 });
+            label(ctx, `${app.state.trophies} TROPHIES`, LINE_X + 50, y + 13, TYPE.caption, { align: 'left', color: UI.textDim, track: 1.5 });
             ctx.restore();
           }
         }
@@ -212,7 +230,7 @@ export function createResult(app: App): Screen {
           ctx.save();
           ctx.globalAlpha = bk;
           ctx.translate(0, (1 - bk) * 12);
-          button(ctx, CONTINUE, { variant: 'primary', text: 'CONTINUE', pressed, breathe: t });
+          button(ctx, L.cont, { variant: 'primary', text: 'CONTINUE', pressed, breathe: t });
           ctx.restore();
         }
       }
@@ -221,14 +239,14 @@ export function createResult(app: App): Screen {
       fx.drawScreen(ctx);
     },
     pointerDown(x, y) {
-      if (t >= buttonAt && inRect(x, y, CONTINUE)) pressed = true;
+      if (t >= buttonAt && inRect(x, y, L.cont)) pressed = true;
       else skip();
     },
     pointerMove(x, y) {
-      if (pressed && !inRect(x, y, CONTINUE)) pressed = false;
+      if (pressed && !inRect(x, y, L.cont)) pressed = false;
     },
     pointerUp(x, y) {
-      if (pressed && inRect(x, y, CONTINUE) && !left) {
+      if (pressed && inRect(x, y, L.cont) && !left) {
         pressed = false;
         left = true;
         sfx.play('click');

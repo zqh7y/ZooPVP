@@ -90,7 +90,7 @@ export function heart(ctx: Ctx, x: number, y: number, size: number, color?: stri
     ctx.bezierCurveTo(16, 26, 42, 14, 42, -8);
     ctx.bezierCurveTo(42, -34, 8, -38, 0, -14);
     ctx.closePath();
-    ctx.fill();
+    ctx.stroke();
   });
 }
 
