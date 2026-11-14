@@ -19,7 +19,7 @@ export const STEEL_LO = '#87929f';
 const WOOD = '#a97c52';
 const WOOD_HI = '#c99c70';
 const WOOD_LO = '#7c5737';
-const GRAIN = '#8c6440';
+const GRAIN = '#97704a';
 /** leather wraps */
 const LEATHER = '#3f3630';
 const LEATHER_HI = '#6a5a4e';

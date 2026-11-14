@@ -963,16 +963,12 @@ function drawFrog(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw:
   else body(ctx);
 
   // the throat pulses while it sits and breathes
-  if (det && !q && !L && air < 0.05 && !tw && !ts && !stony && (pose.mood === 'idle' || pose.mood === 'scared')) {
+  if (det && !q && !L && air < 0.05 && pose.wind < 0.02 && pose.strike < 0.02 && !stony && (pose.mood === 'idle' || pose.mood === 'scared')) {
     const th = Math.pow(Math.max(0, Math.sin(t * 2.1 + look.seed * 1.7)), 3) * (pose.mood === 'scared' ? 1.3 : 1);
-    if (th > 0.06) {
-      const sx = bx + 0.74 * brx + 0.03 * th;
-      const sy = by + 0.1 + 0.04 * th;
-      ellipse(ctx, sx, sy, 0.09 + 0.09 * th, 0.07 + 0.08 * th, 0.3);
-      fillStroke(ctx, P.belly, lw * 0.8, P.line);
-      ellipse(ctx, sx - 0.05 * th, sy - 0.04 * th, 0.04 * th, 0.02 * th, -0.4);
-      ctx.fillStyle = WHITE;
-      ctx.fill();
+    if (th > 0.12) {
+      // the sac swells out under the chin, past the outline
+      ellipse(ctx, bx + 0.84 * brx + 0.05 * th, by + 0.04 + 0.05 * th, 0.06 + 0.13 * th, 0.05 + 0.11 * th, 0.4);
+      fillStroke(ctx, P.belly, lw * 0.9, P.line);
     }
   }
 

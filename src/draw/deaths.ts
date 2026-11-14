@@ -55,6 +55,8 @@ const INFLATE = DEATH_PAYOFF.pop;
 const ZIP = 0.8; // the let-go balloon zips about this long
 const ZIP_LEGS = 7;
 const MANY = 26; // more bodies than this at once: the rest go the quick ways
+const SPECK = 1.2; // a body drawn smaller than this radius (px) is just a speck
+const SMALL = 5; // below this radius a body is drawn at this size and scaled down
 
 /** Picks the death a blow has earned: mostly the weapon's, sometimes the pet's own. */
 export function chooseDeath(pet: PetType, hit: DeathHit): DeathKind {
@@ -526,9 +528,23 @@ export class Deaths {
     if (b.kind === 'slice') return this.drawSlice(ctx, b);
     if (b.pose.alpha <= 0.01) return;
     const r = b.r * b.scale;
+    if (r < SPECK) {
+      // far off in the sky it is only a speck of its own colour
+      ctx.globalAlpha = b.pose.alpha;
+      ctx.fillStyle = BODY[b.look.pet][b.look.team][0];
+      ctx.beginPath();
+      ctx.arc(b.x + b.ox, b.y + b.oy - r, Math.max(0.7, r), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      return;
+    }
     ctx.save();
     ctx.translate(b.x + b.ox, b.y + b.oy + (b.kind === 'spin' ? b.c : 0));
-    petArt.drawPet(ctx, b.look, b.pose, r);
+    if (r < SMALL) {
+      // the pet art wants some room for its details: draw it at a workable size and shrink the picture
+      ctx.scale(r / SMALL, r / SMALL);
+      petArt.drawPet(ctx, b.look, b.pose, SMALL);
+    } else petArt.drawPet(ctx, b.look, b.pose, r);
     if (b.kind === 'shatter' && b.a > 0) {
       // the crack runs from the head down: a dark line with a lit lower-right lip
       const top = -petArt.headTop(b.look, r) * 0.92;

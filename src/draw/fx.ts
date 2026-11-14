@@ -632,8 +632,8 @@ export class Fx {
       const k = r.age / r.life;
       const e = easeOutCubic(k);
       const rad = r.r0 + (r.r1 - r.r0) * e;
-      ctx.globalAlpha = (1 - k * k) * (layer === UNDER ? 0.75 : 0.9);
-      ctx.lineWidth = Math.max(1, (r.r1 - r.r0) * 0.1 * (1 - k) + 1);
+      ctx.globalAlpha = (1 - k * k) * (layer === UNDER ? 0.5 : 0.75);
+      ctx.lineWidth = Math.min(3, (r.r1 - r.r0) * 0.08 * (1 - k)) + 0.8;
       ctx.strokeStyle = r.color;
       ctx.beginPath();
       if (layer === UNDER) ctx.ellipse(r.x, r.y, rad, rad * GROUND_RING, 0, 0, TAU);
@@ -810,17 +810,23 @@ function markSprites(): HTMLCanvasElement[] {
     c.fillRect(-rx, -rx, rx * 2, rx * 2);
     c.restore();
   };
-  // a frog's landing: two dark smudges where its feet dug in, and a few blades torn up
+  // a frog's landing: a soft skid where the grass was scuffed, a few blades torn up along it
   for (let v = 0; v < 3; v++) {
     make((c) => {
-      soft(c, 32, 16, 26, 11, 0.22);
-      for (const side of [-1, 1]) {
-        const x = 32 + side * (9 + rnd() * 4);
-        const y = 16 + (rnd() - 0.5) * 6;
-        blob(c, x, y, 7 + rnd() * 3, 3.2 + rnd(), '#0a1a0e', 0.45);
-        blob(c, x - 1.2, y - 1.2, 4, 1.6, '#06100a', 0.35);
+      soft(c, 32, 16, 24, 9, 0.2);
+      soft(c, 28 + rnd() * 8, 16 + (rnd() - 0.5) * 3, 13, 4.5, 0.18);
+      c.globalAlpha = 0.3;
+      c.strokeStyle = '#06100a';
+      c.lineWidth = 1;
+      c.beginPath();
+      for (let i = 0; i < 5; i++) {
+        const x = 16 + rnd() * 32;
+        const y = 12 + rnd() * 8;
+        c.moveTo(x, y);
+        c.lineTo(x + 4 + rnd() * 4, y + (rnd() - 0.5) * 2);
       }
-      for (let i = 0; i < 4; i++) blob(c, 14 + rnd() * 36, 6 + rnd() * 20, 1.4, 1, '#cfe3b4', 0.55);
+      c.stroke();
+      for (let i = 0; i < 3; i++) blob(c, 18 + rnd() * 28, 9 + rnd() * 14, 1.1, 0.7, '#a9c690', 0.4);
     });
   }
   // a divot: a dark hole with its lit lower lip, and the clod of turf it threw

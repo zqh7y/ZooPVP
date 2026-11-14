@@ -183,6 +183,27 @@ function poses(ctx: Ctx, t: number) {
       ['limp 1', l, { limp: 1 }],
       [pet === 'ant' ? 'snap' : 'wind', l, pet === 'ant' ? { strike: 1 } : { wind: 1 }],
     ]);
+    // the high classes through the same poses: their metal must go with them
+    const s5 = mk(pet, 6, half as Team, { weapon: 'knife', weaponLevel: 6 });
+    const s7 = mk(pet, 7, half as Team, { weapon: 'spear', weaponLevel: 7 });
+    row(680, [
+      ['S idle', s5, {}],
+      ['SSS idle', s7, {}],
+      ['SSS strike', s7, { strike: 1, aimY: -0.8 }],
+      ['SSS puff 1', s7, { puff: 1 }],
+      ['S stone', s5, { stone: 1 }],
+      ['S limp', s5, { limp: 0.8 }],
+    ]);
+    // small things: a blink, eyes on the aim, a helmet in a spin
+    const hat = mk(pet, 4, half as Team, { helmet: 5, sneakers: 6, weapon: 'shield', weaponLevel: 4 });
+    row(820, [
+      ['blink', l, { t: 0.05 + (((l.seed * 0.618) % 1) + 1) * -2.9 + 3.7 * 3 }],
+      ['aim up', bat, { wind: 0.6, aimY: -1 }],
+      ['aim down', bat, { wind: 0.6, aimY: 1 }],
+      ['geared', hat, {}],
+      ['shove', hat, { strike: 1 }],
+      ['geared spin', hat, { spin: 2.2, hop: 0.5 }],
+    ]);
   });
 }
 
@@ -239,7 +260,7 @@ const SIZE: Record<string, [number, number, string]> = {
   lineup: [1000, 640, SLATE],
   battle: [460, 520, PITCH[0]],
   gear: [1000, 720, SLATE],
-  poses: [1000, 560, SLATE],
+  poses: [1000, 900, SLATE],
   items: [720, 480, SLATE],
   perf: [460, 820, PITCH[0]],
   live: [460, 520, PITCH[0]],

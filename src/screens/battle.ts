@@ -36,11 +36,11 @@ const NAME = TYPE.body - 1;
 const COUNT = TYPE.h2 - 4;
 const TUG = { x: BAR.x, y: BAR.y + BAR.h + 6, w: BAR.w, h: 4 };
 const PIPS = 10; // the roll meter: one roll is this many gold pips
-const METER = { x: W / 2 - 60, y: TUG.y + TUG.h + 9, w: 120, h: 4 };
+const METER = { x: W / 2 - 44, y: TUG.y + TUG.h + 9, w: 88, h: 4 };
 const TOKEN = { x: METER.x - 15, y: METER.y + METER.h / 2, size: 14 };
 const STREAK = { x: METER.x + METER.w + 10, y: METER.y + METER.h / 2 };
 const BANNER_W = { short: 250, long: 330 };
-const HP_BAR = { minW: 10, h: 2, lift: 6, show: 1.6 }; // the thin health bar over a fighter that was just hit
+const HP_BAR = { minW: 9, h: 2, lift: 6, show: 1.1 }; // the thin health bar over a fighter that was just hit
 const STAR = 14; // a knock-out star on its way to the roll meter
 const COUNT_SCALE = 2; // the 3, 2, 1 is the title size, this much larger
 const MID = project(ARENA.w / 2, ARENA.h / 2); // the centre spot: the countdown and the banners sit over it
@@ -55,7 +55,8 @@ const STREAK_SHOW = 1.6;
 const END_HOLD = 1.6; // from the deciding blow to the result screen
 const MAX_STARS = 10; // knock-out stars in the air at once
 const BONK_GAP = 0.16; // at least this long between two full bat impacts
-const CROWDED = 70; // more fighters than this: the small hit sparks are left out
+const CROWDED = 70; // more fighters than this: the small hit sparks and rings are left out
+const QUIET = 36; // fewer fighters than this: even a frog's landing gets its little ring
 const GLOW = 1.3; // the floodlights swell this long on the deciding blow
 
 // ---- the ball (arena px and seconds; only for the eye)
@@ -236,7 +237,7 @@ export function createBattleScreen(app: App): BattleScreen {
       case 'land': {
         const u = b.units[ev.unit];
         const p = projectInto(at, ev.x, ev.y);
-        fx.ring(p.x, p.y, COLOR.white, u.r * 0.5 * p.s, (u.r * 1.5 + 2) * p.s, 0.22, 0);
+        if (b.alive[0] + b.alive[1] <= QUIET) fx.ring(p.x, p.y, COLOR.white, u.r * 0.5 * p.s, (u.r * 1.4 + 2) * p.s, 0.2, 0);
         if (scuffs >= 1) {
           scuffs--;
           fx.groundMark('scuff', p.x, p.y + 1, u.r * 2.4 * p.s, frand(10, 14));
@@ -286,17 +287,17 @@ export function createBattleScreen(app: App): BattleScreen {
     const y = gy - r; // the middle of its body
     const sound = { x, enemy: b.units[ev.from].team === 1 };
     const dir = screenAngle(ev.dir);
+    const crowded = b.alive[0] + b.alive[1] > CROWDED;
     const c = Math.cos(dir);
     const sn = Math.sin(dir);
     if (ev.blocked) {
       // a clang on the shield: a bright ring and sparks thrown back
       sfx.play('block', 0, sound);
-      fx.ring(x - c * r, y - sn * r, COLOR.white, r * 0.4, r * 1.5 + 5 * s, 0.2);
+      if (!crowded) fx.ring(x - c * r, y - sn * r, COLOR.white, r * 0.4, r * 1.5 + 5 * s, 0.2);
       fx.burst(x - c * r, y - sn * r, { colors: [UI.accent, COLOR.white], n: 4, speed: 170 * s, size: 4 * s, life: 0.28, gravity: 300, shape: 'star', dir: dir + Math.PI, spread: 0.9 });
     } else if (ev.weapon === 'bat') {
       // the big one
       sfx.play('batHit', 0, sound);
-      fx.ring(x, y, COLOR.white, r * 0.6, r * 2.2 + 10 * s, 0.26);
       fx.dust(gx + c * r, gy, 3, r * 0.4 + 3 * s, true);
       ball.kick(ev.x, ev.y, ev.dir, ev.heavy ? 1 : 0.7);
       if (divots >= 1) {
@@ -308,6 +309,7 @@ export function createBattleScreen(app: App): BattleScreen {
       // so a big fight stays readable and keeps its pace
       if (bonkT <= 0) {
         bonkT = BONK_GAP * (1 + (b.alive[0] + b.alive[1]) / 40);
+        fx.ring(x, y, COLOR.white, r * 0.6, r * 2.2 + 10 * s, 0.26);
         fx.impact(x + c * r * 0.4, y, (v.r * 0.8 + (ev.heavy ? 15 : 10)) * s, UI.accent, 0.18);
         fx.kick(dir, ev.heavy ? 6 : 3.5);
         fx.shake(ev.heavy ? 3 : 1.5, 0.15);
@@ -325,9 +327,9 @@ export function createBattleScreen(app: App): BattleScreen {
       fx.streak(x - c * (r + 20 * s), y - sn * (r + 20 * s), dir, r * 2 + 34 * s, COLOR.white, 2.5 * s, 0.16);
       fx.burst(x + c * r, y + sn * r, { colors: [COLOR.white], n: 2, speed: 150 * s, size: 2.5 * s, life: 0.2, gravity: 0, dir, spread: 0.4 });
     } else if (ev.weapon === 'shield') {
-      fx.ring(x, y, COLOR.white, r * 0.5, r * 1.6 + 4 * s, 0.2);
+      if (!crowded) fx.ring(x, y, COLOR.white, r * 0.5, r * 1.6 + 4 * s, 0.2);
       fx.dust(gx + c * r, gy, 2, r * 0.3 + 3 * s, true);
-    } else if (b.alive[0] + b.alive[1] <= CROWDED) {
+    } else if (!crowded) {
       fx.burst(x, y, { colors: [COLOR.white, COLOR.goldLight], n: 2, speed: 90 * s, size: 2.5 * s, life: 0.2, gravity: 200, dir, spread: 0.8 });
     }
     if (ev.stun) sfx.play('stun', 0, sound);
@@ -365,8 +367,8 @@ export function createBattleScreen(app: App): BattleScreen {
     if (ev.last) {
       // the blow that decides it: the world slows down to watch, the floodlights swell, the crowd erupts
       fx.slowMo(0.2, 0.85);
-      fx.flash(UI.accent, 0.22, 0.5);
-      fx.flash(COLOR.white, 0.35, 0.18);
+      fx.flash(UI.accent, 0.14, 0.5);
+      fx.flash(COLOR.white, 0.3, 0.16);
       fx.speedLines(x, y - u.r * p.s, COLOR.white, 1);
       fx.shake(9, 0.9);
       fx.ring(x, y - u.r * p.s, UI.accent, u.r * p.s, 130, 0.6);
@@ -477,7 +479,7 @@ export function createBattleScreen(app: App): BattleScreen {
       rollsPopped++;
       fullT = 0.7;
       sfx.play('rollEarned', 0, { x: METER.x + METER.w / 2 });
-      fx.floatText(METER.x + METER.w / 2, METER.y + 24, '+1 ROLL', UI.accent, TYPE.body);
+      fx.floatText(METER.x + METER.w / 2, METER.y + 46, '+1 ROLL', UI.accent, TYPE.body);
       fx.ring(TOKEN.x, TOKEN.y, UI.accent, 6, 22, 0.4, 2);
       fx.burst(METER.x + METER.w / 2, METER.y + METER.h / 2, { colors: [UI.accent, COLOR.white], n: 6, speed: 150, size: 3, life: 0.4, gravity: 220, shape: 'star', screen: true });
     }
@@ -541,10 +543,10 @@ export function createBattleScreen(app: App): BattleScreen {
       const x = sx[u.id];
       const top = sy[u.id] - petArt.headTop(v.look, r) - u.hop * r * (u.pet === 'frog' ? 1.5 : 0.8);
       if (show) {
-        const w = Math.round(Math.max(HP_BAR.minW, u.r * 1.6) * s);
+        const w = Math.round(Math.max(HP_BAR.minW, u.r * 1.4) * s);
         const bx = Math.round(x - w / 2);
         const by = Math.round(top - HP_BAR.lift * s);
-        ctx.globalAlpha = clamp((HP_BAR.show - u.sinceHit) / 0.35, 0, 1);
+        ctx.globalAlpha = clamp((HP_BAR.show - u.sinceHit) / 0.3, 0, 1);
         ctx.fillStyle = COLOR.ink;
         ctx.fillRect(bx - 1, by - 1, w + 2, HP_BAR.h + 2);
         ctx.fillStyle = TEAM[u.team].main;
@@ -579,17 +581,25 @@ export function createBattleScreen(app: App): BattleScreen {
     ctx.fillRect(BAR.x + BAR.w - TICK, BAR.y, TICK, BAR.h);
     // the clock sits in a darker well in the middle; gold, and solid gold once it is overtime
     const hot = overtime && winner === null;
-    ctx.fillStyle = UI.bg;
+    ctx.fillStyle = hot ? UI.accent : UI.bg;
     ctx.fillRect(CLOCK.x, CLOCK.y, CLOCK.w, CLOCK.h);
     if (hot) {
-      ctx.globalAlpha = 0.75 + 0.25 * Math.sin(t * 6);
-      ctx.fillStyle = UI.accent;
-      ctx.fillRect(CLOCK.x, CLOCK.y, CLOCK.w, CLOCK.h);
-      ctx.globalAlpha = 1;
+      // a lit top edge and a shaded bottom one: the gold block stands out of the bar
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+      ctx.fillRect(CLOCK.x, CLOCK.y, CLOCK.w, 1);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
+      ctx.fillRect(CLOCK.x, CLOCK.y + CLOCK.h - 2, CLOCK.w, 2);
     }
     ctx.restore();
-    const secs = Math.max(0, Math.ceil(FIGHT.timeLimit - Math.max(0, b.time)));
-    label(ctx, `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`, W / 2, cy + 1, TYPE.h2 - 3, { color: hot ? UI.accentText : UI.accent, weight: 700, track: 0.5 });
+    const left = Math.max(0, FIGHT.timeLimit - Math.max(0, b.time));
+    const secs = Math.ceil(left);
+    // in overtime every second ticks with a small nudge of the digits
+    const tick = hot ? 1 + 0.1 * Math.max(0, 1 - (secs - left) * 7) : 1;
+    ctx.save();
+    ctx.translate(W / 2, cy + 1);
+    ctx.scale(tick, tick);
+    label(ctx, `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`, 0, 0, TYPE.h2 - 3, { color: hot ? UI.accentText : UI.accent, weight: 700, track: 0.5 });
+    ctx.restore();
 
     // you: tick, name, fighters left
     const inL = BAR.x + TICK + 10;
@@ -631,7 +641,11 @@ export function createBattleScreen(app: App): BattleScreen {
       ctx.save();
       ctx.translate(MID.x, MID.y);
       ctx.scale(s, s);
-      ctx.globalAlpha = clamp(k * 8, 0, 1) * clamp((1 - k) * 4, 0, 1);
+      const a = clamp(k * 8, 0, 1) * clamp((1 - k) * 4, 0, 1);
+      // a soft shadow cast down and to the right, away from the floodlights
+      ctx.globalAlpha = a * 0.35;
+      label(ctx, String(countN), 1.5, 2.5, TYPE.title, { color: UI.bg, weight: 700 });
+      ctx.globalAlpha = a;
       label(ctx, String(countN), 0, 0, TYPE.title, { color: countN === 1 ? UI.accent : UI.text, weight: 700, onPitch: true });
       ctx.restore();
     }
