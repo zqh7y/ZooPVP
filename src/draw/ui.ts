@@ -343,7 +343,8 @@ export function countBadge(ctx: Ctx, count: number, x: number, y: number, k = 1)
   const h = 18 * k;
   rr(ctx, x - w / 2, y - h / 2, w, h, h / 2);
   fillStroke(ctx, COLOR.gold, Math.max(1.5, 2.2 * k));
-  label(ctx, s, x, y + 0.5 * k, 12 * k, { color: COLOR.ink, lw: 0 });
+  // a line width of 0 is ignored by canvas (the last width stays), so the outline is the bubble's own gold
+  label(ctx, s, x, y + 0.5 * k, TYPE.small * k, { color: COLOR.ink, outline: COLOR.gold, lw: 1 });
 }
 
 // ------------------------------------------------------------------ battle bars
@@ -374,17 +375,17 @@ export function namePlate(ctx: Ctx, r: Rect, o: { name: string; trophies: number
   const mid = r.y + (r.h - 4) / 2;
   const nameY = r.h > 44 ? mid - 9 : mid;
   ctx.font = `${TYPE.body}px ${FONT}`;
-  const maxW = r.w - pad - 14 - (r.h <= 44 ? tag + 8 : 0);
+  const maxW = r.w - pad - 14 - (tag ? tag + 8 : 0);
   const k = Math.min(1, maxW / ctx.measureText(o.name).width);
   inkText(ctx, o.name, ax, nameY, TYPE.body * k, { align: al });
   if (r.h > 44) inkText(ctx, `${shortNumber(o.trophies)} trophies`, ax, mid + 11, TYPE.small, { align: al, color: COLOR.textInk });
   if (o.bot) {
-    const bx = right ? r.x + r.w - pad - tag : r.x + pad;
-    const by = r.h > 44 ? r.y - 9 : r.y + 4;
-    const bxx = r.h > 44 ? (right ? r.x + r.w - pad - tag : r.x + pad) : right ? r.x + 18 : r.x + r.w - pad - tag + 6;
-    rr(ctx, r.h > 44 ? bx : bxx, by, tag, 20, 8);
+    // the tag sits on the name's line, at the end away from the name, so it never covers it
+    const bx = right ? r.x + 18 : r.x + r.w - pad - tag + 6;
+    const by = nameY - 10;
+    rr(ctx, bx, by, tag, 20, 8);
     fillStroke(ctx, COLOR.bot, S.line.thin + 0.5);
-    label(ctx, 'BOT', (r.h > 44 ? bx : bxx) + tag / 2, by + 10.5, TYPE.small, { lw: 3 });
+    label(ctx, 'BOT', bx + tag / 2, by + 10.5, TYPE.small, { lw: 3 });
   }
 }
 

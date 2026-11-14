@@ -1,0 +1,279 @@
+import { music, sfx } from '../audio/engine';
+import { Fx } from '../draw/fx';
+import { swords } from '../draw/icons';
+import { petArt } from '../draw/pets';
+import { restPose, type PetLook } from '../draw/petTypes';
+import { classBadge, countBadge, namePlate, panel, pill } from '../draw/ui';
+import { makeOpponent } from '../logic/bots';
+import { frand, hashSeed, makeRng } from '../rng';
+import type { App, Screen } from '../screen';
+import { COLOR, S, TEAM, TYPE, W } from '../theme';
+import type { ArmySpec, Opponent } from '../types';
+import { armyPower } from '../data';
+import { circle, clamp, easeOutBack, easeOutCubic, label, starPath, type Ctx, type Rect } from '../util';
+
+// layout
+const PLATE_W = 320;
+const PLATE_H = 64;
+const OPP_PLATE: Rect = { x: (W - PLATE_W) / 2, y: 150, w: PLATE_W, h: PLATE_H };
+const OPP_ARMY_Y = 236;
+const ME_ARMY_Y = 706;
+const ME_PLATE: Rect = { x: (W - PLATE_W) / 2, y: 972, w: PLATE_W, h: PLATE_H };
+const SLOT_W = 58; // one squad's place in its row
+const SLOT_H = 76;
+const PET_R = 17;
+const PER_ROW = 8;
+const MAX_TILES = 16;
+const POWER_W = 200;
+const VS = { x: W / 2, y: 585, r: 64 };
+const RADAR = { x: W / 2, y: 520, r: 150 };
+const SEARCH_TEXT_Y = 760;
+const TAP_Y = 1090;
+
+// timing
+const SEARCH_MIN = 1.5;
+const SEARCH_MAX = 3;
+const PING_EVERY = 1;
+const SLIDE = 0.35; // the plates and armies slide in
+const VS_AT = 0.3; // after the opponent is found
+const VS_POP = 0.25;
+const ROW_STAGGER = 0.04;
+const HOLD = 2.5; // then on to the fight
+const TAP_AFTER = 0.6; // a tap skips once this much is shown
+
+/** Matchmaking: a radar search, then the opponent (a bot), both armies and a VS slam. */
+export function createMatch(app: App): Screen {
+  const fx = new Fx();
+  let t = 0;
+  let searchFor = 2;
+  let found = -1; // time the opponent was found, -1 while searching
+  let pingT = 0;
+  let opponent: Opponent | null = null;
+  let mine: ArmySpec = { squads: [] };
+  let slammed = false;
+  let gone = false;
+  let down = false;
+
+  function start() {
+    if (gone || !opponent) return;
+    gone = true;
+    app.match = { opponent, army: mine, summary: null, result: null };
+    app.state.seed = (hashSeed(app.state.seed, 101) % 2147483646) + 1;
+    app.save();
+    app.go('battle');
+  }
+
+  function drawRadar(ctx: Ctx) {
+    const { x, y, r } = RADAR;
+    ctx.save();
+    circle(ctx, x, y, r);
+    ctx.fillStyle = COLOR.shade;
+    ctx.fill();
+    ctx.lineWidth = S.line.bold;
+    ctx.strokeStyle = TEAM[0].light;
+    ctx.stroke();
+    ctx.lineWidth = S.line.thin;
+    ctx.strokeStyle = TEAM[0].main;
+    for (const k of [0.33, 0.66]) {
+      circle(ctx, x, y, r * k);
+      ctx.stroke();
+    }
+    // the pulse rings out once a second
+    for (let i = 0; i < 2; i++) {
+      const p = ((t + i * 0.5) % PING_EVERY) / PING_EVERY;
+      ctx.globalAlpha = 1 - p;
+      circle(ctx, x, y, r * p);
+      ctx.lineWidth = S.line.ui;
+      ctx.strokeStyle = TEAM[0].light;
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    // the sweep and a few blips it lights up
+    const a = t * 3.4;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.arc(x, y, r - 2, a - 0.7, a);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(165, 214, 255, 0.28)';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r);
+    ctx.lineWidth = S.line.ui;
+    ctx.strokeStyle = COLOR.white;
+    ctx.stroke();
+    for (let i = 0; i < 5; i++) {
+      const ba = i * 2.4 + 0.6;
+      const br = r * (0.3 + ((i * 37) % 60) / 100);
+      const since = (((a - ba) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+      const glow = clamp(1 - since / 2.5, 0, 1);
+      if (glow <= 0) continue;
+      ctx.globalAlpha = glow;
+      circle(ctx, x + Math.cos(ba) * br, y + Math.sin(ba) * br, 5 + 3 * glow);
+      ctx.fillStyle = TEAM[1].main;
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    circle(ctx, x, y, 8);
+    ctx.fillStyle = COLOR.white;
+    ctx.fill();
+    ctx.restore();
+    const dots = '.'.repeat(1 + (Math.floor(t * 2.5) % 3));
+    label(ctx, `Searching for an opponent${dots}`, W / 2 - 160, SEARCH_TEXT_Y, TYPE.h2, { align: 'left' });
+  }
+
+  /** One army on a dark panel: up to two rows of its squads as idle pets, and its power. */
+  function drawArmy(ctx: Ctx, army: ArmySpec, y0: number, team: 0 | 1, age: number) {
+    const squads = [...army.squads].sort((a, b) => b.level - a.level || b.count - a.count).slice(0, MAX_TILES);
+    const rows = Math.max(1, Math.ceil(squads.length / PER_ROW));
+    const dir = team === 1 ? -1 : 1;
+    const pk = easeOutCubic(clamp(age / SLIDE, 0, 1));
+    const ph = rows * SLOT_H + S.barH + S.section;
+    ctx.save();
+    ctx.globalAlpha = pk;
+    panel(ctx, { x: S.pad * 2, y: y0 - S.pad, w: W - S.pad * 4, h: ph }, { tone: 'dark' });
+    ctx.restore();
+    for (let i = 0; i < squads.length; i++) {
+      const row = Math.floor(i / PER_ROW);
+      const inRow = Math.min(PER_ROW, squads.length - row * PER_ROW);
+      const col = i % PER_ROW;
+      const k = easeOutBack(clamp((age - i * ROW_STAGGER) / SLIDE, 0, 1));
+      if (k <= 0) continue;
+      const s = squads[i];
+      const x = W / 2 + (col - (inRow - 1) / 2) * SLOT_W;
+      const y = y0 + row * SLOT_H + SLOT_H - S.pad * 2 + dir * (1 - k) * 60;
+      const look: PetLook = { pet: s.pet, level: s.level, team, weapon: s.weapon, weaponLevel: s.weaponLevel, helmet: s.helmet, sneakers: s.sneakers, chili: s.chili, seed: i * 1.7 };
+      const pose = restPose();
+      pose.t = app.t + i * 0.37;
+      pose.face = team === 1 ? -1 : 1;
+      ctx.save();
+      ctx.globalAlpha = clamp(k, 0, 1);
+      ctx.translate(x, y);
+      petArt.drawShadow(ctx, look, PET_R, 0);
+      petArt.drawPet(ctx, look, pose, PET_R);
+      ctx.restore();
+      classBadge(ctx, s.level, x - SLOT_W / 2 + 12, y + 10, 0.8, app.t);
+      if (s.count > 1) countBadge(ctx, s.count, x + SLOT_W / 2 - 12, y + 10, 1);
+    }
+    const py = y0 + rows * SLOT_H + S.gap;
+    if (pk > 0) {
+      ctx.save();
+      ctx.globalAlpha = pk;
+      pill(ctx, { x: (W - POWER_W) / 2, y: py, w: POWER_W, h: S.barH }, { icon: (c, x, y, sz) => swords(c, x, y, sz, TEAM[team].main), text: `POWER ${armyPower(army.squads)}` });
+      ctx.restore();
+    }
+  }
+
+  function drawVs(ctx: Ctx, age: number) {
+    const p = clamp((age - VS_AT) / VS_POP, 0, 1);
+    if (p <= 0) return;
+    // falls from huge onto the screen
+    const s = p < 1 ? 3 - 2 * easeOutCubic(p) : 1 + 0.04 * Math.sin(age * 6);
+    ctx.save();
+    ctx.translate(VS.x, VS.y);
+    ctx.scale(s, s);
+    ctx.rotate(-0.08);
+    ctx.globalAlpha = Math.min(1, p * 2);
+    starPath(ctx, 0, 0, VS.r * 1.25, VS.r * 0.9, 12, age * 0.6);
+    ctx.fillStyle = COLOR.gold;
+    ctx.fill();
+    ctx.lineWidth = S.line.bold;
+    ctx.strokeStyle = COLOR.ink;
+    ctx.stroke();
+    circle(ctx, 0, 0, VS.r * 0.82);
+    ctx.fillStyle = COLOR.vermilion;
+    ctx.fill();
+    ctx.stroke();
+    label(ctx, 'VS', 0, 2, TYPE.title, { lw: 8 });
+    ctx.restore();
+  }
+
+  return {
+    enter() {
+      fx.clear();
+      t = pingT = 0;
+      found = -1;
+      slammed = gone = down = false;
+      searchFor = frand(SEARCH_MIN, SEARCH_MAX);
+      mine = app.inv.army();
+      opponent = makeOpponent(app.state, makeRng(hashSeed(app.state.seed, app.state.matches, 7)));
+      music.set('search');
+      sfx.play('search');
+    },
+    leave() {
+      fx.clear();
+    },
+    update(dt) {
+      t += dt;
+      fx.update(dt);
+      if (found < 0) {
+        pingT += dt;
+        if (pingT >= PING_EVERY) {
+          pingT -= PING_EVERY;
+          sfx.play('search');
+        }
+        if (t >= searchFor) {
+          found = t;
+          sfx.play('found');
+          fx.flash(COLOR.white, 0.35, 0.25);
+        }
+        return;
+      }
+      const age = t - found;
+      if (!slammed && age >= VS_AT + VS_POP) {
+        slammed = true;
+        sfx.play('vsSlam');
+        fx.shake(10, 0.35);
+        fx.ring(VS.x, VS.y, COLOR.white, VS.r, VS.r * 2.6, 0.45);
+        fx.burst(VS.x, VS.y, { colors: [COLOR.gold, COLOR.goldLight, COLOR.white], n: 26, speed: 520, size: 8, life: 0.7, gravity: 400, shape: 'star' });
+      }
+      if (age >= HOLD) start();
+    },
+    render(ctx) {
+      app.arena.drawDusk(ctx, app.t);
+      ctx.save();
+      ctx.translate(fx.camera.x, fx.camera.y);
+      fx.drawUnder(ctx);
+      if (found < 0) {
+        drawRadar(ctx);
+        namePlate(ctx, ME_PLATE, { name: app.state.name, trophies: app.state.trophies, team: 0 });
+      } else if (opponent) {
+        const age = t - found;
+        const k = easeOutCubic(clamp(age / SLIDE, 0, 1));
+        ctx.save();
+        ctx.translate(0, -(1 - k) * 160);
+        namePlate(ctx, OPP_PLATE, { name: opponent.name, trophies: opponent.trophies, team: 1, bot: true });
+        ctx.restore();
+        drawArmy(ctx, opponent.army, OPP_ARMY_Y, 1, age);
+        drawArmy(ctx, mine, ME_ARMY_Y, 0, age);
+        ctx.save();
+        ctx.translate(0, (1 - k) * 160);
+        namePlate(ctx, ME_PLATE, { name: app.state.name, trophies: app.state.trophies, team: 0 });
+        ctx.restore();
+        drawVs(ctx, age);
+        if (age > TAP_AFTER) {
+          ctx.save();
+          ctx.globalAlpha = 0.65 + 0.35 * Math.sin(app.t * 5);
+          label(ctx, 'TAP TO FIGHT!', W / 2, TAP_Y, TYPE.body, { color: COLOR.textDim });
+          ctx.restore();
+        }
+      }
+      fx.drawOver(ctx);
+      ctx.restore();
+      fx.drawScreen(ctx);
+    },
+    pointerDown() {
+      down = true;
+    },
+    pointerUp() {
+      if (down && found >= 0 && t - found > TAP_AFTER) {
+        sfx.play('click');
+        start();
+      }
+      down = false;
+    },
+    pointerCancel() {
+      down = false;
+    },
+  };
+}
