@@ -1,103 +1,138 @@
-import { W, H, COLOR, FIELD, STAGE, TEAM, FONT } from '../theme';
-import { rr, circle, ellipse, poly, fillStroke, seeded, hash } from '../util';
+import { W, H, STAGE, TEAM, FONT, UI } from '../theme';
+import { ARENA } from '../data';
+import { PITCH, project, quad, circlePath, depthScale, screenY } from './camera';
+import { circle, ellipse, rr, seeded, hash } from '../util';
 import type { Ctx } from '../util';
 
 /*
- * The stadium: a football ground seen from above for the battle (the pitch is exactly FIELD), its night
- * version, the side-on pitch-level strip of the lobby and the lobby's quiet background. Everything that
- * does not move is painted once in build() into offscreen canvases; a frame only copies those and draws
- * the little spectators, a few flags and camera flashes from cached sprites.
+ * The stadium on a floodlit night, seen through the match camera (camera.ts): the pitch is the bright calm
+ * centre and everything round it falls off into darkness. One key light, from the floodlights at the upper
+ * left: highlights sit up-left, shade and cast shadows fall down-right. Everything that does not move is
+ * painted once in build(); a frame copies those layers, the crowd's cached strips (a strip is one section of
+ * a row, so a section can rise and wave as one) and a few phone flashes.
+ *
+ * World units are arena pixels: ax across, ay deep (0 = far end line, ARENA.h = near end line), z up.
  */
 
-// art colours of this module
-const INK = COLOR.ink;
-const GRASS_A = '#86cd68'; // the two mowing stripes: close on purpose
-const GRASS_B = '#7cc55f';
-const APRON = '#4b9a56'; // the darker turf round the pitch
-const CONCRETE = '#d9d1e3';
-const CONCRETE_DARK = '#aca3be';
-/** Seat colours by team: [a row, the next row]. */
-const SEAT = [
-  ['#3558a8', '#2d4b94'],
-  ['#9b4160', '#863553'],
-];
-const ROOF = '#3d3a6b';
-const ROOF_ALT = '#434073';
-const ROOF_LIGHT = '#55518f';
-const ROOF_DARK = '#2e2b52';
-const STEEL = '#a3a8c6';
-const LAMP = '#fff2a8';
-const GLASS = '#cfeaff';
-const CREAM = COLOR.paper;
-const NAVY = COLOR.indigoDark;
-const GOLD = COLOR.gold;
-const SHADE = 'rgba(27, 21, 34, 0.2)';
-const LOBBY_A = '#1d3f38';
-const LOBBY_B = '#1a3933';
+// ------------------------------------------------------------------ palette (one gold, the rest slate)
+
+const BG = UI.bg;
+const GOLD = UI.accent;
+const GOLD_DIM = '#b8930f';
+const LAMP = '#fff7d6';
+const WHITE = '#f4f6f8';
+const POST_SHADE = '#a9b2bd';
+const EDGE = 'rgba(5, 8, 12, 0.8)';
+const GRASS = ['#3b7848', '#367142'];
+const APRON = '#21402b';
+const TREAD = '#192028';
+const TREAD_ALT = '#161c24';
+const RISER = '#10151b';
+const LIP = '#2a333f';
+const STAIR = '#212933';
+const WALL = '#0d1117';
+const ROOF_TOP = '#141a21';
+const FASCIA = '#212934';
+const STEEL = '#262e38';
+const STEEL_LIT = '#6a7686';
+const LED = '#0a0d12';
+const LED_TOP = '#3d4755';
+const CROWD = ['#0c1015', '#11161d', '#171d26'];
+const RIM = 'rgba(255, 236, 186, 0.5)';
+const RIM_BACK = 'rgba(255, 238, 196, 0.62)';
+const SHADOW = 'rgba(3, 8, 5, 0.3)';
+const HOLE = '#06080b';
 
 /** Where the pets stand in the lobby strip. */
 export const STAGE_GROUND_Y = STAGE.y + STAGE.h - 46;
 
-// ------------------------------------------------------------------ the plan of the ground (screen px)
+// ------------------------------------------------------------------ the 3D plan
 
-const FX = FIELD.x;
-const FY = FIELD.y;
-const FW = FIELD.w;
-const FH = FIELD.h;
-const FR = FX + FW;
-const FB = FY + FH;
-const MX = W / 2;
-const MY = FY + FH / 2;
-/** The ring of advertising boards (its outer edge) and the apron inside it. */
-const RING = { x: FX - 18, y: FY - 28, w: FW + 36, h: FH + 56 };
-const APR = { x: FX - 9, y: FY - 12, w: FW + 18, h: FH + 24 };
-const SIDE_W = RING.x; // the room of a side stand
-/** Stairs through the end stands. */
-const AISLES = [60, 165, 375, 480];
-/** Where the rows of the end stands stand (the feet of the fans). */
-const TOP_ROWS = [119, 133, 147, 161];
-const BOT_ROWS = [1061, 1078, 1095, 1136, 1153, 1170];
-const BALCONY = { y: 1097, h: 17 }; // the wall between the two tiers of the bottom stand
-/** The side stands, cut by two walkways and the halfway buildings. */
-const SIDE_SEGS = [
-  [166, 374],
-  [386, 586],
-  [614, 814],
-  [826, 1036],
-];
-const DUGOUT = { y0: 526, y1: 674 };
-/** Floodlight towers: x, foot y, lamp-head y. */
-const TOWERS = [
-  [19, 168, 122],
-  [W - 19, 168, 122],
-  [19, 1112, 1064],
-  [W - 19, 1112, 1064],
-];
-const GOAL_W = 88;
-const GOAL_H = 9; // how far the crossbar is lifted on screen
-const GOAL_D = 22; // how deep the net is
-/** The layers over the crowd (roof, towers, banners) and in front of the fighters. */
-const TOP_H = 174;
-const BOT_Y = 1040;
-const FRONT_Y = FB - 30;
-const FRONT_H = 62;
-
-// the lobby strip, in its own pixels (0 is STAGE.y)
-const SG = STAGE_GROUND_Y - STAGE.y; // the ground line
-const S_ROWS = [84, 99, 114, 129];
-const S_WALL = 129; // top of the board wall
-const S_GRASS = 154;
-const S_BACK_H = 132;
-const S_FRONT_Y = 124;
-
-// ------------------------------------------------------------------ helpers
+const AW = ARENA.w;
+const AH = ARENA.h;
+const MX = PITCH.cx;
+/** Screen px per unit of height, per unit of depth scale (the camera looks down at a steep angle). */
+const ELEV = 0.6;
+/** Tall things lean away from the middle a little, as through a wide lens. */
+const LEAN = 0.00022;
 
 type P = [number, number];
 
+/** A world point (ax, ay on the ground, z up) on screen. */
+function pt(ax: number, ay: number, z = 0): P {
+  const s = depthScale(ay);
+  const x = MX + (ax - AW / 2) * s;
+  return [x + (x - MX) * z * LEAN, screenY(ay) - z * s * ELEV];
+}
+
+// goals
+const GOAL_HW = 50;
+const GOAL_Z = 44;
+const GOAL_ZB = 34;
+const GOAL_D = 28;
+// boards: the foot sits BOARD_IN out from the line, the face leans back BOARD_LEAN
+const BOARD_IN = 22;
+const BOARD_LEAN = 12;
+const BOARD_Z = 22;
+const FAR_BOARD = -40;
+const SIDE_Y0 = -40;
+const SIDE_Y1 = AH + 36;
+const NEAR_BOARD = AH + 36;
+const DUGOUT_GAP = [292, 528];
+// the far stand: row k's front edge, height and ends
+const FAR_ROWS = 8;
+const FAR_STEP = 13;
+const farEdge = (k: number) => -60 - FAR_STEP * k;
+const farZ = (k: number) => 26 + 10 * k;
+const farX0 = (k: number) => -110 + 5 * k;
+const farX1 = (k: number) => AW + 110 - 5 * k;
+const FAR_AISLES = [95, AW - 95];
+const VOMS: [number, number, number][] = [
+  [3, FAR_AISLES[0] + 14, FAR_AISLES[0] + 46],
+  [3, FAR_AISLES[1] - 46, FAR_AISLES[1] - 14],
+];
+const ROOF_Y = -172;
+const ROOF_Z = 128;
+// the side stands: tier j's front edge (left side; the right side mirrors) and height
+const SIDE_TIERS = 3;
+const SIDE_STEP = 13;
+const sideEdge = (j: number) => -36 - SIDE_STEP * j;
+const sideZ = (j: number) => 14 + 9 * j;
+const SIDE_A0 = -62;
+const SIDE_A1 = 960;
+const SIDE_WALKS = [250, 560];
+const TUNNEL = [396, 426];
+// the floodlight towers
+const TOWER_Z = 290;
+const TOWER_AT: P[] = [
+  [-52, -56],
+  [AW + 52, -56],
+];
+const TOWER_BOX = { w: 150, h: 220, dx: 75, dy: 80 };
+// the near stand, in screen px
+const NEAR_TOP = Math.floor(pt(0, NEAR_BOARD + 14)[1]);
+const NEAR_AISLE = 150;
+const nearSpread = (y: number) => 1 + (y - NEAR_TOP) / 520;
+// the overlay strips
+const TOP_H = 150;
+const BOT_Y = 990;
+const FRONT_Y = 910;
+const FRONT_H = 76;
+
+// the lobby strip, in its own pixels (0 is STAGE.y)
+const SG = STAGE_GROUND_Y - STAGE.y;
+const S_ROWS = [40, 55, 70, 85, 100, 115];
+const S_BACK_H = 122;
+const S_FRONT_Y = 114;
+
+const WORDS = ['ZOOPVP', 'GO PETS', 'ZOO CUP', 'ROAR!', 'PAWS UP', 'HOP HOP'];
+
+// ------------------------------------------------------------------ small helpers
+
 function layer(w: number, h: number, ratio: number, paint: (c: Ctx) => void): HTMLCanvasElement {
   const cv = document.createElement('canvas');
-  cv.width = Math.ceil(w * ratio);
-  cv.height = Math.ceil(h * ratio);
+  cv.width = Math.max(1, Math.ceil(w * ratio));
+  cv.height = Math.max(1, Math.ceil(h * ratio));
   const c = cv.getContext('2d')!;
   c.scale(ratio, ratio);
   c.lineJoin = 'round';
@@ -106,29 +141,55 @@ function layer(w: number, h: number, ratio: number, paint: (c: Ctx) => void): HT
   return cv;
 }
 
+function shape(c: Ctx, pts: P[]) {
+  c.beginPath();
+  c.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) c.lineTo(pts[i][0], pts[i][1]);
+  c.closePath();
+}
+
+function fillShape(c: Ctx, pts: P[], color: string | CanvasGradient) {
+  shape(c, pts);
+  c.fillStyle = color;
+  c.fill();
+}
+
+function seg(c: Ctx, a: P, b: P, color: string, w: number) {
+  c.beginPath();
+  c.moveTo(a[0], a[1]);
+  c.lineTo(b[0], b[1]);
+  c.strokeStyle = color;
+  c.lineWidth = w;
+  c.stroke();
+}
+
+/** A flat rectangle of the world at height z. */
+const flat = (ax0: number, ay0: number, ax1: number, ay1: number, z = 0): P[] => [pt(ax0, ay0, z), pt(ax1, ay0, z), pt(ax1, ay1, z), pt(ax0, ay1, z)];
+/** An upright face standing on the ground segment (ax0, ay0)-(ax1, ay1), from z0 to z1. */
+const wall = (ax0: number, ay0: number, ax1: number, ay1: number, z0: number, z1: number): P[] => [pt(ax0, ay0, z0), pt(ax1, ay1, z0), pt(ax1, ay1, z1), pt(ax0, ay0, z1)];
+
 function word(c: Ctx, s: string, x: number, y: number, px: number, color: string) {
-  c.font = `${px}px ${FONT}`;
+  c.font = `700 ${px}px ${FONT}`;
   c.textAlign = 'center';
   c.textBaseline = 'middle';
   c.fillStyle = color;
-  c.fillText(s, x, y + px * 0.07);
+  c.fillText(s, x, y + px * 0.04);
 }
 
-/** A white bar with an ink outline through the points (goal frames, poles). */
-function bar(c: Ctx, pts: number[], w: number, color = '#ffffff') {
-  c.beginPath();
-  c.moveTo(pts[0], pts[1]);
-  for (let i = 2; i < pts.length; i += 2) c.lineTo(pts[i], pts[i + 1]);
-  c.lineWidth = w + 3;
-  c.strokeStyle = INK;
-  c.stroke();
-  c.lineWidth = w;
-  c.strokeStyle = color;
-  c.stroke();
+/** A white tube (posts, poles): a dark edge, the shaded body, a highlight up-left. */
+function rod(c: Ctx, a: P, b: P, w: number) {
+  seg(c, a, b, EDGE, w + 2);
+  seg(c, a, b, POST_SHADE, w);
+  const o = w * 0.2;
+  seg(c, [a[0] - o, a[1] - o], [b[0] - o, b[1] - o], WHITE, w * 0.5);
 }
 
-/** The threads of a net stretched over a four-cornered patch. */
-function netQuad(c: Ctx, p0: P, p1: P, p2: P, p3: P, nu: number, nv: number) {
+/** A net over a four-cornered patch: a faint veil and a fine mesh. */
+function net(c: Ctx, q: P[], nu: number, nv: number) {
+  shape(c, q);
+  c.fillStyle = 'rgba(230, 236, 242, 0.07)';
+  c.fill();
+  const [p0, p1, p2, p3] = q;
   c.beginPath();
   for (let i = 1; i < nu; i++) {
     const k = i / nu;
@@ -140,373 +201,415 @@ function netQuad(c: Ctx, p0: P, p1: P, p2: P, p3: P, nu: number, nv: number) {
     c.moveTo(p0[0] + (p3[0] - p0[0]) * k, p0[1] + (p3[1] - p0[1]) * k);
     c.lineTo(p1[0] + (p2[0] - p1[0]) * k, p1[1] + (p2[1] - p1[1]) * k);
   }
+  c.strokeStyle = 'rgba(232, 238, 244, 0.38)';
+  c.lineWidth = 0.7;
   c.stroke();
 }
 
-/** Every marking of a football pitch, in solid white (the caller fades the whole drawing). */
-function pitchLines(c: Ctx, x: number, y: number, w: number, h: number, lw: number) {
-  const u = w / 68; // px per metre
-  const cx = x + w / 2;
-  const cy = y + h / 2;
-  const i = lw / 2;
+/** Every marking of the pitch, through the camera, in solid white (the caller fades it). */
+function markings(c: Ctx, lw: number) {
+  const u = AW / 68; // px per metre
   const r = 9.15 * u;
   c.strokeStyle = '#ffffff';
   c.fillStyle = '#ffffff';
   c.lineWidth = lw;
   c.lineJoin = 'miter';
-  c.lineCap = 'butt';
-  c.strokeRect(x + i, y + i, w - lw, h - lw);
-  c.beginPath();
-  c.moveTo(x, cy);
-  c.lineTo(x + w, cy);
+  shape(c, quad(0, 0, AW, AH));
   c.stroke();
-  circle(c, cx, cy, r);
+  const a = project(0, AH / 2);
+  const b = project(AW, AH / 2);
+  seg(c, [a.x, a.y], [b.x, b.y], '#ffffff', lw);
+  circlePath(c, AW / 2, AH / 2, r, 0, Math.PI * 2, 64);
   c.stroke();
-  circle(c, cx, cy, lw * 1.4);
+  circlePath(c, AW / 2, AH / 2, 2.6, 0, Math.PI * 2, 12);
   c.fill();
-  for (const s of [1, -1]) {
-    const ey = s === 1 ? y + i : y + h - i;
-    const pw = 40.3 * u;
-    const pd = 16.5 * u;
-    const gw = 18.3 * u;
-    const gd = 5.5 * u;
-    const spot = 11 * u;
+  const box = (w: number, d: number, y0: number, dir: number) => {
+    const p = [project(AW / 2 - w / 2, y0), project(AW / 2 - w / 2, y0 + dir * d), project(AW / 2 + w / 2, y0 + dir * d), project(AW / 2 + w / 2, y0)];
     c.beginPath();
-    c.moveTo(cx - pw / 2, ey);
-    c.lineTo(cx - pw / 2, ey + s * pd);
-    c.lineTo(cx + pw / 2, ey + s * pd);
-    c.lineTo(cx + pw / 2, ey);
-    c.moveTo(cx - gw / 2, ey);
-    c.lineTo(cx - gw / 2, ey + s * gd);
-    c.lineTo(cx + gw / 2, ey + s * gd);
-    c.lineTo(cx + gw / 2, ey);
+    c.moveTo(p[0].x, p[0].y);
+    for (let i = 1; i < 4; i++) c.lineTo(p[i].x, p[i].y);
     c.stroke();
-    circle(c, cx, ey + s * spot, lw * 1.2);
+  };
+  const pd = 16.5 * u;
+  const sp = 11 * u;
+  const k = Math.asin((pd - sp) / r);
+  for (const far of [true, false]) {
+    const y0 = far ? 0 : AH;
+    const dir = far ? 1 : -1;
+    box(40.32 * u, pd, y0, dir);
+    box(18.32 * u, 5.5 * u, y0, dir);
+    circlePath(c, AW / 2, y0 + dir * sp, 2.3, 0, Math.PI * 2, 12);
     c.fill();
-    const a = Math.acos((pd - spot) / r);
-    c.beginPath();
-    c.arc(cx, ey + s * spot, r, s * (Math.PI / 2) - a, s * (Math.PI / 2) + a);
+    if (far) circlePath(c, AW / 2, sp, r, k, Math.PI - k, 24);
+    else circlePath(c, AW / 2, AH - sp, r, Math.PI + k, Math.PI * 2 - k, 24);
     c.stroke();
   }
-  const ca = 1.7 * u;
   const q = Math.PI / 2;
   const corners: [number, number, number][] = [
-    [x + i, y + i, 0],
-    [x + w - i, y + i, q],
-    [x + w - i, y + h - i, q * 2],
-    [x + i, y + h - i, q * 3],
+    [0, 0, 0],
+    [AW, 0, q],
+    [AW, AH, q * 2],
+    [0, AH, q * 3],
   ];
-  for (const [px, py, a0] of corners) {
-    c.beginPath();
-    c.arc(px, py, ca, a0, a0 + q);
+  for (const [x, y, a0] of corners) {
+    circlePath(c, x, y, 10, a0, a0 + q, 8);
     c.stroke();
   }
   c.lineJoin = 'round';
-  c.lineCap = 'round';
 }
 
-// ------------------------------------------------------------------ advertising boards
-
-const BOARD = [
-  { bg: NAVY, fg: CREAM },
-  { bg: CREAM, fg: COLOR.vermilion },
-  { bg: GOLD, fg: INK },
-  { bg: COLOR.jade, fg: CREAM },
-];
-
-/** A row of boards: [word, style, width] one after another from x. */
-function boardRow(c: Ctx, x: number, y: number, h: number, cells: [string, number, number][], px: number) {
-  let cx = x;
-  for (const [s, st, w] of cells) {
-    c.fillStyle = BOARD[st].bg;
-    c.fillRect(cx, y, w, h);
-    c.fillStyle = 'rgba(255, 255, 255, 0.28)';
-    c.fillRect(cx, y, w, Math.max(1.5, h * 0.14));
-    c.fillStyle = 'rgba(27, 21, 34, 0.16)';
-    c.fillRect(cx, y + h - Math.max(1.5, h * 0.16), w, Math.max(1.5, h * 0.16));
-    if (s) word(c, s, cx + w / 2, y + h / 2, px, BOARD[st].fg);
-    cx += w;
-    c.fillStyle = INK;
-    c.fillRect(cx - 1, y, 2, h);
-  }
-}
-
-/** A column of plain boards down a touchline. */
-function boardColumn(c: Ctx, x: number, w: number, y0: number, y1: number, skip0: number, skip1: number) {
-  const n = 14;
-  const step = (y1 - y0) / n;
-  for (let i = 0; i < n; i++) {
-    const y = y0 + i * step;
-    c.fillStyle = BOARD[[0, 2, 1, 0, 3, 1][i % 6]].bg;
-    c.fillRect(x, y, w, step);
-    c.fillStyle = 'rgba(255, 255, 255, 0.3)';
-    c.fillRect(x, y, 1.5, step);
-    c.fillStyle = INK;
-    c.fillRect(x, y + step - 1, w, 2);
-  }
-  if (skip1 > skip0) {
-    c.fillStyle = INK;
-    c.fillRect(x - 2, skip0, w + 4, skip1 - skip0);
-  }
-}
-
-// ------------------------------------------------------------------ the spectators
-
-const KINDS = 6; // bear, cat, bunny, frog, panda, chick
-const TONES = 4; // blue shirt, red shirt, cream shirt + blue scarf, cream shirt + red scarf
-const POSES = 3; // watching, arms up, scarf held up
-const FUR = ['#c98d5e', '#b9b3c2', '#fff1dc', '#7ed36f', '#ffffff', '#ffd95a'];
-/** Sprite sizes: side stands, top stand, bottom stand and lobby. */
-const SIZES = [12.5, 15, 17.5];
-const FOOT = 2.5; // room under the feet in a sprite cell
-const cellW = (s: number) => Math.ceil(s * 1.5 + 6);
-const cellH = (s: number) => Math.ceil(s * 1.5 + 7);
+// ------------------------------------------------------------------ the crowd
 
 interface Fan {
-  x0: number; // where its sprite goes
-  y0: number;
-  w: number;
-  h: number;
-  b: number; // its first sprite (the watching pose)
-  ph: number;
-  r: number; // how soon it joins a cheer
-  idle: number;
-  cheer: number;
-  jump: number;
-  hx: number; // its head, for the camera flashes
-  hy: number;
+  x: number; // screen x of its middle
+  y: number; // screen y of its feet (the tread it stands on)
+  s: number; // size
+  kind: number; // the ears: bear, cat, bunny, frog, round, chick
+  tone: number;
+  scarf: number; // team, or -1
+  back: boolean; // seen from behind (the near stand)
+  phone: boolean;
+  up: boolean; // raises its arms in a cheer
 }
 
-interface Flag {
+interface Strip {
   x: number;
   y: number;
-  team: number;
+  w: number;
+  h: number;
+  idle: HTMLCanvasElement;
+  cheer: HTMLCanvasElement;
   ph: number;
+  delay: number;
+  jump: number;
 }
 
-/** One tiny animal fan: cx is its middle, by its feet, s its size. */
-function fanSprite(c: Ctx, kind: number, tone: number, pose: number, cx: number, by: number, s: number) {
-  const team = TEAM[tone & 1];
-  const shirt = tone < 2 ? team.main : CREAM;
-  const scarf = tone < 2 ? '#ffffff' : team.main;
-  const fur = FUR[kind];
-  const lw = Math.max(1.3, s * 0.1);
-  const hr = s * 0.36;
-  const bw = s * 0.8;
-  const bh = s * 0.44;
-  const hy = by - bh - hr * 0.6;
-  if (pose > 0) {
-    for (const d of [-1, 1]) {
-      c.beginPath();
-      c.moveTo(cx + d * bw * 0.36, by - bh * 0.7);
-      c.lineTo(cx + d * s * 0.5, hy - hr * 0.95);
-      c.lineWidth = s * 0.17 + lw * 2;
-      c.strokeStyle = INK;
-      c.stroke();
-      c.lineWidth = s * 0.17;
-      c.strokeStyle = fur;
-      c.stroke();
-    }
+/** Adds a closed sub-path, always clockwise, so the overlapping parts of one silhouette never cancel. */
+function polyCW(c: Ctx, p: number[]) {
+  const n = p.length / 2;
+  let a = 0;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    a += p[i * 2] * p[j * 2 + 1] - p[j * 2] * p[i * 2 + 1];
   }
-  rr(c, cx - bw / 2, by - bh, bw, bh, s * 0.2);
-  fillStroke(c, shirt, lw);
-  // ears
-  if (kind === 0 || kind === 4) {
-    for (const d of [-1, 1]) {
-      circle(c, cx + d * hr * 0.74, hy - hr * 0.72, hr * 0.38);
-      fillStroke(c, kind === 4 ? INK : fur, lw);
-    }
-  } else if (kind === 1) {
-    for (const d of [-1, 1]) {
-      poly(c, [cx + d * hr * 0.98, hy - hr * 0.3, cx + d * hr * 0.86, hy - hr * 1.42, cx + d * hr * 0.16, hy - hr * 0.86]);
-      fillStroke(c, fur, lw);
-    }
-  } else if (kind === 2) {
-    for (const d of [-1, 1]) {
-      ellipse(c, cx + d * hr * 0.42, hy - hr * 1.42, hr * 0.27, hr * 0.74, d * 0.16);
-      fillStroke(c, fur, lw);
-    }
-  } else if (kind === 5) {
-    poly(c, [cx - hr * 0.3, hy - hr * 0.86, cx, hy - hr * 1.5, cx + hr * 0.3, hy - hr * 0.86]);
-    fillStroke(c, fur, lw);
+  for (let k = 0; k < n; k++) {
+    const i = a >= 0 ? k : n - 1 - k;
+    if (k === 0) c.moveTo(p[i * 2], p[i * 2 + 1]);
+    else c.lineTo(p[i * 2], p[i * 2 + 1]);
   }
-  circle(c, cx, hy, hr);
-  fillStroke(c, fur, lw);
-  // the scarf round the neck
-  c.fillStyle = scarf;
-  c.fillRect(cx - bw * 0.34, hy + hr * 0.78, bw * 0.68, s * 0.15);
-  // the face
-  const er = Math.max(0.75, s * 0.058);
-  let ex = hr * 0.42;
-  let ey = hy + hr * 0.06;
-  if (kind === 3) {
-    ex = hr * 0.56;
-    ey = hy - hr * 0.72;
-    for (const d of [-1, 1]) {
-      circle(c, cx + d * ex, ey, hr * 0.42);
-      fillStroke(c, fur, lw);
-    }
-  }
-  c.fillStyle = INK;
+  c.closePath();
+}
+
+function oval(c: Ctx, x: number, y: number, rx: number, ry: number, rot: number) {
+  c.moveTo(x + Math.cos(rot) * rx, y + Math.sin(rot) * rx);
+  c.ellipse(x, y, rx, ry, rot, 0, Math.PI * 2);
+}
+
+const headY = (f: Fan) => f.y - f.s * 0.5 - f.s * 0.33 * 0.7;
+
+/** The outline of one fan (head, ears, shoulders, raised arms) as one path. */
+function silPath(c: Ctx, f: Fan, pose: number, ox: number, oy: number) {
+  const s = f.s;
+  const x = f.x + ox;
+  const by = f.y + oy;
+  const hr = s * 0.33;
+  const hy = headY(f) + oy;
+  c.beginPath();
+  oval(c, x, by - s * 0.1, s * 0.48, s * 0.42, 0);
+  oval(c, x, hy, hr, hr, 0);
   for (const d of [-1, 1]) {
-    circle(c, cx + d * ex, ey, kind === 4 ? er * 2 : er);
-    c.fill();
+    if (f.kind === 0) oval(c, x + d * hr * 0.72, hy - hr * 0.72, hr * 0.36, hr * 0.36, 0);
+    else if (f.kind === 1) polyCW(c, [x + d * hr * 0.95, hy - hr * 0.2, x + d * hr * 0.8, hy - hr * 1.42, x + d * hr * 0.12, hy - hr * 0.84]);
+    else if (f.kind === 2) oval(c, x + d * hr * 0.42, hy - hr * 1.28, hr * 0.7, hr * 0.24, Math.PI / 2 + d * 0.18);
+    else if (f.kind === 3) oval(c, x + d * hr * 0.55, hy - hr * 0.72, hr * 0.42, hr * 0.42, 0);
   }
-  if (kind === 5) {
-    poly(c, [cx - hr * 0.26, hy + hr * 0.24, cx + hr * 0.26, hy + hr * 0.24, cx, hy + hr * 0.62]);
-    c.fillStyle = '#ff9a3c';
-    c.fill();
-  } else if (pose > 0) {
-    circle(c, cx, hy + hr * 0.48, er * 1.25);
-    c.fill();
-  }
-  if (pose === 2) {
-    const sy = hy - hr - s * 0.36;
-    const sh = s * 0.22;
-    rr(c, cx - s * 0.62, sy, s * 1.24, sh, 1.5);
-    fillStroke(c, team.main, lw);
-    c.fillStyle = '#ffffff';
-    for (const k of [-0.36, 0, 0.36]) c.fillRect(cx + k * s - s * 0.07, sy + lw / 2, s * 0.14, sh - lw);
+  if (f.kind === 5) polyCW(c, [x - hr * 0.3, hy - hr * 0.84, x + hr * 0.06, hy - hr * 1.6, x + hr * 0.32, hy - hr * 0.84]);
+  const arms = pose === 1 ? [-1, 1] : f.phone ? [1] : [];
+  for (const d of arms) {
+    const sx = x + d * s * 0.34;
+    const sy = by - s * 0.36;
+    const hx = x + d * s * (pose === 1 ? 0.58 : 0.46);
+    const hy2 = hy - hr * (pose === 1 ? 1.55 : 1.05);
+    const rot = Math.atan2(hy2 - sy, hx - sx);
+    oval(c, (sx + hx) / 2, (sy + hy2) / 2, Math.hypot(hx - sx, hy2 - sy) / 2 + s * 0.05, s * 0.1, rot);
+    oval(c, hx, hy2, s * 0.12, s * 0.12, 0);
   }
 }
 
-/** A big supporters' flag on its pole (the pole's foot is at 8, 46 of a 52 x 50 cell). */
-function flagSprite(c: Ctx, team: number, frame: number) {
-  const tm = TEAM[team];
-  bar(c, [8, 46, 8, 6], 1.8, CREAM);
-  const a = frame ? 3 : -3;
-  const cloth = () => {
-    c.beginPath();
-    c.moveTo(9, 5);
-    c.quadraticCurveTo(20, 5 + a, 30, 5);
-    c.quadraticCurveTo(40, 5 - a, 48, 6);
-    c.lineTo(48, 24);
-    c.quadraticCurveTo(40, 23 - a, 30, 23);
-    c.quadraticCurveTo(20, 23 + a, 9, 23);
-    c.closePath();
-  };
-  cloth();
-  c.fillStyle = tm.main;
+/** One fan: a dark silhouette lit only at its rim (up-left), with its scarf and phone if it has them. */
+function paintFan(c: Ctx, f: Fan, pose: number) {
+  const s = f.s;
+  const k = Math.max(0.8, s / 15);
+  c.save();
+  c.beginPath();
+  c.rect(f.x - s * 1.4, f.y - s * 2.6, s * 2.8, s * (2.6 + (f.back ? 0.4 : 0.06)));
+  c.clip();
+  silPath(c, f, pose, 0, 0);
+  c.fillStyle = f.back ? RIM_BACK : RIM;
   c.fill();
   c.save();
   c.clip();
-  c.fillStyle = '#ffffff';
-  c.fillRect(9, 11.5, 40, 5.5);
-  c.fillStyle = tm.dark;
-  c.fillRect(9, 20, 40, 6);
+  silPath(c, f, pose, (f.back ? 0.3 : 0.8) * k, (f.back ? 1.25 : 0.95) * k);
+  c.fillStyle = CROWD[f.tone];
+  c.fill();
   c.restore();
-  cloth();
-  c.lineWidth = 2.2;
-  c.strokeStyle = INK;
-  c.stroke();
+  const hr = s * 0.33;
+  const hy = headY(f);
+  if (f.scarf >= 0) {
+    const tm = TEAM[f.scarf];
+    c.fillStyle = tm.dark;
+    c.fillRect(f.x - s * 0.3, hy + hr * 0.8, s * 0.6, s * 0.15);
+    c.fillStyle = tm.main;
+    c.fillRect(f.x - s * 0.3, hy + hr * 0.8, s * 0.6, s * 0.075);
+    if (!f.back) {
+      c.fillStyle = tm.dark;
+      c.fillRect(f.x + s * 0.06, hy + hr * 0.8, s * 0.12, s * 0.34);
+    }
+    if (pose === 1) {
+      const y = hy - hr * 1.55 - s * 0.1;
+      c.fillStyle = tm.dark;
+      c.fillRect(f.x - s * 0.58, y, s * 1.16, s * 0.18);
+      c.fillStyle = tm.main;
+      c.fillRect(f.x - s * 0.58, y, s * 1.16, s * 0.1);
+      c.fillStyle = 'rgba(255, 255, 255, 0.85)';
+      c.fillRect(f.x - s * 0.24, y, s * 0.1, s * 0.18);
+      c.fillRect(f.x + s * 0.14, y, s * 0.1, s * 0.18);
+    }
+  }
+  if (f.phone) {
+    const px = f.x + s * 0.46;
+    const py = hy - hr * 1.05 - s * 0.2;
+    if (f.back) {
+      circle(c, px, py, s * 0.24);
+      c.fillStyle = 'rgba(220, 232, 255, 0.14)';
+      c.fill();
+    }
+    c.fillStyle = f.back ? '#e6eef8' : '#05070a';
+    c.fillRect(px - s * 0.07, py - s * 0.1, s * 0.14, s * 0.2);
+  }
+  c.restore();
 }
 
-// ------------------------------------------------------------------ stadium pieces
+// ------------------------------------------------------------------ stadium props
 
-/** A floodlight tower seen from above: the foot at (x, by), the lamp head round (x, hy). */
-function tower(c: Ctx, x: number, by: number, hy: number) {
-  ellipse(c, x + 5, by + 2, 12, 5);
-  c.fillStyle = SHADE;
-  c.fill();
-  c.fillStyle = INK;
-  c.fillRect(x - 5.5, hy, 11, by - hy);
-  c.fillStyle = STEEL;
-  c.fillRect(x - 3, hy, 6, by - hy - 2.5);
-  c.strokeStyle = INK;
-  c.lineWidth = 1.3;
-  c.beginPath();
-  for (let y = hy + 12; y < by - 6; y += 8) {
-    c.moveTo(x - 3, y);
-    c.lineTo(x + 3, y + 8);
-    c.moveTo(x + 3, y);
-    c.lineTo(x - 3, y + 8);
+/** A goal standing on the end line; the far one faces us, the near one shows us its back. */
+function goal(c: Ctx, near: boolean) {
+  const x0 = AW / 2 - GOAL_HW;
+  const x1 = AW / 2 + GOAL_HW;
+  const yl = near ? AH : 0;
+  const yb = near ? AH + GOAL_D : -GOAL_D;
+  const L0 = pt(x0, yl, 0);
+  const L1 = pt(x0, yl, GOAL_Z);
+  const R0 = pt(x1, yl, 0);
+  const R1 = pt(x1, yl, GOAL_Z);
+  const B0 = pt(x0, yb, 0);
+  const B1 = pt(x0, yb, GOAL_ZB);
+  const C0 = pt(x1, yb, 0);
+  const C1 = pt(x1, yb, GOAL_ZB);
+  const frame = () => {
+    rod(c, L0, L1, 3.4);
+    rod(c, R0, R1, 3.4);
+    rod(c, L1, R1, 3.4);
+  };
+  const back = () => {
+    for (const [a, b] of [
+      [B0, B1],
+      [C0, C1],
+      [B1, C1],
+      [L1, B1],
+      [R1, C1],
+      [L0, B0],
+      [R0, C0],
+      [B0, C0],
+    ])
+      seg(c, a, b, 'rgba(170, 180, 192, 0.85)', 1.3);
+  };
+  const nets = () => {
+    net(c, [B1, C1, C0, B0], 18, 5);
+    net(c, [L0, L1, B1, B0], 4, 6);
+    net(c, [R0, R1, C1, C0], 4, 6);
+    net(c, [L1, R1, C1, B1], 18, 4);
+  };
+  if (near) {
+    frame();
+    back();
+    nets();
+  } else {
+    nets();
+    back();
+    frame();
   }
+}
+
+/** The goal's shadow on the grass, thrown down-right by the key light. */
+function goalShadow(c: Ctx, near: boolean) {
+  const x0 = AW / 2 - GOAL_HW;
+  const x1 = AW / 2 + GOAL_HW;
+  const yl = near ? AH : 0;
+  const yb = near ? AH + GOAL_D : -GOAL_D;
+  const sx = (z: number) => z * 0.3;
+  const sy = (z: number) => z * 0.2;
+  const pts: P[] = near
+    ? [pt(x0, yl), pt(x1, yl), pt(x1 + sx(GOAL_Z), yl + sy(GOAL_Z)), pt(x1 + sx(GOAL_ZB), yb + sy(GOAL_ZB)), pt(x0 + sx(GOAL_ZB), yb + sy(GOAL_ZB)), pt(x0, yb)]
+    : [pt(x0, yb), pt(x1, yb), pt(x1 + sx(GOAL_ZB), yb + sy(GOAL_ZB)), pt(x1 + sx(GOAL_Z), yl + sy(GOAL_Z)), pt(x0 + sx(GOAL_Z), yl + sy(GOAL_Z)), pt(x0, yl)];
+  fillShape(c, pts, 'rgba(3, 8, 5, 0.2)');
+  const a = pt(x0 + sx(GOAL_Z), yl + sy(GOAL_Z));
+  const b = pt(x1 + sx(GOAL_Z), yl + sy(GOAL_Z));
+  seg(c, pt(x0, yl), a, SHADOW, 2.6);
+  seg(c, pt(x1, yl), b, SHADOW, 2.6);
+  seg(c, a, b, SHADOW, 2.6);
+}
+
+/** A corner flag: a thin pole, a small gold flag flying outward, a shadow down-right. */
+function cornerFlag(c: Ctx, ax: number, ay: number, dir: number) {
+  const z = 30;
+  const b = pt(ax, ay);
+  const t = pt(ax, ay, z);
+  const sh = pt(ax + z * 0.3, ay + z * 0.2);
+  seg(c, b, sh, SHADOW, 1.8);
+  fillShape(c, [sh, [sh[0] + dir * 7, sh[1] + 1], pt(ax + z * 0.22, ay + z * 0.15)], SHADOW);
+  ellipse(c, b[0] + 1, b[1] + 0.5, 3, 1.3);
+  c.fillStyle = SHADOW;
+  c.fill();
+  rod(c, b, t, 1.6);
+  const m = pt(ax, ay, z - 9);
+  const tip: P = [t[0] + dir * 12, t[1] + 4];
+  shape(c, [t, tip, m]);
+  c.fillStyle = GOLD;
+  c.fill();
+  c.strokeStyle = EDGE;
+  c.lineWidth = 1;
   c.stroke();
-  rr(c, x - 9, by - 5, 18, 8, 3);
-  fillStroke(c, CONCRETE_DARK, 2.5);
-  rr(c, x - 17, hy - 13, 34, 26, 6);
-  fillStroke(c, ROOF_LIGHT, 3);
-  c.fillStyle = 'rgba(255, 255, 255, 0.16)';
-  c.fillRect(x - 13, hy - 10.5, 26, 3);
-  for (let i = 0; i < 3; i++)
+  fillShape(c, [[(t[0] + m[0]) / 2, (t[1] + m[1]) / 2], tip, m], GOLD_DIM);
+}
+
+/** A floodlight tower: a lattice mast and a bank of lamps turned toward the pitch, with its halo. */
+function tower(c: Ctx, at: P) {
+  const left = at[0] < AW / 2;
+  const f = pt(at[0], at[1], BOARD_Z + 2);
+  const h = pt(at[0], at[1], TOWER_Z);
+  const g = c.createRadialGradient(h[0], h[1], 2, h[0], h[1], 66);
+  g.addColorStop(0, 'rgba(255, 240, 180, 0.55)');
+  g.addColorStop(0.3, 'rgba(255, 228, 140, 0.16)');
+  g.addColorStop(1, 'rgba(255, 220, 120, 0)');
+  c.fillStyle = g;
+  c.fillRect(h[0] - 70, h[1] - 70, 140, 140);
+  const top = h[1] + 12;
+  const lerpX = (a: number, b: number, k: number) => a + (b - a) * k;
+  const rail = (side: number): [P, P] => [
+    [f[0] + side * 5, f[1]],
+    [h[0] + side * 2.6, top],
+  ];
+  const [l0, l1] = rail(-1);
+  const [r0, r1] = rail(1);
+  c.beginPath();
+  const n = 11;
+  for (let i = 0; i < n; i++) {
+    const a = i / n;
+    const b = (i + 1) / n;
+    c.moveTo(lerpX(l0[0], l1[0], a), lerpX(l0[1], l1[1], a));
+    c.lineTo(lerpX(r0[0], r1[0], b), lerpX(r0[1], r1[1], b));
+    c.moveTo(lerpX(r0[0], r1[0], a), lerpX(r0[1], r1[1], a));
+    c.lineTo(lerpX(l0[0], l1[0], b), lerpX(l0[1], l1[1], b));
+  }
+  c.strokeStyle = STEEL;
+  c.lineWidth = 1;
+  c.stroke();
+  seg(c, l0, l1, EDGE, 3.2);
+  seg(c, r0, r1, EDGE, 3.2);
+  seg(c, l0, l1, STEEL_LIT, 1.4);
+  seg(c, r0, r1, STEEL, 1.4);
+  c.save();
+  c.translate(h[0], h[1]);
+  c.rotate(left ? 0.2 : -0.2);
+  rr(c, -20, 10, 40, 3.5, 1.5);
+  c.fillStyle = STEEL;
+  c.fill();
+  rr(c, -19, -12, 38, 22, 4);
+  c.fillStyle = '#1a2028';
+  c.fill();
+  c.strokeStyle = EDGE;
+  c.lineWidth = 1.6;
+  c.stroke();
+  seg(c, [-15, -11.2], [15, -11.2], STEEL_LIT, 1.2);
+  seg(c, [-18.2, -8], [-18.2, 6], STEEL_LIT, 1.2);
+  for (let i = 0; i < 4; i++)
     for (let j = 0; j < 2; j++) {
-      circle(c, x - 10 + i * 10, hy - 3.5 + j * 9.5, 3.7);
-      fillStroke(c, LAMP, 1.5);
-      circle(c, x - 11 + i * 10, hy - 4.5 + j * 9.5, 1.2);
+      const x = -12 + i * 8;
+      const y = -5.5 + j * 9;
+      circle(c, x, y, 3.5);
+      c.fillStyle = GOLD;
+      c.fill();
+      circle(c, x, y, 2.5);
+      c.fillStyle = LAMP;
+      c.fill();
+      circle(c, x - 0.9, y - 0.9, 0.9);
       c.fillStyle = '#ffffff';
       c.fill();
     }
+  c.restore();
 }
 
-/** A corner flag: the pole stands at (x, y), the cloth flies to side d. */
-function cornerFlag(c: Ctx, x: number, y: number, d: number) {
-  ellipse(c, x + 3, y + 1, 6, 2.4);
-  c.fillStyle = SHADE;
-  c.fill();
-  poly(c, [x, y - 19, x + d * 11, y - 15, x, y - 11]);
-  fillStroke(c, COLOR.vermilion, 1.8);
-  bar(c, [x, y, x, y - 19], 1.6, GOLD);
-}
-
-/** A goal seen from above; top = the far goal (its mouth faces us), otherwise the near one (we see its back). */
-function goal(c: Ctx, top: boolean) {
-  const xl = MX - GOAL_W / 2;
-  const xr = MX + GOAL_W / 2;
-  const ly = top ? FY : FB;
-  const ty = ly - GOAL_H;
-  const by = top ? ly - GOAL_D : ly + GOAL_D - 2;
-  if (!top) {
-    bar(c, [xl, ly, xl, ty], 3);
-    bar(c, [xr, ly, xr, ty], 3);
+/** A team shelter by the right touchline: a glass roof over a row of seats in the team's colour. */
+function dugout(c: Ctx, ay0: number, ay1: number, team: number) {
+  const ax0 = AW + 8;
+  const ax1 = AW + 30;
+  const z = 17;
+  fillShape(c, [pt(ax0, ay0), pt(ax1, ay0), pt(ax1 + 6, ay1 + 4), pt(ax0 + 6, ay1 + 4)], 'rgba(3, 8, 5, 0.35)');
+  fillShape(c, flat(ax0, ay0, ax1, ay1, 0), '#151a20');
+  for (let a = ay0 + 7; a < ay1 - 4; a += 9.5) {
+    fillShape(c, flat(ax1 - 9, a - 3.4, ax1 - 3, a + 3.4, 5), TEAM[team].dark);
+    fillShape(c, wall(ax1 - 3, a - 3.4, ax1 - 3, a + 3.4, 5, 11), TEAM[team].main);
+    const [hx, hy] = pt(ax1 - 9, a, 9);
+    paintFan(c, { x: hx, y: hy + 3, s: 7.5, kind: Math.floor(hash(a) * 6), tone: 1, scarf: -1, back: false, phone: false, up: false }, 0);
   }
-  poly(c, [xl, ty, xr, ty, xr - 5, by, xl + 5, by]);
-  c.fillStyle = top ? 'rgba(255, 255, 255, 0.24)' : 'rgba(255, 255, 255, 0.14)';
-  c.fill();
-  c.strokeStyle = top ? 'rgba(255, 255, 255, 0.75)' : 'rgba(255, 255, 255, 0.6)';
-  c.lineWidth = 1;
-  netQuad(c, [xl, ty], [xr, ty], [xr - 5, by], [xl + 5, by], 14, top ? 3 : 5);
-  bar(c, [xl, ty, xl + 5, by, xr - 5, by, xr, ty], 1.4, '#e9e4f0');
-  if (top) bar(c, [xl, ly, xl, ty, xr, ty, xr, ly], 3);
-  else bar(c, [xl, ty, xr, ty], 3);
-}
-
-/** A team shelter by the touchline, seen from above. */
-function dugout(c: Ctx, y: number, team: number) {
-  for (let i = 0; i < 4; i++) {
-    circle(c, FR + 6.5, y + 10 + i * 12, 3.3);
-    fillStroke(c, FUR[(i * 2 + team) % KINDS], 1.3);
-  }
-  rr(c, FR + 8, y, 17, 56, 6);
-  fillStroke(c, GLASS, 2.4);
-  c.fillStyle = TEAM[team].main;
-  c.fillRect(FR + 18.5, y + 4, 4.5, 48);
-  c.strokeStyle = 'rgba(43, 31, 51, 0.4)';
+  fillShape(c, flat(ax0, ay0, ax1, ay1, z), 'rgba(150, 172, 196, 0.2)');
+  shape(c, flat(ax0, ay0, ax1, ay1, z));
+  c.strokeStyle = 'rgba(5, 8, 12, 0.7)';
   c.lineWidth = 1.2;
-  c.beginPath();
-  for (let i = 1; i < 4; i++) {
-    c.moveTo(FR + 9.5, y + i * 14);
-    c.lineTo(FR + 18, y + i * 14);
-  }
   c.stroke();
+  seg(c, pt(ax0, ay0, z), pt(ax0, ay1, z), 'rgba(255, 255, 255, 0.55)', 1);
+  seg(c, pt(ax0, ay0, z), pt(ax1, ay0, z), 'rgba(255, 255, 255, 0.35)', 1);
+  fillShape(c, wall(ax0, ay1, ax1, ay1, 0, z), '#1c232c');
+  seg(c, pt(ax0, ay1, z), pt(ax1, ay1, z), LIP, 1);
 }
 
-/** A strip of stairs through a stand. */
-function stairs(c: Ctx, x: number, y: number, h: number) {
-  c.fillStyle = INK;
-  c.fillRect(x - 6.5, y, 13, h);
-  c.fillStyle = CONCRETE;
-  c.fillRect(x - 4.5, y, 9, h);
-  c.fillStyle = 'rgba(27, 21, 34, 0.22)';
-  for (let sy = y + 3; sy < y + h; sy += 4.7) c.fillRect(x - 4.5, sy, 9, 1.4);
+/** A broadcast camera on its tripod on the left apron, with its operator. */
+function tvCamera(c: Ctx, ax: number, ay: number) {
+  fillShape(c, [pt(ax - 6, ay - 4), pt(ax + 10, ay - 4), pt(ax + 14, ay + 6), pt(ax - 2, ay + 6)], 'rgba(3, 8, 5, 0.3)');
+  const top = pt(ax, ay, 15);
+  for (const [dx, dy] of [
+    [-5, -5],
+    [5, -4],
+    [-1, 6],
+  ])
+    seg(c, pt(ax + dx, ay + dy), top, '#3a4350', 1);
+  const [hx, hy] = pt(ax - 13, ay, 0);
+  paintFan(c, { x: hx, y: hy, s: 12, kind: 0, tone: 2, scarf: -1, back: false, phone: false, up: false }, 0);
+  fillShape(c, flat(ax - 6, ay - 4, ax + 7, ay + 4, 22), '#3a4452');
+  fillShape(c, wall(ax - 6, ay + 4, ax + 7, ay + 4, 15, 22), '#1b2129');
+  seg(c, pt(ax - 6, ay - 4, 22), pt(ax + 7, ay - 4, 22), STEEL_LIT, 1);
+  const l = pt(ax + 9, ay, 18.5);
+  circle(c, l[0], l[1], 2.6);
+  c.fillStyle = '#0b0e12';
+  c.fill();
+  circle(c, l[0] - 0.6, l[1] - 0.6, 0.8);
+  c.fillStyle = 'rgba(200, 225, 255, 0.9)';
+  c.fill();
+  const tally = pt(ax - 4, ay - 2, 23.5);
+  circle(c, tally[0], tally[1], 0.9);
+  c.fillStyle = GOLD;
+  c.fill();
 }
 
-/** Mowing stripes that run away from the viewer (the lobby strip). */
-function perspectiveStripes(c: Ctx, y0: number, y1: number) {
-  c.fillStyle = GRASS_A;
-  c.fillRect(0, y0, W, y1 - y0);
-  c.fillStyle = GRASS_B;
-  const k = 1 + (y1 - y0) / 420;
-  for (let i = -9; i < 9; i += 2) poly(c, [MX + i * 44, y0, MX + (i + 1) * 44, y0, MX + (i + 1) * 44 * k, y1, MX + i * 44 * k, y1]), c.fill();
+/** LED scanlines over a board face. */
+function scanlines(c: Ctx, face: P[], y0: number, y1: number) {
+  c.save();
+  shape(c, face);
+  c.clip();
+  c.fillStyle = 'rgba(0, 0, 0, 0.32)';
+  for (let y = Math.floor(y0); y < y1; y += 2) c.fillRect(0, y + 1, W, 0.8);
+  c.restore();
 }
 
 // ------------------------------------------------------------------ the arena
@@ -516,6 +619,7 @@ export class Arena {
   private back?: HTMLCanvasElement;
   private topStrip?: HTMLCanvasElement;
   private botStrip?: HTMLCanvasElement;
+  private towers: { cv: HTMLCanvasElement; x: number; y: number }[] = [];
   private front?: HTMLCanvasElement;
   private night?: HTMLCanvasElement;
   private glow?: HTMLCanvasElement;
@@ -523,52 +627,71 @@ export class Arena {
   private stageBack?: HTMLCanvasElement;
   private stageFront?: HTMLCanvasElement;
   private lobby?: HTMLCanvasElement;
-  private sprites: HTMLCanvasElement[] = [];
-  private flagSprites: HTMLCanvasElement[] = [];
-  private fans: Fan[] = [];
-  private stageFans: Fan[] = [];
-  private flags: Flag[] = [];
+  private strips: Strip[] = [];
+  private stageStrips: Strip[] = [];
+  private heads: P[] = [];
+  private stageHeads: P[] = [];
+  private lamps: P[] = [];
   private cheerAmt = 0;
   private fontWait = false;
 
   /** Cache every static layer at the device pixel ratio. Call again when the ratio changes. */
   build(ratio: number) {
     this.ratio = ratio;
-    this.sprites = [];
-    for (const s of SIZES)
-      for (let k = 0; k < KINDS; k++)
-        for (let tn = 0; tn < TONES; tn++)
-          for (let p = 0; p < POSES; p++)
-            this.sprites.push(layer(cellW(s), cellH(s), ratio, (c) => fanSprite(c, k, tn, p, cellW(s) / 2, cellH(s) - FOOT, s)));
-    this.flagSprites = [];
-    for (let tm = 0; tm < 2; tm++) for (let f = 0; f < 2; f++) this.flagSprites.push(layer(52, 50, ratio, (c) => flagSprite(c, tm, f)));
-    this.placeFans();
+    this.buildCrowd();
     this.back = layer(W, H, ratio, (c) => this.paintBack(c));
-    this.topStrip = layer(W, TOP_H, ratio, (c) => this.paintTopStrip(c));
+    this.topStrip = layer(W, TOP_H, ratio, (c) => this.paintTop(c));
     this.botStrip = layer(W, H - BOT_Y, ratio, (c) => {
-      c.translate(0, -BOT_Y);
-      this.paintBotStrip(c);
+      const g = c.createLinearGradient(0, 0, 0, H - BOT_Y);
+      g.addColorStop(0, 'rgba(12, 16, 22, 0)');
+      g.addColorStop(1, 'rgba(12, 16, 22, 0.62)');
+      c.fillStyle = g;
+      c.fillRect(0, 0, W, H - BOT_Y);
+    });
+    this.lamps = TOWER_AT.map((a) => pt(a[0], a[1], TOWER_Z));
+    this.towers = TOWER_AT.map((a, i) => {
+      const x = Math.floor(this.lamps[i][0] - TOWER_BOX.dx);
+      const y = Math.floor(this.lamps[i][1] - TOWER_BOX.dy);
+      return {
+        x,
+        y,
+        cv: layer(TOWER_BOX.w, TOWER_BOX.h, ratio, (c) => {
+          c.translate(-x, -y);
+          tower(c, a);
+        }),
+      };
     });
     this.front = layer(W, FRONT_H, ratio, (c) => {
       c.translate(0, -FRONT_Y);
-      goal(c, false);
-      cornerFlag(c, FX + 2, FB - 2, -1);
-      cornerFlag(c, FR - 2, FB - 2, 1);
+      goal(c, true);
+      cornerFlag(c, 0, AH, -1);
+      cornerFlag(c, AW, AH, 1);
     });
-    this.night = layer(W, H, ratio, (c) => this.paintNight(c));
-    this.glow = layer(110, 110, ratio, (c) => {
-      const g = c.createRadialGradient(55, 55, 2, 55, 55, 55);
-      g.addColorStop(0, 'rgba(255, 244, 190, 0.85)');
-      g.addColorStop(0.3, 'rgba(255, 232, 150, 0.32)');
+    this.night = layer(W, H, ratio, (c) => {
+      c.fillStyle = 'rgba(5, 8, 12, 0.64)';
+      c.fillRect(0, 0, W, H);
+      c.globalCompositeOperation = 'destination-out';
+      shape(c, quad(0, 0, AW, AH));
+      c.fillStyle = 'rgba(0, 0, 0, 0.3)';
+      c.fill();
+    });
+    this.glow = layer(140, 140, ratio, (c) => {
+      const g = c.createRadialGradient(70, 70, 2, 70, 70, 70);
+      g.addColorStop(0, 'rgba(255, 240, 180, 0.8)');
+      g.addColorStop(0.25, 'rgba(255, 226, 140, 0.25)');
       g.addColorStop(1, 'rgba(255, 220, 120, 0)');
       c.fillStyle = g;
-      c.fillRect(0, 0, 110, 110);
+      c.fillRect(0, 0, 140, 140);
     });
-    this.spark = layer(18, 18, ratio, (c) => {
+    this.spark = layer(16, 16, ratio, (c) => {
+      const g = c.createRadialGradient(8, 8, 0, 8, 8, 8);
+      g.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
+      g.addColorStop(0.35, 'rgba(235, 242, 255, 0.35)');
+      g.addColorStop(1, 'rgba(235, 242, 255, 0)');
+      c.fillStyle = g;
+      c.fillRect(0, 0, 16, 16);
       c.fillStyle = '#ffffff';
-      poly(c, [9, 0, 10.6, 7.4, 18, 9, 10.6, 10.6, 9, 18, 7.4, 10.6, 0, 9, 7.4, 7.4]);
-      c.fill();
-      circle(c, 9, 9, 3.2);
+      polyCW(c, [8, 1.5, 8.8, 7.2, 14.5, 8, 8.8, 8.8, 8, 14.5, 7.2, 8.8, 1.5, 8, 7.2, 7.2]);
       c.fill();
     });
     this.stageBack = layer(W, S_BACK_H, ratio, (c) => this.paintStageBack(c));
@@ -579,7 +702,7 @@ export class Arena {
     this.lobby = layer(W, H, ratio, (c) => this.paintLobby(c));
     // the words on the boards need the game's font: paint again once it has arrived
     const fonts = typeof document !== 'undefined' ? document.fonts : undefined;
-    const face = `12px ${FONT.split(',')[0]}`;
+    const face = `700 12px ${FONT.split(',')[0]}`;
     if (fonts && !this.fontWait && !fonts.check(face)) {
       this.fontWait = true;
       fonts.load(face).then(
@@ -594,61 +717,40 @@ export class Arena {
     this.cheerAmt = Math.max(0, this.cheerAmt - dt * 0.9);
   }
 
-  /** Make the crowd jump for a moment (amount 0..1). */
+  /** Make the crowd rise and wave for a moment, phones flashing (amount 0..1). */
   cheer(amount: number) {
     this.cheerAmt = Math.min(1, Math.max(this.cheerAmt, amount));
   }
 
   /** The whole stadium behind the fighters, with the crowd. */
   drawBattle(ctx: Ctx, t: number) {
-    if (!this.back) this.build(this.ratio);
-    ctx.drawImage(this.back!, 0, 0, W, H);
-    this.drawFans(ctx, this.fans, t);
-    ctx.drawImage(this.topStrip!, 0, 0, W, TOP_H);
-    ctx.drawImage(this.botStrip!, 0, BOT_Y, W, H - BOT_Y);
-    this.drawFlags(ctx, t);
-    this.drawFlashes(ctx, t);
+    this.scene(ctx, t);
+    this.drawFlashes(ctx, this.heads, t, 5, 28);
   }
 
-  /** In front of the fighters: the near goal, the near corner flags, confetti while the crowd cheers. */
-  drawBattleFront(ctx: Ctx, t: number) {
+  /** In front of the fighters: only the near goal and the near corner flags. */
+  drawBattleFront(ctx: Ctx, _t: number) {
     if (!this.front) this.build(this.ratio);
     ctx.drawImage(this.front!, 0, FRONT_Y, W, FRONT_H);
-    const ch = this.cheerAmt;
-    if (ch > 0.03) {
-      ctx.globalAlpha = Math.min(1, ch * 1.4);
-      for (let i = 0; i < 28; i++) {
-        const side = i % 4;
-        const u = hash(i * 5.3);
-        const fall = (t * (60 + u * 50) + u * 400) % 150;
-        const sway = Math.sin(t * 5 + i) * 6;
-        // only along the edges of the pitch, never over the middle of the fight
-        const x = side === 0 ? 34 + u * 60 + sway : side === 1 ? W - 34 - u * 60 + sway : hash(i * 9.1) * W;
-        const y = side === 2 ? 150 + fall * 0.6 : side === 3 ? 960 + fall * 0.5 : hash(i * 2.7) * H * 0.9 + fall;
-        ctx.fillStyle = i % 3 === 0 ? GOLD : i % 3 === 1 ? TEAM[0].light : TEAM[1].light;
-        ctx.fillRect(x, y, 5, 3);
-      }
-      ctx.globalAlpha = 1;
-    }
   }
 
-  /** The same ground as a night match, floodlights on (matchmaking and result screens). */
+  /** The same ground with the lights at half (matchmaking and result screens sit on it). */
   drawDusk(ctx: Ctx, t: number) {
-    this.drawBattle(ctx, t);
+    this.scene(ctx, t);
     ctx.drawImage(this.front!, 0, FRONT_Y, W, FRONT_H);
     ctx.drawImage(this.night!, 0, 0, W, H);
     const op = ctx.globalCompositeOperation;
     ctx.globalCompositeOperation = 'lighter';
-    for (let i = 0; i < TOWERS.length; i++) {
-      ctx.globalAlpha = 0.86 + 0.14 * Math.sin(t * 4.1 + i * 1.7) * Math.sin(t * 2.3 + i);
-      ctx.drawImage(this.glow!, TOWERS[i][0] - 55, TOWERS[i][2] - 55, 110, 110);
+    for (let i = 0; i < this.lamps.length; i++) {
+      ctx.globalAlpha = 0.42 + 0.05 * Math.sin(t * 3.1 + i * 2);
+      ctx.drawImage(this.glow!, this.lamps[i][0] - 70, this.lamps[i][1] - 70, 140, 140);
     }
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = op;
-    this.drawFlashes(ctx, t + 3);
+    this.drawFlashes(ctx, this.heads, t + 7, 3, 10);
   }
 
-  /** The lobby strip on STAGE: a pitch-level view across the grass. Pets stand on STAGE_GROUND_Y. */
+  /** The lobby strip on STAGE: pitch level, across the grass to the stand. Pets stand on STAGE_GROUND_Y. */
   drawStage(ctx: Ctx, t: number) {
     if (!this.stageBack) this.build(this.ratio);
     ctx.save();
@@ -656,8 +758,9 @@ export class Arena {
     ctx.rect(STAGE.x, STAGE.y, STAGE.w, STAGE.h);
     ctx.clip();
     ctx.drawImage(this.stageBack!, STAGE.x, STAGE.y, W, S_BACK_H);
-    this.drawFans(ctx, this.stageFans, t);
+    this.drawStrips(ctx, this.stageStrips, t);
     ctx.drawImage(this.stageFront!, STAGE.x, STAGE.y + S_FRONT_Y, W, STAGE.h - S_FRONT_Y);
+    this.drawFlashes(ctx, this.stageHeads, t, 2, 8);
     ctx.restore();
   }
 
@@ -669,341 +772,436 @@ export class Arena {
 
   // ---------------------------------------------------------------- per frame
 
-  private drawFans(ctx: Ctx, fans: Fan[], t: number) {
+  private scene(ctx: Ctx, t: number) {
+    if (!this.back) this.build(this.ratio);
+    ctx.drawImage(this.back!, 0, 0, W, H);
+    this.drawStrips(ctx, this.strips, t);
+    ctx.drawImage(this.topStrip!, 0, 0, W, TOP_H);
+    for (const tw of this.towers) ctx.drawImage(tw.cv, tw.x, tw.y, TOWER_BOX.w, TOWER_BOX.h);
+    ctx.drawImage(this.botStrip!, 0, BOT_Y, W, H - BOT_Y);
+  }
+
+  private drawStrips(ctx: Ctx, strips: Strip[], t: number) {
+    const ch = this.cheerAmt;
     const q = this.ratio;
-    const ch = this.cheerAmt;
-    const amp = Math.min(1, ch * 1.6);
-    const spr = this.sprites;
-    const live = ch > 0.03;
-    for (let i = 0; i < fans.length; i++) {
-      const f = fans[i];
-      let dy: number;
-      let pose: number;
-      if (live && f.r < ch * 1.3) {
-        dy = -Math.abs(Math.sin(t * 9 + f.ph)) * f.jump * amp;
-        pose = f.cheer;
-      } else {
-        dy = Math.sin(t * 2.3 + f.ph) * 0.9;
-        pose = f.idle;
+    for (let i = 0; i < strips.length; i++) {
+      const st = strips[i];
+      let dy = Math.sin(t * 1.3 + st.ph * 2.3) * 0.7;
+      let img = st.idle;
+      if (ch > 0.02) {
+        const k = Math.min(1, Math.max(0, (ch * 1.3 - st.delay) * 2.5));
+        if (k > 0) {
+          dy -= Math.abs(Math.sin(t * 7 + st.ph)) * st.jump * k;
+          if (k > 0.25) img = st.cheer;
+        }
       }
-      ctx.drawImage(spr[f.b + pose], f.x0, Math.round((f.y0 + dy) * q) / q, f.w, f.h);
+      ctx.drawImage(img, st.x, Math.round((st.y + dy) * q) / q, st.w, st.h);
     }
   }
 
-  private drawFlags(ctx: Ctx, t: number) {
-    const ch = this.cheerAmt;
-    const speed = 2.4 + ch * 5;
-    for (let i = 0; i < this.flags.length; i++) {
-      const f = this.flags[i];
-      const a = Math.sin(t * speed + f.ph) * (0.24 + ch * 0.2) + 0.1;
-      const frame = Math.floor(t * 5 + f.ph) & 1;
-      ctx.save();
-      ctx.translate(f.x, f.y);
-      ctx.rotate(a);
-      ctx.drawImage(this.flagSprites[f.team * 2 + frame], -8, -46, 52, 50);
-      ctx.restore();
-    }
-  }
-
-  /** Camera flashes twinkling in the crowd; many more while it cheers. */
-  private drawFlashes(ctx: Ctx, t: number) {
-    const fans = this.fans;
-    if (!fans.length) return;
-    const n = 4 + Math.round(this.cheerAmt * 12);
+  /** Phone flashes: tiny sparkles that blink at random in the crowd; a burst while it cheers. */
+  private drawFlashes(ctx: Ctx, heads: P[], t: number, base: number, burst: number) {
+    if (!heads.length || !this.spark) return;
+    const n = base + Math.round(this.cheerAmt * burst);
     for (let k = 0; k < n; k++) {
-      const clock = t * 2.6 + k * 0.618;
+      const clock = t * 1.7 + k * 0.618 + ((k * k) % 7) * 0.13;
       const slot = Math.floor(clock);
-      const age = clock - slot;
-      if (age > 0.45) continue;
-      const f = fans[Math.floor(hash(slot * 7.13 + k * 31.7) * fans.length)];
-      const s = 18 * (0.55 + 0.6 * Math.sin((age / 0.45) * Math.PI));
-      ctx.globalAlpha = 1 - age / 0.45;
-      ctx.drawImage(this.spark!, f.hx - s / 2, f.hy - s / 2, s, s);
+      const age = (clock - slot) / 0.32;
+      if (age > 1) continue;
+      const h = heads[Math.floor(hash(slot * 7.13 + k * 31.7) * heads.length)];
+      const s = 6 + 7 * Math.sin(age * Math.PI);
+      ctx.globalAlpha = 1 - age * 0.6;
+      ctx.drawImage(this.spark, h[0] - s / 2, h[1] - s / 2, s, s);
     }
     ctx.globalAlpha = 1;
   }
 
   // ---------------------------------------------------------------- the crowd
 
-  private placeFans() {
-    const q = this.ratio;
-    const rnd = seeded(77);
-    const mk = (x: number, y: number, sc: number, team: number): Fan => {
-      const s = SIZES[sc];
-      const cw = cellW(s);
-      const chh = cellH(s);
-      const kind = Math.floor(rnd() * KINDS);
-      const tone = team + (rnd() < 0.24 ? 2 : 0);
-      const pr = rnd();
-      return {
-        x0: Math.round((x - cw / 2) * q) / q,
-        y0: y - chh + FOOT,
-        w: cw,
-        h: chh,
-        b: ((sc * KINDS + kind) * TONES + tone) * POSES,
-        ph: rnd() * 6.283,
-        r: rnd(),
-        idle: pr < 0.05 ? 2 : pr < 0.1 ? 1 : 0,
-        cheer: rnd() < 0.4 ? 2 : 1,
-        jump: 3 + rnd() * 4 + sc,
-        hx: x,
-        hy: y - s * 0.75,
-      };
-    };
-    const fans: Fan[] = [];
-    // the top stand: red
-    TOP_ROWS.forEach((y, k) => {
-      for (let x = 8 + (k % 2) * 7.2; x < W - 3; x += 14.4) {
-        if (AISLES.some((a) => Math.abs(x - a) < 12)) continue;
-        fans.push(mk(x + (rnd() - 0.5) * 2, y, 1, 1));
-      }
+  private buildCrowd() {
+    const rnd = seeded(31);
+    const fan = (x: number, y: number, s: number, team: number, back: boolean, scarf: number): Fan => ({
+      x,
+      y,
+      s,
+      kind: Math.floor(rnd() * 6),
+      tone: Math.floor(rnd() * 3),
+      scarf: rnd() < scarf ? team : -1,
+      back,
+      phone: back && rnd() < 0.012,
+      up: rnd() < 0.72,
     });
-    // the side stands: red toward the top end, blue toward the bottom end, mixed round the halfway line
+    const groups: Fan[][] = [];
+    // the far stand, back row first; three sections between the aisles
+    for (let k = FAR_ROWS - 1; k >= 0; k--) {
+      const ay = farEdge(k) - FAR_STEP / 2;
+      const z = farZ(k);
+      const sec: Fan[][] = [[], [], []];
+      for (let ax = farX0(k) + 7 + (k % 2) * 7; ax < farX1(k) - 6; ax += 14) {
+        const jx = ax + (rnd() - 0.5) * 3;
+        if (FAR_AISLES.some((a) => Math.abs(jx - a) < 13)) continue;
+        if (VOMS.some(([r, a0, a1]) => r === k && jx > a0 - 6 && jx < a1 + 6)) continue;
+        const [x, y] = pt(jx, ay, z);
+        if (x < -8 || x > W + 8) continue;
+        sec[jx < FAR_AISLES[0] ? 0 : jx < FAR_AISLES[1] ? 1 : 2].push(fan(x, y, 15.5 * depthScale(ay), 1, false, 0.09));
+      }
+      groups.push(...sec);
+    }
+    // the side stands, outer tier first; cut by the walkways
+    const cuts = [SIDE_A0, ...SIDE_WALKS, SIDE_A1];
     for (const side of [0, 1])
-      for (const col of [0, 1]) {
-        const x = side ? W - (col ? 16.5 : 6) : col ? 16.5 : 6;
-        for (const [y0, y1] of SIDE_SEGS) {
-          const n = Math.floor((y1 - y0 - 14) / 12.4);
-          for (let i = n; i >= 0; i--) {
-            const y = y1 - i * 12.4;
-            if (side === 1 && col === 1 && y > DUGOUT.y0 - 2 && y < DUGOUT.y1 + 16) continue;
-            const blue = Math.min(1, Math.max(0, (y - 540) / 120));
-            fans.push(mk(x, y, 0, rnd() < blue ? 0 : 1));
+      for (let j = SIDE_TIERS - 1; j >= 0; j--) {
+        const axl = sideEdge(j) - SIDE_STEP / 2;
+        const ax = side ? AW - axl : axl;
+        for (let g = 0; g < cuts.length - 1; g++) {
+          const list: Fan[] = [];
+          for (let ay = cuts[g] + 11 + (j % 2) * 7; ay < cuts[g + 1] - 9; ay += 14) {
+            if (side && ay > TUNNEL[0] - 6 && ay < TUNNEL[1] + 6) continue;
+            const [x, y] = pt(ax + (rnd() - 0.5) * 2, ay, sideZ(j));
+            if (x < -8 || x > W + 8) continue;
+            const blue = Math.min(1, Math.max(0, (ay - 330) / 160));
+            list.push(fan(x, y, 14 * depthScale(ay), rnd() < blue ? 0 : 1, false, 0.08));
           }
+          groups.push(list);
         }
       }
-    // the bottom stand: blue
-    BOT_ROWS.forEach((y, k) => {
-      for (let x = 9 + (k % 2) * 8.3; x < W - 3; x += 16.6) {
-        if (AISLES.some((a) => Math.abs(x - a) < 13)) continue;
-        fans.push(mk(x + (rnd() - 0.5) * 2, y, 2, 0));
+    const front = groups.flat();
+    // the near stand: seen from behind, growing toward the camera
+    let y = NEAR_TOP - 4;
+    let s = 17;
+    while (y - s < H) {
+      const sec: Fan[][] = [[], [], []];
+      const sp = s * 0.92;
+      const spread = nearSpread(y);
+      const al = MX - NEAR_AISLE * spread;
+      const ar = MX + NEAR_AISLE * spread;
+      for (let x = 4 + rnd() * sp * 0.5; x < W + 4; x += sp * (0.9 + rnd() * 0.2)) {
+        if (Math.abs(x - al) < 8 * spread + s * 0.45 || Math.abs(x - ar) < 8 * spread + s * 0.45) continue;
+        sec[x < al ? 0 : x < ar ? 1 : 2].push(fan(x, y + (rnd() - 0.5) * 1.5, s, 0, true, 0.1));
       }
-    });
-    this.fans = fans;
-    this.flags = [
-      { x: 112, y: 142, team: 1, ph: 0.4 },
-      { x: 322, y: 130, team: 1, ph: 2.1 },
-      { x: 436, y: 146, team: 1, ph: 4.0 },
-      { x: 96, y: 1086, team: 0, ph: 1.2 },
-      { x: 228, y: 1158, team: 0, ph: 3.3 },
-      { x: 318, y: 1160, team: 0, ph: 5.1 },
-      { x: 448, y: 1084, team: 0, ph: 0.2 },
-    ];
-    // the lobby's stand: the home crowd
-    const sf: Fan[] = [];
-    S_ROWS.forEach((y, k) => {
-      for (let x = 10 + (k % 2) * 8.4; x < W - 3; x += 16.8) {
+      groups.push(...sec);
+      y += s * 0.62;
+      s += 1.7;
+    }
+    this.strips = this.makeStrips(groups);
+    this.heads = front.map((f) => [f.x, headY(f)] as P);
+    // the lobby's stand
+    const sg: Fan[][] = [];
+    S_ROWS.forEach((by, k) => {
+      const sec: Fan[][] = [[], []];
+      const sz = 13 + k * 0.5;
+      for (let x = 8 + (k % 2) * 7.5; x < W - 4; x += sz * 1.08) {
         if (Math.abs(x - 135) < 13 || Math.abs(x - 405) < 13) continue;
-        sf.push(mk(x + (rnd() - 0.5) * 2, STAGE.y + y, 2, rnd() < 0.88 ? 0 : 1));
+        sec[x < MX ? 0 : 1].push(fan(x + (rnd() - 0.5) * 2, STAGE.y + by, sz, rnd() < 0.9 ? 0 : 1, false, 0.13));
       }
+      sg.push(...sec);
     });
-    this.stageFans = sf;
+    this.stageStrips = this.makeStrips(sg);
+    this.stageHeads = sg.flat().map((f) => [f.x, headY(f)] as P);
+  }
+
+  private makeStrips(groups: Fan[][]): Strip[] {
+    const out: Strip[] = [];
+    groups.forEach((g, i) => {
+      if (!g.length) return;
+      let x0 = Infinity;
+      let y0 = Infinity;
+      let x1 = -Infinity;
+      let y1 = -Infinity;
+      let sz = 0;
+      for (const f of g) {
+        x0 = Math.min(x0, f.x - f.s * 0.9);
+        x1 = Math.max(x1, f.x + f.s * 0.9);
+        y0 = Math.min(y0, f.y - f.s * 1.75);
+        y1 = Math.max(y1, f.y + f.s * (f.back ? 0.45 : 0.1));
+        sz += f.s;
+      }
+      x0 = Math.floor(x0);
+      y0 = Math.floor(y0);
+      const w = Math.ceil(x1 - x0);
+      const h = Math.ceil(y1 - y0);
+      const paint = (pose: number) =>
+        layer(w, h, this.ratio, (c) => {
+          c.translate(-x0, -y0);
+          for (const f of g) paintFan(c, f, pose && f.up ? 1 : 0);
+        });
+      out.push({ x: x0, y: y0, w, h, idle: paint(0), cheer: paint(1), ph: ((x0 + w / 2) / W) * 3.4 + (i % 2) * 0.5, delay: hash(i * 1.7) * 0.45, jump: (sz / g.length) * 0.32 });
+    });
+    return out;
   }
 
   // ---------------------------------------------------------------- painting: the battle
 
   private paintBack(c: Ctx) {
-    c.fillStyle = ROOF_DARK;
+    const sky = c.createLinearGradient(0, 0, 0, 260);
+    sky.addColorStop(0, BG);
+    sky.addColorStop(1, '#121821');
+    c.fillStyle = sky;
     c.fillRect(0, 0, W, H);
 
-    // the top stand's terraces
-    TOP_ROWS.forEach((y, k) => {
-      const y0 = k ? TOP_ROWS[k - 1] : 100;
-      c.fillStyle = SEAT[1][k % 2];
-      c.fillRect(0, y0, W, y - y0);
-      c.fillStyle = SHADE;
-      c.fillRect(0, y - 2, W, 2);
-    });
-    // the bottom stand's two tiers
-    BOT_ROWS.forEach((y, k) => {
-      const y0 = k === 0 ? RING.y + RING.h : k === 3 ? BALCONY.y + BALCONY.h : BOT_ROWS[k - 1];
-      c.fillStyle = SEAT[0][k % 2];
-      c.fillRect(0, y0, W, y - y0 + (k === 2 ? 4 : 0));
-      c.fillStyle = SHADE;
-      c.fillRect(0, y - 2, W, 2);
-    });
-    for (const a of AISLES) {
-      stairs(c, a, 100, RING.y - 100);
-      stairs(c, a, RING.y + RING.h, H - RING.y - RING.h);
-    }
-    // the side stands
-    for (const x of [0, W - SIDE_W]) {
-      c.fillStyle = SEAT[1][0];
-      c.fillRect(x, RING.y, SIDE_W, MY - RING.y);
-      c.fillStyle = SEAT[0][0];
-      c.fillRect(x, MY, SIDE_W, RING.y + RING.h - MY);
-    }
-    c.fillStyle = 'rgba(27, 21, 34, 0.16)';
-    c.fillRect(0, RING.y, SIDE_W / 2, RING.h);
-    c.fillRect(W - SIDE_W / 2, RING.y, SIDE_W / 2, RING.h);
-    for (const y of [380, 820])
-      for (const x of [0, W - SIDE_W]) {
-        c.fillStyle = INK;
-        c.fillRect(x, y - 6, SIDE_W, 12);
-        c.fillStyle = CONCRETE;
-        c.fillRect(x, y - 4, SIDE_W, 8);
-      }
+    this.paintFarStand(c);
+    for (const side of [0, 1]) this.paintSideStand(c, side);
+    this.paintNearStand(c);
 
-    // the ring of boards, then the apron inside it
-    rr(c, RING.x, RING.y, RING.w, RING.h, 7);
-    c.fillStyle = INK;
-    c.fill();
-    const bx = RING.x + 2;
-    const bw = RING.w - 4;
-    const cw = (bw - 100) / 4;
-    const bh = APR.y - RING.y - 3.25;
-    boardRow(c, bx, RING.y + 2, bh, [['ZOO CUP', 0, cw], ['GO PETS!', 1, cw], ['', 2, 100], ['ROAR!', 1, cw], ['PAWS UP', 0, cw]], 10.5);
-    boardRow(c, bx, APR.y + APR.h + 1.25, bh, [['HOP HOP', 2, cw], ['ZOO CUP', 0, cw], ['', 1, 100], ['GO PETS!', 0, cw], ['BIG BITE', 2, cw]], 10.5);
-    boardColumn(c, RING.x + 2, APR.x - RING.x - 3, APR.y, APR.y + APR.h, 0, 0);
-    boardColumn(c, APR.x + APR.w + 1, APR.x - RING.x - 3, APR.y, APR.y + APR.h, DUGOUT.y0, DUGOUT.y1);
-    rr(c, APR.x, APR.y, APR.w, APR.h, 5);
-    fillStroke(c, APRON, 2.5);
-    c.fillStyle = SHADE; // the boards' shadow on the apron
-    c.fillRect(APR.x + 1.25, APR.y + 1.25, APR.w - 2.5, 4);
-    c.fillRect(APR.x + 1.25, APR.y + 5.25, 3, APR.h - 6.5);
+    // the apron round the pitch, darker toward the stands
+    fillShape(c, flat(sideEdge(0), -60, AW - sideEdge(0), NEAR_BOARD + 10), APRON);
+    fillShape(c, flat(-BOARD_IN, FAR_BOARD, AW + BOARD_IN, NEAR_BOARD), '#244731');
+    this.paintPitch(c);
 
-    // the pitch
-    const bands = 14;
-    const band = FH / bands;
-    for (let i = 0; i < bands; i++) {
-      c.fillStyle = i % 2 ? GRASS_B : GRASS_A;
-      c.fillRect(FX, FY + i * band, FW, band + 0.5);
-    }
-    const rnd = seeded(5);
-    for (let i = 0; i < 700; i++) {
-      c.fillStyle = i % 2 ? 'rgba(255, 255, 255, 0.07)' : 'rgba(30, 90, 40, 0.07)';
-      c.fillRect(FX + 4 + rnd() * (FW - 12), FY + 4 + rnd() * (FH - 8), 4, 1.5);
-    }
+    // light from the two far towers: short soft beams in the air, pools of light on the grass
     c.save();
     c.beginPath();
-    c.rect(FX, FY, FW, FH);
+    c.rect(0, 0, W, NEAR_TOP);
     c.clip();
-    c.translate(MX, MY);
-    c.scale(1, FH / FW);
-    const g = c.createRadialGradient(0, 0, FW * 0.3, 0, 0, FW * 0.76);
-    g.addColorStop(0, 'rgba(255, 255, 220, 0.07)');
-    g.addColorStop(0.55, 'rgba(20, 70, 40, 0)');
-    g.addColorStop(1, 'rgba(20, 70, 40, 0.2)');
-    c.fillStyle = g;
-    c.fillRect(-FW, -FW, FW * 2, FW * 2);
-    c.restore();
-    const lines = layer(FW, FH, this.ratio, (lc) => pitchLines(lc, 0, 0, FW, FH, 3));
-    c.globalAlpha = 0.62;
-    c.drawImage(lines, FX, FY, FW, FH);
-    c.globalAlpha = 1;
-
-    // the goals: the far one whole, of the near one only its shadow (the rest is in front of the fighters)
-    const xl = MX - GOAL_W / 2;
-    const xr = MX + GOAL_W / 2;
-    c.fillStyle = 'rgba(27, 21, 34, 0.24)';
-    poly(c, [xl, FY, xl + 5, FY - GOAL_D, xr - 5, FY - GOAL_D, xr, FY]);
-    c.fill();
-    poly(c, [xl, FB, xl + 5, FB + GOAL_D - 2, xr - 5, FB + GOAL_D - 2, xr, FB]);
-    c.fill();
-    goal(c, true);
-    cornerFlag(c, FX + 2, FY + 2, -1);
-    cornerFlag(c, FR - 2, FY + 2, 1);
-
-    // the halfway buildings: dugouts and the tunnel on the right, a TV camera on the left
-    rr(c, FR + 7, MY - 12, 40, 24, 4);
-    fillStroke(c, CONCRETE, 2.4);
-    rr(c, FR + 20, MY - 8, 30, 16, 3);
-    c.fillStyle = ROOF_DARK;
-    c.fill();
-    c.fillStyle = GOLD;
-    c.fillRect(FR + 9.5, MY - 9.5, 4, 19);
-    dugout(c, MY - 70, 1);
-    dugout(c, MY + 14, 0);
-    rr(c, -6, MY - 13, 27, 26, 4);
-    fillStroke(c, CONCRETE, 2.4);
-    circle(c, 6, MY + 5, 4);
-    fillStroke(c, FUR[0], 1.4);
-    rr(c, 5, MY - 9, 11, 9, 2);
-    fillStroke(c, '#5a5574', 1.6);
-    c.fillStyle = INK;
-    c.fillRect(16, MY - 7, 4, 5);
-  }
-
-  /** Over the crowd at the far end: the stand's roof and the two far towers. */
-  private paintTopStrip(c: Ctx) {
-    const edge = 96;
-    for (let x = 0, i = 0; x < W; x += 54, i++) {
-      c.fillStyle = i % 2 ? ROOF_ALT : ROOF;
-      c.fillRect(x, 0, 54, edge);
-    }
-    c.fillStyle = 'rgba(27, 21, 34, 0.3)';
-    for (let x = 54; x < W; x += 54) c.fillRect(x - 1, 0, 2, edge);
-    c.fillStyle = ROOF_LIGHT;
-    c.fillRect(0, edge - 12, W, 4);
-    c.fillStyle = INK;
-    c.fillRect(0, edge - 3, W, 14);
-    c.fillStyle = CREAM;
-    c.fillRect(0, edge, W, 8);
-    c.fillStyle = COLOR.paperDark;
-    c.fillRect(0, edge + 5, W, 3);
-    c.fillStyle = 'rgba(27, 21, 34, 0.3)'; // the roof's shadow on the back row
-    c.fillRect(0, edge + 11, W, 7);
-    tower(c, TOWERS[0][0], TOWERS[0][1], TOWERS[0][2]);
-    tower(c, TOWERS[1][0], TOWERS[1][1], TOWERS[1][2]);
-  }
-
-  /** Over the crowd at the near end: the balcony wall with its banners and the two near towers. */
-  private paintBotStrip(c: Ctx) {
-    const y = BALCONY.y;
-    const h = BALCONY.h;
-    c.fillStyle = INK;
-    c.fillRect(0, y - 1.5, W, h + 3);
-    c.fillStyle = CONCRETE;
-    c.fillRect(0, y + 1, W, h - 2);
-    c.fillStyle = CONCRETE_DARK;
-    c.fillRect(0, y + h - 5, W, 4);
-    for (const a of AISLES) stairs(c, a, y - 1.5, h + 3);
-    // banners hung over the wall
-    for (const [x0, x1] of [
-      [70, 155],
-      [385, 470],
+    c.globalCompositeOperation = 'lighter';
+    TOWER_AT.forEach((a) => {
+      const h = pt(a[0], a[1], TOWER_Z);
+      const left = a[0] < AW / 2;
+      const aim = project(left ? AW * 0.2 : AW * 0.8, AH * 0.3);
+      const len = Math.hypot(aim.x - h[0], aim.y - h[1]);
+      const ang = Math.atan2(aim.y - h[1], aim.x - h[0]);
+      const strong = left ? 1 : 0.65;
+      for (const sp of [0.34, 0.22, 0.1]) {
+        const g = c.createLinearGradient(h[0], h[1], h[0] + Math.cos(ang) * len, h[1] + Math.sin(ang) * len);
+        g.addColorStop(0, `rgba(255, 228, 150, ${0.035 * strong})`);
+        g.addColorStop(1, 'rgba(255, 228, 150, 0)');
+        c.fillStyle = g;
+        shape(c, [h, [h[0] + Math.cos(ang - sp) * len, h[1] + Math.sin(ang - sp) * len], [h[0] + Math.cos(ang + sp) * len, h[1] + Math.sin(ang + sp) * len]]);
+        c.fill();
+      }
+    });
+    for (const [ax, ay, r, al] of [
+      [AW * 0.3, AH * 0.3, 250, 0.075],
+      [AW * 0.72, AH * 0.32, 230, 0.045],
+      [AW * 0.5, AH * 0.72, 260, 0.035],
     ]) {
-      rr(c, x0, y - 3, x1 - x0, h + 5, 3);
-      fillStroke(c, TEAM[0].main, 2.4);
-      c.fillStyle = '#ffffff';
-      for (let x = x0 + 12; x < x1 - 8; x += 21) c.fillRect(x, y - 1.8, 9, h + 2.6);
+      const m = project(ax, ay);
+      c.save();
+      c.translate(m.x, m.y);
+      c.scale(1, 0.8);
+      const g = c.createRadialGradient(0, 0, 0, 0, 0, r);
+      g.addColorStop(0, `rgba(255, 238, 190, ${al})`);
+      g.addColorStop(1, 'rgba(255, 238, 190, 0)');
+      c.fillStyle = g;
+      c.fillRect(-r, -r, r * 2, r * 2);
+      c.restore();
     }
-    rr(c, 178, y - 4, 184, h + 8, 4);
-    fillStroke(c, CREAM, 2.6);
-    c.fillStyle = TEAM[0].main;
-    c.fillRect(180, y + h - 1, 180, 3.5);
-    word(c, 'GO PETS GO!', MX, y + h / 2 - 1, 16, TEAM[0].dark);
-    tower(c, TOWERS[2][0], TOWERS[2][1], TOWERS[2][2]);
-    tower(c, TOWERS[3][0], TOWERS[3][1], TOWERS[3][2]);
+    c.restore();
+
+    this.paintBoards(c);
+    goalShadow(c, false);
+    goalShadow(c, true);
+    goal(c, false);
+    cornerFlag(c, 0, 0, -1);
+    cornerFlag(c, AW, 0, 1);
+    dugout(c, DUGOUT_GAP[0] + 12, DUGOUT_GAP[0] + 92, 1);
+    dugout(c, DUGOUT_GAP[1] - 92, DUGOUT_GAP[1] - 12, 0);
+    tvCamera(c, -10, AH / 2 - 6);
   }
 
-  /** The night veil: dark stands, a floodlit pitch, four soft cones of light. */
-  private paintNight(c: Ctx) {
-    c.fillStyle = 'rgba(14, 12, 46, 0.7)';
-    c.fillRect(0, 0, W, H);
-    c.globalCompositeOperation = 'destination-out';
+  private paintFarStand(c: Ctx) {
+    const kt = FAR_ROWS - 1;
+    // the back wall up to the roof
+    fillShape(c, wall(farX0(kt), farEdge(kt) - FAR_STEP, farX1(kt), farEdge(kt) - FAR_STEP, farZ(kt), ROOF_Z), WALL);
+    for (let k = kt; k >= 0; k--) {
+      const a = farEdge(k);
+      const z = farZ(k);
+      const zp = k ? farZ(k - 1) : 0;
+      const x0 = farX0(k);
+      const x1 = farX1(k);
+      fillShape(c, flat(x0, a - FAR_STEP, x1, a, z), k % 2 ? TREAD : TREAD_ALT);
+      fillShape(c, wall(x0, a, x1, a, zp, z), RISER);
+      for (const s of FAR_AISLES) {
+        fillShape(c, flat(s - 7, a - FAR_STEP, s + 7, a, z), STAIR);
+        fillShape(c, wall(s - 7, a, s + 7, a, zp, z), '#1a2029');
+        seg(c, pt(s - 7, a - FAR_STEP / 2, z), pt(s + 7, a - FAR_STEP / 2, z), RISER, 1);
+      }
+      for (const [r, v0, v1] of VOMS)
+        if (r === k) {
+          fillShape(c, flat(v0, a - FAR_STEP + 1, v1, a, z), HOLE);
+          seg(c, pt(v0, a, z), pt(v1, a, z), LIP, 1);
+        }
+      seg(c, pt(x0, a, z), pt(x1, a, z), LIP, 1);
+    }
+    // the gold ribbon along the front wall
+    seg(c, pt(farX0(0), farEdge(0), farZ(0) - 4), pt(farX1(0), farEdge(0), farZ(0) - 4), 'rgba(255, 210, 31, 0.55)', 1.2);
+  }
+
+  private paintSideStand(c: Ctx, side: number) {
+    const X = (ax: number) => (side ? AW - ax : ax);
+    const jt = SIDE_TIERS - 1;
+    fillShape(c, flat(X(sideEdge(jt) - SIDE_STEP), SIDE_A0, X(-400), SIDE_A1, sideZ(jt)), WALL);
+    for (let j = jt; j >= 0; j--) {
+      const e = sideEdge(j);
+      const z = sideZ(j);
+      const zp = j ? sideZ(j - 1) : 0;
+      fillShape(c, flat(X(e - SIDE_STEP), SIDE_A0, X(e), SIDE_A1, z), j % 2 ? TREAD : TREAD_ALT);
+      fillShape(c, wall(X(e), SIDE_A0, X(e), SIDE_A1, zp, z), RISER);
+      for (const wk of SIDE_WALKS) fillShape(c, flat(X(e - SIDE_STEP), wk - 8, X(e), wk + 8, z), STAIR);
+      seg(c, pt(X(e), SIDE_A0, z), pt(X(e), SIDE_A1, z), LIP, 1);
+    }
+    if (side) {
+      // the players' tunnel under the right stand
+      fillShape(c, flat(X(sideEdge(0)), TUNNEL[0], X(sideEdge(jt) - SIDE_STEP), TUNNEL[1], sideZ(0) + 1), HOLE);
+      seg(c, pt(X(sideEdge(0)), TUNNEL[0], sideZ(0) + 1), pt(X(sideEdge(0)), TUNNEL[1], sideZ(0) + 1), GOLD, 1.2);
+      fillShape(c, flat(AW + BOARD_IN, TUNNEL[0] + 4, X(sideEdge(0)), TUNNEL[1] - 4), 'rgba(255, 220, 120, 0.06)');
+    }
+  }
+
+  private paintNearStand(c: Ctx) {
+    c.fillStyle = RISER;
+    c.fillRect(0, NEAR_TOP - 4, W, H - NEAR_TOP + 4);
+    let y = NEAR_TOP - 4;
+    let s = 17;
+    let i = 0;
+    while (y - s < H) {
+      const top = y - s * 0.62;
+      c.fillStyle = i % 2 ? TREAD : TREAD_ALT;
+      c.fillRect(0, top, W, y - top);
+      c.fillStyle = LIP;
+      c.fillRect(0, top, W, 1);
+      y += s * 0.62;
+      s += 1.7;
+      i++;
+    }
+    for (const d of [-1, 1]) {
+      const pts: P[] = [];
+      for (const yy of [NEAR_TOP, H])
+        for (const e of d < 0 ? [-1, 1] : [1, -1]) pts.push([MX + d * NEAR_AISLE * nearSpread(yy) + e * 8 * nearSpread(yy), yy]);
+      fillShape(c, [pts[0], pts[1], pts[3], pts[2]], STAIR);
+    }
+  }
+
+  private paintPitch(c: Ctx) {
+    const bands = 16;
+    for (let i = 0; i < bands; i++) fillShape(c, quad(0, (i * AH) / bands, AW, AH / bands + 0.6), GRASS[i % 2]);
     c.save();
-    c.translate(MX, MY);
-    c.scale(1, FH / FW);
-    const g = c.createRadialGradient(0, 0, FW * 0.1, 0, 0, FW * 0.8);
-    g.addColorStop(0, 'rgba(0, 0, 0, 0.5)');
-    g.addColorStop(0.72, 'rgba(0, 0, 0, 0.36)');
-    g.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    shape(c, quad(0, 0, AW, AH));
+    c.clip();
+    const rnd = seeded(5);
+    for (let i = 0; i < 2600; i++) {
+      const p = pt(rnd() * AW, rnd() * AH);
+      c.fillStyle = i % 2 ? 'rgba(255, 255, 240, 0.045)' : 'rgba(0, 20, 8, 0.07)';
+      c.fillRect(p[0], p[1], 1 + (i % 3 === 0 ? 1 : 0), 1);
+    }
+    // the floodlit pool in the middle and the key light from the upper left
+    const mid = project(AW * 0.45, AH * 0.45);
+    c.save();
+    c.translate(mid.x, mid.y);
+    c.scale(1, 1.45);
+    const g = c.createRadialGradient(0, 0, 40, 0, 0, 330);
+    g.addColorStop(0, 'rgba(255, 246, 210, 0.07)');
+    g.addColorStop(0.55, 'rgba(255, 246, 210, 0)');
+    g.addColorStop(1, 'rgba(0, 10, 4, 0.3)');
     c.fillStyle = g;
-    c.fillRect(-W, -W * 1.2, W * 2, W * 2.4);
+    c.fillRect(-W, -H, W * 2, H * 2);
     c.restore();
-    c.globalCompositeOperation = 'source-over';
-    for (const [x, , hy] of TOWERS) {
-      const tx = MX + (x < MX ? -60 : 60);
-      const ty = MY + (hy < MY ? -170 : 170);
-      const len = Math.hypot(tx - x, ty - hy);
-      const nx = -(ty - hy) / len;
-      const ny = (tx - x) / len;
-      const g2 = c.createLinearGradient(x, hy, tx, ty);
-      g2.addColorStop(0, 'rgba(255, 244, 190, 0.3)');
-      g2.addColorStop(1, 'rgba(255, 244, 190, 0)');
-      c.fillStyle = g2;
-      poly(c, [x + nx * 8, hy + ny * 8, tx + nx * 120, ty + ny * 120, tx - nx * 120, ty - ny * 120, x - nx * 8, hy - ny * 8]);
+    const k = c.createLinearGradient(40, 300, 500, 950);
+    k.addColorStop(0, 'rgba(255, 240, 190, 0.05)');
+    k.addColorStop(1, 'rgba(0, 10, 4, 0.12)');
+    c.fillStyle = k;
+    c.fillRect(0, 0, W, H);
+    c.restore();
+    const lines = layer(W, H, this.ratio, (lc) => markings(lc, 2.2));
+    c.globalAlpha = 0.62;
+    c.drawImage(lines, 0, 0, W, H);
+    c.globalAlpha = 1;
+  }
+
+  /** The LED boards: a dark face with a lit top, a contact shadow and a little light spilled on the apron. */
+  private paintBoards(c: Ctx) {
+    const top = BOARD_Z;
+    // far: faces the camera, so its words read straight
+    {
+      const a = FAR_BOARD;
+      const x0 = -BOARD_IN;
+      const x1 = AW + BOARD_IN;
+      fillShape(c, flat(x0, a, x1, a + 14), 'rgba(255, 214, 90, 0.035)');
+      fillShape(c, [pt(x0, a), pt(x1, a), pt(x1 + 5, a + 5), pt(x0 + 5, a + 5)], SHADOW);
+      const face = [pt(x0, a, 0), pt(x1, a, 0), pt(x1, a - 4, top), pt(x0, a - 4, top)];
+      fillShape(c, face, LED);
+      fillShape(c, [pt(x0, a - 4, top), pt(x1, a - 4, top), pt(x1, a - 7, top - 1), pt(x0, a - 7, top - 1)], LED_TOP);
+      const n = 5;
+      const pw = (x1 - x0) / n;
+      for (let i = 0; i < n; i++) {
+        const m = pt(x0 + pw * (i + 0.5), a - 2, top / 2);
+        const s = i === 2 ? 'ZOOPVP' : WORDS[[1, 2, 0, 3, 4][i]];
+        word(c, s, m[0], m[1], 10, i === 2 || i === 0 ? GOLD : WHITE);
+        if (i) seg(c, pt(x0 + pw * i, a, 0), pt(x0 + pw * i, a - 4, top), '#1d242d', 1.2);
+      }
+      scanlines(c, face, face[3][1], face[0][1]);
+    }
+    // the sides: lean back, words run along the touchline
+    for (const side of [0, 1]) {
+      const X = (ax: number) => (side ? AW - ax : ax);
+      const n = 12;
+      const len = (SIDE_Y1 - SIDE_Y0) / n;
+      for (let i = 0; i < n; i++) {
+        const ya = SIDE_Y0 + i * len;
+        const yb = ya + len;
+        if (side && yb > DUGOUT_GAP[0] && ya < DUGOUT_GAP[1]) continue;
+        const foot = X(-BOARD_IN);
+        const lip = X(-BOARD_IN - BOARD_LEAN);
+        fillShape(c, flat(X(-BOARD_IN + 4), ya, X(-BOARD_IN + 14), yb), 'rgba(255, 214, 90, 0.035)');
+        fillShape(c, flat(foot, ya, X(-BOARD_IN + 5), yb), SHADOW);
+        const face: P[] = [pt(foot, ya, 0), pt(foot, yb, 0), pt(lip, yb, top), pt(lip, ya, top)];
+        fillShape(c, face, LED);
+        fillShape(c, [pt(lip, ya, top), pt(lip, yb, top), pt(X(-BOARD_IN - BOARD_LEAN - 3), yb, top - 1), pt(X(-BOARD_IN - BOARD_LEAN - 3), ya, top - 1)], LED_TOP);
+        seg(c, pt(foot, yb, 0), pt(lip, yb, top), '#1d242d', 1.1);
+        const mid = (ya + yb) / 2;
+        const cx = X(-BOARD_IN - BOARD_LEAN / 2);
+        const m = pt(cx, mid, top / 2);
+        const u0 = pt(cx, mid + (side ? -1 : 1), top / 2);
+        const u1 = pt(cx, mid + (side ? 1 : -1), top / 2);
+        const dl = Math.hypot(u1[0] - u0[0], u1[1] - u0[1]);
+        const fp = pt(foot, mid, 0);
+        const tp = pt(lip, mid, top);
+        const gx = (fp[0] - tp[0]) / 16;
+        const gy = (fp[1] - tp[1]) / 16;
+        c.save();
+        c.transform((u1[0] - u0[0]) / dl, (u1[1] - u0[1]) / dl, gx, gy, m[0], m[1]);
+        const w = WORDS[(i + side * 3) % WORDS.length];
+        word(c, w, 0, 0, 9, w === 'ZOOPVP' ? GOLD : WHITE);
+        c.restore();
+      }
+    }
+    // near: we see their backs; their light spills toward the pitch
+    {
+      const a = NEAR_BOARD;
+      const x0 = -BOARD_IN;
+      const x1 = AW + BOARD_IN;
+      fillShape(c, flat(x0, a - 14, x1, a), 'rgba(255, 214, 90, 0.05)');
+      fillShape(c, [pt(x0, a + 10, top - 2), pt(x1, a + 10, top - 2), pt(x1, a + 14, 0), pt(x0, a + 14, 0)], '#141920');
+      fillShape(c, [pt(x0, a, 0), pt(x1, a, 0), pt(x1, a + 10, top - 2), pt(x0, a + 10, top - 2)], '#1b222b');
+      seg(c, pt(x0, a + 10, top - 2), pt(x1, a + 10, top - 2), LED_TOP, 1.4);
+      seg(c, pt(x0, a, 0), pt(x1, a, 0), 'rgba(255, 210, 31, 0.6)', 1);
+    }
+  }
+
+  /** Over the crowd at the far end: the stand's roof and the shadow it throws on the top rows. */
+  private paintTop(c: Ctx) {
+    const f0 = pt(-80, ROOF_Y, ROOF_Z);
+    const sky = c.createLinearGradient(0, 0, 0, f0[1]);
+    sky.addColorStop(0, BG);
+    sky.addColorStop(1, '#121821');
+    c.fillStyle = sky;
+    c.fillRect(0, 0, W, f0[1] + 1);
+    fillShape(c, flat(-80, ROOF_Y - 70, AW + 80, ROOF_Y, ROOF_Z + 10), ROOF_TOP);
+    for (let ax = -60; ax <= AW + 60; ax += 46) seg(c, pt(ax, ROOF_Y - 70, ROOF_Z + 10), pt(ax, ROOF_Y, ROOF_Z + 10), '#19202a', 1);
+    fillShape(c, wall(-80, ROOF_Y, AW + 80, ROOF_Y, ROOF_Z, ROOF_Z + 10), FASCIA);
+    seg(c, pt(-80, ROOF_Y, ROOF_Z + 10), pt(AW + 80, ROOF_Y, ROOF_Z + 10), '#3e4958', 1);
+    const sh = c.createLinearGradient(0, f0[1], 0, f0[1] + 28);
+    sh.addColorStop(0, 'rgba(4, 6, 9, 0.6)');
+    sh.addColorStop(1, 'rgba(4, 6, 9, 0)');
+    c.fillStyle = sh;
+    c.fillRect(0, f0[1], W, 28);
+    for (let ax = -64; ax <= AW + 64; ax += 23) {
+      const p = pt(ax, ROOF_Y, ROOF_Z - 0.5);
+      circle(c, p[0], p[1], 2.6);
+      c.fillStyle = 'rgba(255, 226, 140, 0.18)';
+      c.fill();
+      circle(c, p[0], p[1], 0.9);
+      c.fillStyle = '#ffe9a0';
       c.fill();
     }
   }
@@ -1011,160 +1209,215 @@ export class Arena {
   // ---------------------------------------------------------------- painting: the lobby
 
   private paintStageBack(c: Ctx) {
-    const sky = c.createLinearGradient(0, 0, 0, 70);
-    sky.addColorStop(0, '#7fc6f7');
-    sky.addColorStop(1, '#cdeeff');
-    c.fillStyle = sky;
+    c.fillStyle = BG;
     c.fillRect(0, 0, W, S_BACK_H);
-    c.fillStyle = 'rgba(255, 255, 255, 0.85)';
-    for (const [x, y, s] of [
-      [150, 20, 1],
-      [372, 13, 0.8],
-      [262, 30, 0.6],
-    ]) {
-      c.beginPath();
-      for (const [dx, dy, r] of [
-        [-18, 3, 9],
-        [-5, -2, 13],
-        [11, 1, 10],
-        [22, 5, 7],
-      ]) {
-        c.moveTo(x + (dx + r) * s, y + dy * s);
-        c.arc(x + dx * s, y + dy * s, r * s, 0, Math.PI * 2);
-      }
+    c.fillStyle = WALL;
+    c.fillRect(0, 18, W, S_BACK_H - 18);
+    S_ROWS.forEach((y, k) => {
+      c.fillStyle = k % 2 ? TREAD : TREAD_ALT;
+      c.fillRect(0, y - 15, W, 15);
+      c.fillStyle = LIP;
+      c.fillRect(0, y - 15, W, 1);
+    });
+    for (const x of [135, 405]) {
+      c.fillStyle = STAIR;
+      c.fillRect(x - 7, 24, 14, S_BACK_H - 24);
+      c.fillStyle = RISER;
+      for (let y = 25 + 7.5; y < S_BACK_H; y += 7.5) c.fillRect(x - 7, y, 14, 1);
+    }
+    // the roof edge and its lights
+    c.fillStyle = ROOF_TOP;
+    c.fillRect(0, 0, W, 10);
+    c.fillStyle = FASCIA;
+    c.fillRect(0, 10, W, 9);
+    c.fillStyle = '#3e4958';
+    c.fillRect(0, 10, W, 1);
+    const sh = c.createLinearGradient(0, 19, 0, 46);
+    sh.addColorStop(0, 'rgba(4, 6, 9, 0.6)');
+    sh.addColorStop(1, 'rgba(4, 6, 9, 0)');
+    c.fillStyle = sh;
+    c.fillRect(0, 19, W, 27);
+    for (let x = 14; x < W; x += 26) {
+      circle(c, x, 19.5, 2.6);
+      c.fillStyle = 'rgba(255, 226, 140, 0.18)';
+      c.fill();
+      circle(c, x, 19.5, 0.9);
+      c.fillStyle = '#ffe9a0';
       c.fill();
     }
-    // floodlight masts behind the roof
-    for (const x of [62, W - 62]) {
-      c.fillStyle = INK;
-      c.fillRect(x - 5.5, 22, 11, 30);
-      c.fillStyle = STEEL;
-      c.fillRect(x - 3, 22, 6, 30);
-      rr(c, x - 25, 3, 50, 25, 6);
-      fillStroke(c, ROOF_LIGHT, 3);
-      for (let i = 0; i < 4; i++)
-        for (let j = 0; j < 2; j++) {
-          circle(c, x - 15.6 + i * 10.4, 10.6 + j * 9.6, 3.7);
-          fillStroke(c, LAMP, 1.5);
-        }
-    }
-    // the roof, the dark under it, the terraces
-    c.fillStyle = INK;
-    c.fillRect(0, 40, W, 19);
-    c.fillStyle = ROOF;
-    c.fillRect(0, 42.5, W, 8);
-    c.fillStyle = ROOF_LIGHT;
-    c.fillRect(0, 42.5, W, 2.5);
-    c.fillStyle = CREAM;
-    c.fillRect(0, 50.5, W, 6);
-    c.fillStyle = ROOF_DARK;
-    c.fillRect(0, 59, W, S_ROWS[0] - 59 - 14);
-    S_ROWS.forEach((y, k) => {
-      const y0 = k ? S_ROWS[k - 1] : S_ROWS[0] - 14;
-      c.fillStyle = SEAT[0][k % 2];
-      c.fillRect(0, y0, W, y - y0 + 4);
-      c.fillStyle = SHADE;
-      c.fillRect(0, y - 2, W, 2);
-    });
-    stairs(c, 135, 59, S_BACK_H - 59);
-    stairs(c, 405, 59, S_BACK_H - 59);
-    c.fillStyle = 'rgba(27, 21, 34, 0.28)'; // the roof's shadow
-    c.fillRect(0, 59, W, 8);
-    // pennants under the roof edge
-    for (let x = 6, i = 0; x < W; x += 16, i++) {
-      poly(c, [x, 58, x + 12, 58, x + 6, 68]);
-      fillStroke(c, [TEAM[0].main, CREAM, GOLD][i % 3], 1.6);
-    }
+    // the floodlight at the upper left: the key light of the strip
+    c.globalCompositeOperation = 'lighter';
+    const g = c.createRadialGradient(48, 13, 4, 48, 13, 230);
+    g.addColorStop(0, 'rgba(255, 232, 160, 0.4)');
+    g.addColorStop(0.2, 'rgba(255, 226, 140, 0.1)');
+    g.addColorStop(1, 'rgba(255, 220, 120, 0)');
+    c.fillStyle = g;
+    c.fillRect(0, 0, W, S_BACK_H);
+    c.globalCompositeOperation = 'source-over';
+    c.save();
+    c.translate(48, 13);
+    c.rotate(0.12);
+    rr(c, -26, -11, 52, 20, 4);
+    c.fillStyle = '#1a2028';
+    c.fill();
+    c.strokeStyle = EDGE;
+    c.lineWidth = 1.6;
+    c.stroke();
+    for (let i = 0; i < 5; i++)
+      for (let j = 0; j < 2; j++) {
+        circle(c, -19 + i * 9.5, -4.5 + j * 8.5, 3.4);
+        c.fillStyle = GOLD;
+        c.fill();
+        circle(c, -19 + i * 9.5, -4.5 + j * 8.5, 2.4);
+        c.fillStyle = LAMP;
+        c.fill();
+      }
+    c.restore();
   }
 
   private paintStageFront(c: Ctx) {
-    // the wall of boards
-    c.fillStyle = INK;
-    c.fillRect(0, S_WALL - 2.5, W, S_GRASS - S_WALL + 4);
-    boardRow(c, -1, S_WALL, S_GRASS - S_WALL - 1, [['ZOO CUP', 0, 110], ['GO PETS!', 2, 106], ['ROAR!', 1, 108], ['PAWS UP', 3, 106], ['HOP HOP', 0, 112]], 15);
-    // the grass
-    perspectiveStripes(c, S_GRASS, STAGE.h);
-    c.fillStyle = SHADE;
-    c.fillRect(0, S_GRASS, W, 6);
-    c.fillStyle = 'rgba(255, 255, 255, 0.7)';
-    c.fillRect(0, S_GRASS + 12, W, 3);
-    c.strokeStyle = 'rgba(255, 255, 255, 0.42)';
-    c.lineWidth = 3.5;
-    ellipse(c, MX, SG + 4, 176, 31);
+    c.fillStyle = WALL;
+    c.fillRect(0, S_FRONT_Y, W, 4);
+    // the boards
+    const b0 = 120;
+    const b1 = 143;
+    c.fillStyle = LED_TOP;
+    c.fillRect(0, b0 - 2.5, W, 2.5);
+    c.fillStyle = 'rgba(255, 255, 255, 0.14)';
+    c.fillRect(0, b0 - 2.5, W, 0.8);
+    c.fillStyle = LED;
+    c.fillRect(0, b0, W, b1 - b0);
+    const pw = W / 5;
+    for (let i = 0; i < 5; i++) {
+      const s = WORDS[[1, 2, 0, 3, 4][i]];
+      word(c, s, pw * (i + 0.5), (b0 + b1) / 2, 15, s === 'ZOOPVP' ? GOLD : WHITE);
+      if (i) {
+        c.fillStyle = '#1d242d';
+        c.fillRect(pw * i - 0.6, b0, 1.2, b1 - b0);
+      }
+    }
+    scanlines(c, [
+      [0, b0],
+      [W, b0],
+      [W, b1],
+      [0, b1],
+    ], b0, b1);
+    // the grass, running away from us; the key light warms the upper left
+    c.fillStyle = APRON;
+    c.fillRect(0, b1, W, 9);
+    const g0 = b1 + 9;
+    c.fillStyle = GRASS[0];
+    c.fillRect(0, g0, W, STAGE.h - g0);
+    c.fillStyle = GRASS[1];
+    const k = 1 + (STAGE.h - g0) / 260;
+    for (let i = -10; i < 10; i += 2) {
+      const xa = MX + i * 40;
+      const xb = MX + (i + 1) * 40;
+      shape(c, [
+        [xa, g0],
+        [xb, g0],
+        [MX + (xb - MX) * k, STAGE.h],
+        [MX + (xa - MX) * k, STAGE.h],
+      ]);
+      c.fill();
+    }
+    const rnd = seeded(8);
+    for (let i = 0; i < 700; i++) {
+      c.fillStyle = i % 2 ? 'rgba(255, 255, 240, 0.05)' : 'rgba(0, 20, 8, 0.08)';
+      c.fillRect(rnd() * W, g0 + rnd() * (STAGE.h - g0), 1.5, 1);
+    }
+    c.fillStyle = 'rgba(3, 8, 5, 0.35)';
+    c.fillRect(0, b1, W, 4);
+    c.fillStyle = 'rgba(255, 214, 90, 0.05)';
+    c.fillRect(0, b1 + 4, W, 8);
+    c.fillStyle = 'rgba(255, 255, 255, 0.5)';
+    c.fillRect(0, g0 + 1, W, 1.6);
+    c.strokeStyle = 'rgba(255, 255, 255, 0.32)';
+    c.lineWidth = 2.4;
+    ellipse(c, MX, SG + 2, 200, 30);
     c.stroke();
-    ellipse(c, MX, SG + 4, 7, 2.6);
+    seg(c, [MX, g0 + 1], [MX, STAGE.h], 'rgba(255, 255, 255, 0.32)', 2.4);
     c.fillStyle = 'rgba(255, 255, 255, 0.55)';
-    c.fill();
-    c.fillStyle = 'rgba(20, 70, 40, 0.16)';
-    c.fillRect(0, STAGE.h - 7, W, 7);
+    c.fillRect(0, STAGE.h - 12, W, 2.6);
+    const lg = c.createLinearGradient(0, g0, W, STAGE.h);
+    lg.addColorStop(0, 'rgba(255, 236, 170, 0.1)');
+    lg.addColorStop(0.5, 'rgba(255, 236, 170, 0)');
+    lg.addColorStop(1, 'rgba(0, 8, 4, 0.3)');
+    c.fillStyle = lg;
+    c.fillRect(0, g0, W, STAGE.h - g0);
 
-    // a goal at the right end, seen from the side
-    const a0: P = [472, SG + 14];
-    const a1: P = [472, SG - 62];
-    const b0: P = [494, SG - 12];
-    const b1: P = [494, SG - 84];
-    const cg: P = [534, SG + 14];
-    const dg: P = [552, SG - 12];
-    ellipse(c, 506, SG + 12, 44, 7);
-    c.fillStyle = SHADE;
+    // a goal at the right end, seen side on
+    const A0: P = [476, SG + 16];
+    const A1: P = [476, SG - 58];
+    const B0: P = [498, SG - 12];
+    const B1: P = [498, SG - 80];
+    const C0: P = [534, SG + 16];
+    const C1: P = [528, SG - 44];
+    const D0: P = [554, SG - 12];
+    const D1: P = [548, SG - 66];
+    ellipse(c, 512, SG + 12, 48, 6);
+    c.fillStyle = SHADOW;
     c.fill();
-    bar(c, [b0[0], b0[1], b1[0], b1[1]], 3.5);
-    c.fillStyle = 'rgba(255, 255, 255, 0.2)';
-    poly(c, [a1[0], a1[1], b1[0], b1[1], dg[0], dg[1], cg[0], cg[1]]);
-    c.fill();
-    poly(c, [a1[0], a1[1], cg[0], cg[1], a0[0], a0[1]]);
-    c.fill();
-    c.strokeStyle = 'rgba(255, 255, 255, 0.7)';
-    c.lineWidth = 1.2;
-    netQuad(c, a1, b1, dg, cg, 4, 9);
-    netQuad(c, a1, a1, cg, a0, 8, 7);
-    bar(c, [a1[0], a1[1], cg[0], cg[1], a0[0], a0[1]], 1.6, '#e9e4f0');
-    bar(c, [a0[0], a0[1], a1[0], a1[1], b1[0], b1[1]], 4);
+    rod(c, B0, B1, 3.2);
+    net(c, [B1, D1, D0, B0], 5, 8);
+    net(c, [C1, D1, D0, C0], 4, 8);
+    net(c, [A1, B1, D1, C1], 8, 5);
+    net(c, [A1, C1, C0, A0], 5, 8);
+    for (const [a, b] of [
+      [C1, D1],
+      [C0, C1],
+      [A1, C1],
+      [B1, D1],
+    ])
+      seg(c, a, b, 'rgba(170, 180, 192, 0.85)', 1.3);
+    rod(c, A0, A1, 3.6);
+    rod(c, A1, B1, 3.4);
 
     // a corner flag and a ball at the left end
-    ellipse(c, 36, SG + 14, 9, 3);
-    c.fillStyle = SHADE;
+    ellipse(c, 30, SG + 15, 8, 2.2);
+    c.fillStyle = SHADOW;
     c.fill();
-    poly(c, [32, SG - 50, 56, SG - 42, 32, SG - 33]);
-    fillStroke(c, COLOR.vermilion, 2.4);
-    bar(c, [32, SG + 13, 32, SG - 51], 2.4, GOLD);
-    ellipse(c, 70, SG + 31, 11, 3.4);
-    c.fillStyle = SHADE;
+    rod(c, [26, SG + 14], [26, SG - 46], 2);
+    shape(c, [
+      [26, SG - 46],
+      [46, SG - 40],
+      [26, SG - 33],
+    ]);
+    c.fillStyle = GOLD;
     c.fill();
-    circle(c, 68, SG + 22, 9.5);
-    fillStroke(c, '#ffffff', 2.4);
-    c.fillStyle = INK;
-    poly(c, [68, SG + 17.5, 72.3, SG + 20.6, 70.7, SG + 25.6, 65.3, SG + 25.6, 63.7, SG + 20.6]);
-    c.fill();
-    c.strokeStyle = INK;
-    c.lineWidth = 1.4;
-    c.beginPath();
-    for (const [x1, y1, x2, y2] of [
-      [68, 17.5, 68, 13],
-      [72.3, 20.6, 76.6, 19],
-      [70.7, 25.6, 73.4, 29.6],
-      [65.3, 25.6, 62.6, 29.6],
-      [63.7, 20.6, 59.4, 19],
-    ]) {
-      c.moveTo(x1, SG + y1);
-      c.lineTo(x2, SG + y2);
-    }
+    c.strokeStyle = EDGE;
+    c.lineWidth = 1;
     c.stroke();
+    const bx = 66;
+    const by = SG + 20;
+    ellipse(c, bx + 4, by + 9, 11, 3);
+    c.fillStyle = SHADOW;
+    c.fill();
+    circle(c, bx, by, 9);
+    c.fillStyle = POST_SHADE;
+    c.fill();
+    c.strokeStyle = EDGE;
+    c.lineWidth = 1.6;
+    c.stroke();
+    circle(c, bx - 1.2, by - 1.2, 7.2);
+    c.fillStyle = WHITE;
+    c.fill();
+    c.fillStyle = '#20262e';
+    c.beginPath();
+    polyCW(c, [bx, by - 4, bx + 3.8, by - 1.2, bx + 2.4, by + 3.2, bx - 2.4, by + 3.2, bx - 3.8, by - 1.2]);
+    c.fill();
   }
 
   private paintLobby(c: Ctx) {
-    c.fillStyle = LOBBY_A;
+    c.fillStyle = BG;
     c.fillRect(0, 0, W, H);
-    c.fillStyle = LOBBY_B;
-    for (let y = 0; y < H; y += 180) c.fillRect(0, y, W, 90);
-    const lines = layer(W, H, this.ratio, (lc) => pitchLines(lc, 14, 20, W - 28, H - 40, 5));
-    c.globalAlpha = 0.055;
-    c.drawImage(lines, 0, 0, W, H);
-    c.globalAlpha = 1;
-    const g = c.createRadialGradient(MX, H / 2, H * 0.2, MX, H / 2, H * 0.62);
-    g.addColorStop(0, 'rgba(10, 16, 24, 0)');
-    g.addColorStop(1, 'rgba(10, 16, 24, 0.42)');
-    c.fillStyle = g;
-    c.fillRect(0, 0, W, H);
+    c.strokeStyle = 'rgba(255, 255, 255, 0.035)';
+    c.lineWidth = 3;
+    seg(c, [0, H / 2], [W, H / 2], 'rgba(255, 255, 255, 0.035)', 3);
+    circle(c, W / 2, H / 2, 96);
+    c.stroke();
+    circle(c, W / 2, H / 2, 5);
+    c.fillStyle = 'rgba(255, 255, 255, 0.035)';
+    c.fill();
   }
 }

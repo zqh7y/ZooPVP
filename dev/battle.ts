@@ -7,7 +7,9 @@ import type { Inventory } from '../src/logic/inventory';
 import { newSave } from '../src/logic/save';
 import type { App, Match, ScreenName } from '../src/screen';
 import { createBattleScreen } from '../src/screens/battle';
-import { COLOR, FIELD, H, TYPE, W } from '../src/theme';
+import { ARENA } from '../src/data';
+import { project } from '../src/draw/camera';
+import { COLOR, H, TYPE, W } from '../src/theme';
 import type { ArmySpec, DeathKind, PetType, SquadSpec, WeaponType } from '../src/types';
 import { label } from '../src/util';
 import { param, paramNum, params, stage } from './harness';
@@ -68,8 +70,8 @@ function deathPage(which: string) {
   const kinds = which === 'all' ? DEATH_KINDS : [which as DeathKind];
   const past = paramNum('t', 0.03);
   const when = (k: DeathKind) => (which === 'all' ? DEATH_PAYOFF[k] + past : past);
-  const cell = (i: number) =>
-    which === 'all' ? { x: FIELD.x + FIELD.w * (0.25 + 0.5 * (i % 2)), y: FIELD.y + 150 + 195 * Math.floor(i / 2) } : { x: W / 2, y: FIELD.y + FIELD.h / 2 };
+  // arena points: the camera puts them on screen, farther ones smaller
+  const cell = (i: number) => (which === 'all' ? { x: ARENA.w * (0.27 + 0.46 * (i % 2)), y: 120 + 190 * Math.floor(i / 2) } : { x: ARENA.w / 2, y: ARENA.h / 2 });
   const longest = Math.max(...kinds.map(when));
   let done = false;
   const run = () => {
@@ -102,7 +104,10 @@ function deathPage(which: string) {
       deaths.drawOver(ctx);
       fx.drawOver(ctx);
       fx.drawScreen(ctx);
-      kinds.forEach((k, i) => label(ctx, `${k} ${when(k).toFixed(2)}s`, cell(i).x, cell(i).y + 26, TYPE.small));
+      kinds.forEach((k, i) => {
+        const p = project(cell(i).x, cell(i).y);
+        label(ctx, `${k} ${when(k).toFixed(2)}s`, p.x, p.y + 22, TYPE.small, { onPitch: true });
+      });
     },
   });
 }
@@ -206,9 +211,9 @@ function fxPage(rain: string) {
           fx.revealRays(90 + i * 120, 560, lv);
         });
         fx.linkSpark(150, 760);
-        fx.word(300, 760, 'BONK!');
+        fx.word(300, 760, 'S-CLASS');
         fx.floatText(420, 760, '+30', COLOR.goldLight);
-        if (rain === 'confetti') fx.confettiCannon();
+        if (rain === 'confetti') fx.confettiCannon(0);
         if (rain === 'drizzle') fx.sadDrizzle();
         for (let i = 0; i < Math.round(paramNum('t', 0.25) * 60); i++) fx.update(1 / 60);
       }

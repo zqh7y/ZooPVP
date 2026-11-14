@@ -3,104 +3,160 @@ import { CLASS_FX, COLOR, RAINBOW, TIER } from '../theme';
 import { circle, clamp, ellipse, fillStroke, poly, rr, starPath } from '../util';
 
 /*
- * The four weapons, each in seven classes: the same object growing richer, with the class colour as trim.
+ * The four weapons, each in seven classes: the same object in better materials. One key light from the upper
+ * left: every part has a bright upper-left edge and a darker lower-right side. Class shows as metal, not hue:
+ * grey steel (E, D, C), silver (B), gold (A), gold with a glow (S), white-gold with a slow glint (SSS).
  * Everything is drawn in a unit box (1 = the weapon's length) so a piece looks the same at any size.
- * The small shared helpers (trim colour, sparkle, glow, flame, rainbow rim) are used by the gear and pets too.
+ * The small shared helpers (metal, glow, glint, heat) are used by the gear and the pets too.
  */
 type Ctx = CanvasRenderingContext2D;
 
-const STEEL = '#e8eef5';
-const STEEL_SHADE = '#aab4c6';
-const WOOD_LIGHT = '#e0a868';
+/** steel: the face, the bright upper-left edge, the darker lower bevel */
+export const STEEL = '#c4ccd6';
+export const STEEL_HI = '#f3f6f9';
+export const STEEL_LO = '#87929f';
+/** wood: the face, its lit side, its shade and the grain */
+const WOOD = '#a97c52';
+const WOOD_HI = '#c99c70';
+const WOOD_LO = '#7c5737';
+const GRAIN = '#8c6440';
+/** leather wraps */
+const LEATHER = '#3f3630';
+const LEATHER_HI = '#6a5a4e';
+/** dark iron (the club from A) */
+const IRON = '#3d444e';
+const IRON_HI = '#5f6874';
+const IRON_LO = '#272c33';
 
 /** class 1..7 as an index 0..6 */
 export const cls = (level: number) => clamp(Math.round(level), 1, 7) - 1;
 
-/** The class colour used as trim; an SSS piece runs through the rainbow (i picks where it starts). */
-export const trimOf = (k: number, t: number, i = 0) => (k === 6 ? RAINBOW[(i + Math.floor(t * 4)) % 5] : TIER.metal[k]);
+/** The class metal used as trim; an SSS piece slowly shimmers through white-gold (i picks where it starts). */
+export const trimOf = (k: number, t: number, i = 0) => (k === 6 ? RAINBOW[(i + Math.floor(t * 1.5)) % RAINBOW.length] : TIER.metal[k]);
 
-/** A four-point twinkle, s px at its largest. */
-export function sparkle(ctx: Ctx, x: number, y: number, s: number, t: number, phase = 0) {
-  const k = 0.55 + 0.45 * Math.sin(t * 5 + phase);
-  starPath(ctx, x, y, s * k, s * k * 0.3, 4);
-  ctx.fillStyle = CLASS_FX.spark;
-  ctx.fill();
-  ctx.lineWidth = s * 0.1;
-  ctx.strokeStyle = '#e89a1c';
-  ctx.stroke();
+/** '#rrggbb' as 'rgba(r,g,b,a)' */
+export function rgba(hex: string, a: number) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`;
 }
 
-/** A soft halo without blur: two see-through ovals. */
+/** Fills the current path with see-through ink: a shade laid over what is there. */
+export function shadeFill(ctx: Ctx, a: number) {
+  const g = ctx.globalAlpha;
+  ctx.globalAlpha = g * a;
+  ctx.fillStyle = COLOR.ink;
+  ctx.fill();
+  ctx.globalAlpha = g;
+}
+
+/** A metal band of class k: the metal, a light line along its top, a dark one along its bottom. */
+export function band(ctx: Ctx, x: number, y: number, w: number, h: number, k: number, t: number, lw: number) {
+  rr(ctx, x, y, w, h, Math.min(w, h) * 0.35);
+  fillStroke(ctx, trimOf(k, t), lw);
+  ctx.fillStyle = TIER.metalLight[k];
+  ctx.fillRect(x + lw * 0.5, y + lw * 0.5, w * 0.55, Math.max(h * 0.3, lw * 0.5));
+  ctx.fillStyle = TIER.tileDark[k];
+  ctx.fillRect(x + w * 0.45, y + h - lw * 0.5 - h * 0.26, w * 0.55 - lw * 0.5, h * 0.26);
+}
+
+/** A round metal stud or boss of class k, lit from the upper left. */
+export function stud(ctx: Ctx, x: number, y: number, s: number, k: number, t: number, lw: number) {
+  circle(ctx, x, y, s);
+  fillStroke(ctx, TIER.tileDark[k], lw);
+  circle(ctx, x - s * 0.14, y - s * 0.14, s * 0.78);
+  ctx.fillStyle = trimOf(k, t);
+  ctx.fill();
+  circle(ctx, x - s * 0.36, y - s * 0.36, s * 0.26);
+  ctx.fillStyle = TIER.metalLight[k];
+  ctx.fill();
+}
+
+/** A slow four-point glint of white-gold light, s at its largest; dark half the time. */
+export function sparkle(ctx: Ctx, x: number, y: number, s: number, t: number, phase = 0) {
+  const k = Math.sin(t * 1.9 + phase);
+  if (k < 0.15) return;
+  const a = s * (k - 0.15) * 1.18;
+  starPath(ctx, x, y, a, a * 0.2, 4);
+  ctx.fillStyle = CLASS_FX.spark;
+  ctx.fill();
+}
+
+const GLOWS = new Map<string, HTMLCanvasElement>();
+/** A soft halo of light behind a piece (S and SSS): a picture made once per colour, so it costs one copy. */
 export function glow(ctx: Ctx, x: number, y: number, rx: number, ry: number, color: string, t: number) {
-  const p = 1 + 0.07 * Math.sin(t * 4);
+  let c = GLOWS.get(color);
+  if (!c) {
+    c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const g = c.getContext('2d')!;
+    const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gr.addColorStop(0, rgba(color, 0.42));
+    gr.addColorStop(0.45, rgba(color, 0.2));
+    gr.addColorStop(1, rgba(color, 0));
+    g.fillStyle = gr;
+    g.fillRect(0, 0, 64, 64);
+    GLOWS.set(color, c);
+  }
+  const p = 1 + 0.05 * Math.sin(t * 2.2);
+  ctx.drawImage(c, x - rx * p, y - ry * p, rx * 2 * p, ry * 2 * p);
+}
+
+/** Heat rising off something hot: n faint gold wavy lines, s tall, standing on (x, y). */
+export function heat(ctx: Ctx, x: number, y: number, s: number, t: number, lw: number, n = 2) {
   const a = ctx.globalAlpha;
-  ctx.fillStyle = color;
-  ctx.globalAlpha = a * 0.2;
-  ellipse(ctx, x, y, rx * p, ry * p);
-  ctx.fill();
-  ctx.globalAlpha = a * 0.28;
-  ellipse(ctx, x, y, rx * 0.7 * p, ry * 0.7 * p);
-  ctx.fill();
+  ctx.lineWidth = lw;
+  ctx.strokeStyle = CLASS_FX.s;
+  for (let i = 0; i < n; i++) {
+    const ph = (t * 0.8 + i / n) % 1;
+    const y0 = y - ph * s * 0.45;
+    const x0 = x + (i - (n - 1) / 2) * s * 0.34;
+    const wv = s * 0.09;
+    ctx.globalAlpha = a * Math.sin(ph * Math.PI) * 0.7;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.bezierCurveTo(x0 + wv, y0 - s * 0.15, x0 - wv, y0 - s * 0.3, x0 + wv * 0.5, y0 - s * 0.5);
+    ctx.stroke();
+  }
   ctx.globalAlpha = a;
 }
 
-/** A flickering flame standing on (x, y), s tall. lw > 0 outlines it. */
-export function flame(ctx: Ctx, x: number, y: number, s: number, t: number, outer = '#ff8a1e', inner = '#ffe066', lw = 0) {
-  const w = Math.sin(t * 9 + x * 3) * 0.16 * s;
-  for (let i = 0; i < 2; i++) {
-    const k = i ? 0.55 : 1;
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.bezierCurveTo(x - 0.62 * s * k, y - 0.08 * s * k, x - 0.42 * s * k, y - 0.6 * s * k, x + w * k, y - s * k);
-    ctx.bezierCurveTo(x + 0.08 * s * k + w * 0.4, y - 0.6 * s * k, x + 0.62 * s * k, y - 0.32 * s * k, x, y);
-    ctx.fillStyle = i ? inner : outer;
-    ctx.fill();
-    if (!i && lw) {
-      ctx.lineWidth = lw;
-      ctx.strokeStyle = COLOR.ink;
-      ctx.stroke();
-    }
-  }
+/** Clips to the current path and runs draw, for light and shade that must stay inside a shape. */
+function inside(ctx: Ctx, draw: () => void) {
+  ctx.save();
+  ctx.clip();
+  draw();
+  ctx.restore();
 }
 
-/** Strokes the current path as a moving rainbow (the SSS rim). seg = the length of one colour. */
-export function rainbowStroke(ctx: Ctx, lw: number, t: number, seg: number) {
-  ctx.lineWidth = lw;
-  ctx.setLineDash([seg, seg * 4]);
-  for (let i = 0; i < 5; i++) {
-    ctx.lineDashOffset = -i * seg - t * seg * 3;
-    ctx.strokeStyle = RAINBOW[i];
-    ctx.stroke();
-  }
-  ctx.setLineDash([]);
-}
-
-// ------------------------------------------------------------------ knife: kitchen knife -> legendary tanto
+// ------------------------------------------------------------------ knife: kitchen knife -> tanto
 
 function knife(ctx: Ctx, k: number, t: number, lw: number) {
   const g = k < 2 ? 0 : k < 4 ? 1 : 2;
-  const e = [0.18, 0.13, 0.115][g]; // the cutting edge
-  const sp = -0.09; // the spine
-  const tr = trimOf(k, t);
-  if (k >= 5) glow(ctx, 0.02, -0.68, 0.3, 0.42, TIER.metalLight[k], t);
-  // handle
-  rr(ctx, -0.075, -0.4, 0.15, 0.4, 0.06);
-  fillStroke(ctx, g === 0 ? COLOR.wood : g === 1 ? '#5a4664' : '#2f2a45', lw);
-  if (g === 0) {
-    ctx.fillStyle = tr;
-    if (k === 1) ctx.fillRect(-0.075 + lw / 2, -0.3, 0.15 - lw, 0.07);
-    circle(ctx, 0, -0.12, 0.028);
+  const e = [0.15, 0.12, 0.11][g]; // the cutting edge
+  const sp = -0.085; // the spine
+  if (k >= 5) glow(ctx, 0.02, -0.66, 0.34, 0.46, k === 6 ? CLASS_FX.sss : CLASS_FX.s, t);
+  // the handle: wood with rivets, then a leather wrap
+  rr(ctx, -0.07, -0.4, 0.14, 0.4, 0.05);
+  fillStroke(ctx, k < 2 ? WOOD : LEATHER, lw);
+  ctx.fillStyle = k < 2 ? WOOD_HI : LEATHER_HI;
+  ctx.fillRect(-0.07 + lw * 0.5, -0.38, 0.035, 0.34);
+  if (k < 2) {
+    ctx.fillStyle = STEEL;
+    circle(ctx, 0, -0.12, 0.024);
     ctx.fill();
-    circle(ctx, 0, -0.22 - k * 0.14, 0.028);
+    circle(ctx, 0, -0.27, 0.024);
     ctx.fill();
   } else {
-    ctx.fillStyle = TIER.metalLight[k];
-    for (let i = 0; i < 3; i++) {
-      poly(ctx, [0, -0.09 - i * 0.1, 0.04, -0.13 - i * 0.1, 0, -0.17 - i * 0.1, -0.04, -0.13 - i * 0.1]);
-      ctx.fill();
+    ctx.lineWidth = lw * 0.7;
+    ctx.strokeStyle = LEATHER_HI;
+    ctx.beginPath();
+    for (let i = 0; i < 4; i++) {
+      ctx.moveTo(-0.06, -0.06 - i * 0.08);
+      ctx.lineTo(0.06, -0.11 - i * 0.08);
     }
+    ctx.stroke();
   }
-  // blade
+  // the blade
   ctx.beginPath();
   ctx.moveTo(sp, -0.4);
   if (g === 0) {
@@ -118,58 +174,50 @@ function knife(ctx: Ctx, k: number, t: number, lw: number) {
     ctx.lineTo(e, -0.4);
   }
   ctx.closePath();
-  fillStroke(ctx, STEEL, lw);
-  ctx.fillStyle = STEEL_SHADE;
-  ctx.fillRect(sp + lw * 0.5, -0.8, 0.05, 0.38);
-  // the edge: plain steel shine, the class colour from A up
-  ctx.lineWidth = 0.034;
-  ctx.strokeStyle = k >= 4 ? TIER.metalLight[k] : COLOR.white;
-  ctx.beginPath();
-  ctx.moveTo(e - 0.045, -0.45);
-  ctx.lineTo(e - 0.045, -0.78);
+  ctx.fillStyle = STEEL;
+  ctx.fill();
+  inside(ctx, () => {
+    // the bevel toward the edge is darker, the flat by the spine catches the light
+    ctx.fillStyle = STEEL_LO;
+    ctx.fillRect(e - 0.075, -1.05, 0.2, 0.7);
+    ctx.fillStyle = STEEL_HI;
+    ctx.fillRect(sp - 0.02, -1.05, 0.055, 0.7);
+    if (k >= 4) {
+      // a hamon line in the class metal
+      ctx.fillStyle = TIER.metalLight[k];
+      ctx.fillRect(e - 0.085, -0.9, 0.018, 0.5);
+    }
+  });
+  ctx.lineWidth = lw;
+  ctx.strokeStyle = COLOR.ink;
   ctx.stroke();
-  if (k === 6) {
-    ctx.beginPath();
-    ctx.moveTo(e - 0.045, -0.45);
-    ctx.lineTo(e - 0.045, -0.8);
-    rainbowStroke(ctx, 0.04, t, 0.07);
+  // guard and pommel in the class metal
+  if (g === 0) band(ctx, -0.085, -0.445, 0.17, 0.065, k, t, lw * 0.8);
+  else {
+    ellipse(ctx, 0.012, -0.41, 0.14 + 0.01 * k, 0.045);
+    fillStroke(ctx, trimOf(k, t), lw);
+    ellipse(ctx, -0.02, -0.425, 0.08, 0.014);
+    ctx.fillStyle = TIER.metalLight[k];
+    ctx.fill();
   }
-  // guard and pommel
-  if (g === 0) {
-    rr(ctx, -0.085, -0.44, 0.17, 0.07, 0.02);
-    fillStroke(ctx, TIER.metalLight[0], lw * 0.8);
-  } else {
-    ellipse(ctx, 0.012, -0.41, 0.15 + 0.012 * k, 0.048);
-    fillStroke(ctx, tr, lw);
-  }
-  if (k >= 3) {
-    circle(ctx, 0, -0.02, 0.075);
-    fillStroke(ctx, tr, lw);
-  }
-  if (k >= 4) sparkle(ctx, 0.06, -0.92, k === 6 ? 0.16 : 0.11, t, 1);
+  if (k >= 3) stud(ctx, 0, -0.02, 0.065, k, t, lw);
+  if (k === 6) sparkle(ctx, 0.0, -0.84, 0.15, t, 1);
 }
 
-// ------------------------------------------------------------------ bat: wooden bat -> studded kanabo
+// ------------------------------------------------------------------ bat: wooden bat -> iron club
 
 function bat(ctx: Ctx, k: number, t: number, lw: number) {
-  const bw = 0.115 + k * 0.012; // half the barrel
-  const wood = k < 3;
-  const body = wood ? WOOD_LIGHT : k === 3 ? '#96643f' : k === 6 ? '#5a45b0' : k === 5 ? '#4b2534' : '#4a4458';
-  const shade = wood ? '#b9793f' : k === 3 ? '#6b4227' : k === 6 ? '#3d2c84' : k === 5 ? '#301520' : '#2f2a3a';
-  const tr = trimOf(k, t);
+  const bw = 0.115 + k * 0.01; // half the barrel
+  const wood = k < 4;
   const studs = k < 3 ? 0 : k < 4 ? 2 : k < 6 ? 3 : 4;
-  if (k >= 5) glow(ctx, 0, -0.74, 0.34, 0.36, TIER.metalLight[k], t);
+  if (k >= 5) glow(ctx, 0, -0.72, 0.36, 0.42, k === 6 ? CLASS_FX.sss : CLASS_FX.s, t);
   // side studs first, so only their points stick out of the barrel
   for (let i = 0; i < studs; i++) {
     const y = -0.92 + ((i + 0.5) * 0.36) / studs;
     for (const s of [-1, 1]) {
-      poly(ctx, [s * (bw - 0.02), y - 0.05, s * (bw + 0.075), y, s * (bw - 0.02), y + 0.05]);
-      fillStroke(ctx, trimOf(k, t, i), lw * 0.8);
+      poly(ctx, [s * (bw - 0.02), y - 0.045, s * (bw + 0.065), y, s * (bw - 0.02), y + 0.045]);
+      fillStroke(ctx, s < 0 ? TIER.metalLight[k] : trimOf(k, t, i), lw * 0.8);
     }
-  }
-  if (k >= 5) {
-    poly(ctx, [-0.05, -0.97, 0, -1.09, 0.05, -0.97]);
-    fillStroke(ctx, tr, lw * 0.8);
   }
   ctx.beginPath();
   ctx.moveTo(-0.05, -0.02);
@@ -182,167 +230,160 @@ function bat(ctx: Ctx, k: number, t: number, lw: number) {
   ctx.bezierCurveTo(bw, -0.5, 0.055, -0.5, 0.05, -0.34);
   ctx.lineTo(0.05, -0.02);
   ctx.closePath();
-  fillStroke(ctx, body, lw);
-  // one shade down the right, one gloss down the left
-  ctx.fillStyle = shade;
-  rr(ctx, bw * 0.35, -0.93, bw * 0.5, 0.36, 0.03);
+  ctx.fillStyle = wood ? WOOD : IRON;
   ctx.fill();
-  ctx.fillStyle = wood ? '#f6d29c' : 'rgba(255,255,255,0.3)';
-  rr(ctx, -bw * 0.72, -0.92, bw * 0.3, 0.3, 0.02);
-  ctx.fill();
-  // knob and grip tape
-  ellipse(ctx, 0, -0.025, 0.085, 0.045);
-  fillStroke(ctx, k >= 3 ? tr : shade, lw);
-  if (k >= 1) {
-    rr(ctx, -0.058, -0.32, 0.116, 0.22, 0.02);
-    fillStroke(ctx, k >= 3 ? TIER.metalLight[k] : tr, lw * 0.8);
-  }
-  // iron rings from C, stud heads on the face from B
-  if (k >= 2) {
-    ctx.fillStyle = tr;
-    ctx.fillRect(-bw + lw / 2, -0.62, bw * 2 - lw, 0.05);
-    if (k >= 4) ctx.fillRect(-bw + lw / 2, -0.955, bw * 2 - lw, 0.04);
-  }
-  for (let i = 0; i < studs; i++) {
-    circle(ctx, i % 2 ? 0.04 : -0.04, -0.9 + ((i + 0.5) * 0.3) / studs, 0.032);
-    ctx.fillStyle = trimOf(k, t, i + 2);
-    ctx.fill();
-  }
-  if (k >= 4) sparkle(ctx, -bw - 0.03, -0.9, k === 6 ? 0.16 : 0.11, t, 2);
-}
-
-// ------------------------------------------------------------------ shield: wooden lid -> crested war shield
-
-function shieldPath(ctx: Ctx, g: number) {
-  if (g === 0) {
-    circle(ctx, 0, 0, 0.47);
-    return;
-  }
-  ctx.beginPath();
-  if (g === 1) {
-    ctx.moveTo(-0.41, -0.42);
-    ctx.quadraticCurveTo(0, -0.54, 0.41, -0.42);
-  } else {
-    ctx.moveTo(-0.45, -0.44);
-    ctx.lineTo(-0.2, -0.36);
-    ctx.lineTo(0, -0.5);
-    ctx.lineTo(0.2, -0.36);
-    ctx.lineTo(0.45, -0.44);
-  }
-  ctx.lineTo(0.41, 0.04);
-  ctx.quadraticCurveTo(0.36, 0.36, 0, 0.5);
-  ctx.quadraticCurveTo(-0.36, 0.36, -0.41, 0.04);
-  ctx.closePath();
-}
-
-function shield(ctx: Ctx, k: number, t: number, lw: number) {
-  const g = k < 3 ? 0 : k < 5 ? 1 : 2;
-  const tr = trimOf(k, t);
-  const rim = k === 0 ? COLOR.woodDark : k >= 5 ? COLOR.gold : tr;
-  const face = k < 2 ? WOOD_LIGHT : k === 4 ? COLOR.paper : k === 5 ? '#d92447' : k === 6 ? '#fff0ff' : TIER.tile[k];
-  if (k >= 5) glow(ctx, 0, 0, 0.6, 0.6, TIER.metalLight[k], t);
-  shieldPath(ctx, g);
-  fillStroke(ctx, rim, lw);
-  if (k === 6) {
-    shieldPath(ctx, g);
-    rainbowStroke(ctx, 0.07, t, 0.16);
-    shieldPath(ctx, g);
-    ctx.lineWidth = lw;
-    ctx.strokeStyle = COLOR.ink;
-    ctx.stroke();
-  }
-  ctx.save();
-  ctx.scale(0.76, 0.76);
-  shieldPath(ctx, g);
-  fillStroke(ctx, face, lw * 0.9);
-  // one shade on the right half
-  ctx.clip();
-  ctx.globalAlpha *= 0.14;
-  ctx.fillStyle = COLOR.ink;
-  ctx.fillRect(0, -0.7, 0.7, 1.4);
-  ctx.restore();
-  if (k < 2) {
-    // planks and nails
-    ctx.lineWidth = lw * 0.7;
-    ctx.strokeStyle = COLOR.woodDark;
-    for (const x of [-0.13, 0.13]) {
+  inside(ctx, () => {
+    // a round barrel: shade down the right, a lit strip down the left, grain along the wood
+    ctx.fillStyle = wood ? WOOD_LO : IRON_LO;
+    ctx.fillRect(bw * 0.3, -1.05, bw, 1.05);
+    ctx.fillStyle = wood ? WOOD_HI : IRON_HI;
+    ctx.fillRect(-bw * 0.62, -1.05, bw * 0.28, 1.0);
+    if (wood) {
+      ctx.lineWidth = lw * 0.4;
+      ctx.strokeStyle = GRAIN;
       ctx.beginPath();
-      ctx.moveTo(x, -0.32);
-      ctx.lineTo(x, 0.32);
+      ctx.moveTo(bw * 0.1, -0.56);
+      ctx.quadraticCurveTo(bw * 0.2, -0.75, bw * 0.05, -0.93);
       ctx.stroke();
     }
-  }
-  if (k === 0) {
-    // a lid: its handle
-    rr(ctx, -0.17, -0.06, 0.34, 0.12, 0.06);
-    fillStroke(ctx, COLOR.wood, lw);
-  } else if (k < 3) {
-    circle(ctx, 0, 0, 0.1 + k * 0.02);
-    fillStroke(ctx, k === 1 ? tr : TIER.metalLight[k], lw);
-  } else {
-    // a five-petal flower as the crest
-    const pc = k === 4 ? COLOR.gold : k === 5 ? COLOR.goldLight : tr;
-    for (let i = 0; i < 5; i++) {
-      const a = (i * Math.PI * 2) / 5 - Math.PI / 2;
-      circle(ctx, Math.cos(a) * 0.12, Math.sin(a) * 0.12 - 0.02, 0.075);
-      fillStroke(ctx, k === 6 ? RAINBOW[i] : pc, lw * 0.7);
+  });
+  ctx.lineWidth = lw;
+  ctx.strokeStyle = COLOR.ink;
+  ctx.stroke();
+  // knob and grip
+  ellipse(ctx, 0, -0.025, 0.08, 0.042);
+  fillStroke(ctx, k >= 3 ? trimOf(k, t) : WOOD_LO, lw);
+  if (k >= 1) {
+    rr(ctx, -0.056, -0.31, 0.112, 0.24, 0.02);
+    fillStroke(ctx, LEATHER, lw * 0.8);
+    ctx.lineWidth = lw * 0.6;
+    ctx.strokeStyle = LEATHER_HI;
+    ctx.beginPath();
+    for (let i = 0; i < 4; i++) {
+      ctx.moveTo(-0.05, -0.09 - i * 0.055);
+      ctx.lineTo(0.05, -0.12 - i * 0.055);
     }
-    circle(ctx, 0, -0.02, 0.055);
-    fillStroke(ctx, k >= 5 ? COLOR.white : TIER.metalLight[k], lw * 0.7);
+    ctx.stroke();
   }
-  if (g === 2) {
-    // gold studs on the corners
-    ctx.fillStyle = COLOR.goldLight;
-    for (const x of [-0.33, 0.33]) {
-      circle(ctx, x, -0.33, 0.035);
+  // metal rings from C, stud heads on the face from B
+  if (k >= 2) band(ctx, -bw - 0.005, -0.635, bw * 2 + 0.01, 0.05, k, t, lw * 0.8);
+  if (k >= 4) band(ctx, -bw - 0.005, -0.965, bw * 2 + 0.01, 0.045, k, t, lw * 0.8);
+  for (let i = 0; i < studs; i++) stud(ctx, i % 2 ? 0.035 : -0.035, -0.88 + ((i + 0.5) * 0.24) / studs, 0.03, k, t, lw * 0.6);
+  if (k === 6) sparkle(ctx, -bw * 0.4, -0.82, 0.16, t, 2);
+}
+
+// ------------------------------------------------------------------ shield: a round shield with a boss
+
+function shield(ctx: Ctx, k: number, t: number, lw: number) {
+  const R = 0.47;
+  const fr = 0.38; // the face inside the rim
+  const wood = k < 3;
+  const face = wood ? WOOD : k === 3 ? TIER.metal[3] : k === 4 ? IRON : TIER.tile[k];
+  const faceLo = wood ? WOOD_LO : k === 3 ? TIER.tile[3] : k === 4 ? IRON_LO : TIER.tileDark[k];
+  const faceHi = wood ? WOOD_HI : k === 4 ? IRON_HI : TIER.metalLight[k];
+  if (k >= 5) glow(ctx, 0, 0, 0.66, 0.66, k === 6 ? CLASS_FX.sss : CLASS_FX.s, t);
+  // the rim: a ring of the class metal, lit on the upper left
+  circle(ctx, 0, 0, R);
+  fillStroke(ctx, TIER.tileDark[k], lw);
+  ctx.beginPath();
+  ctx.arc(-0.02, -0.02, R - lw * 0.5 - 0.015, 0, Math.PI * 2);
+  ctx.fillStyle = trimOf(k, t);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(0, 0, R - 0.035, Math.PI * 0.95, Math.PI * 1.55);
+  ctx.lineWidth = 0.03;
+  ctx.strokeStyle = TIER.metalLight[k];
+  ctx.stroke();
+  // the face: its shade falls to the lower right
+  circle(ctx, 0, 0, fr);
+  ctx.fillStyle = faceLo;
+  ctx.fill();
+  inside(ctx, () => {
+    circle(ctx, -0.045, -0.05, fr * 0.95);
+    ctx.fillStyle = face;
+    ctx.fill();
+    if (wood) {
+      // planks
+      ctx.lineWidth = lw * 0.6;
+      ctx.strokeStyle = GRAIN;
+      ctx.beginPath();
+      for (const x of [-0.14, 0.12]) {
+        ctx.moveTo(x, -0.4);
+        ctx.lineTo(x, 0.4);
+      }
+      ctx.stroke();
+    } else if (k === 3) {
+      // brushed steel: fine lines across
+      ctx.lineWidth = 0.012;
+      ctx.strokeStyle = TIER.metalLight[3];
+      ctx.beginPath();
+      for (let i = -3; i <= 3; i++) {
+        ctx.moveTo(-0.36, i * 0.09 - 0.02);
+        ctx.lineTo(0.2, i * 0.09 - 0.05);
+      }
+      ctx.stroke();
+    }
+    // a soft sheen on the upper left
+    ellipse(ctx, -0.17, -0.19, 0.13, 0.06, -0.75);
+    ctx.fillStyle = faceHi;
+    ctx.fill();
+  });
+  circle(ctx, 0, 0, fr);
+  ctx.lineWidth = lw * 0.7;
+  ctx.strokeStyle = COLOR.ink;
+  ctx.stroke();
+  // rivets round the rim from D
+  if (k >= 1) {
+    ctx.fillStyle = TIER.metalLight[k];
+    for (let i = 0; i < 6; i++) {
+      const a = (i * Math.PI) / 3 + 0.5;
+      circle(ctx, Math.cos(a) * 0.425, Math.sin(a) * 0.425, 0.018);
       ctx.fill();
     }
   }
-  if (k >= 4) sparkle(ctx, -0.26, -0.26, k === 6 ? 0.2 : 0.14, t, 3);
+  // the raised boss: a contact shadow to the lower right, then the dome catching the light
+  circle(ctx, 0.03, 0.035, 0.14);
+  shadeFill(ctx, 0.3);
+  stud(ctx, 0, 0, 0.125 + (k >= 4 ? 0.015 : 0), wood ? Math.max(k, 1) : k, t, lw);
+  if (k === 6) sparkle(ctx, -0.2, -0.22, 0.2, t, 3);
 }
 
-// ------------------------------------------------------------------ spear: bamboo pole -> great yari
+// ------------------------------------------------------------------ spear: sharpened pole -> long yari
 
 function spear(ctx: Ctx, k: number, t: number, lw: number) {
-  const w = 0.04 + k * 0.003; // half the shaft
-  const bl = 0.25 + k * 0.022; // blade length
+  const w = 0.038 + k * 0.003; // half the shaft
+  const bl = 0.25 + k * 0.02; // blade length
   const by = -1 + bl;
-  const bw = 0.105 + k * 0.012;
-  const tr = trimOf(k, t);
-  const shaft = k < 2 ? '#cfd66e' : k === 5 ? '#8c1f33' : k === 6 ? '#f1e9ff' : k === 4 ? '#5a3a2a' : COLOR.wood;
-  if (k >= 5) glow(ctx, 0, -0.84, 0.26, 0.3, TIER.metalLight[k], t);
-  if (k === 0) {
-    // a pole cut to a point
-    poly(ctx, [-w, 0, -w, -0.86, w * 0.5, -1, w, -0.8, w, 0]);
-    fillStroke(ctx, shaft, lw);
-    poly(ctx, [-w, -0.86, w * 0.5, -1, w, -0.8]);
-    fillStroke(ctx, '#f3f0c0', lw * 0.7);
-  } else {
-    rr(ctx, -w, by, w * 2, -by, w);
-    fillStroke(ctx, shaft, lw);
-  }
-  if (k < 2) {
-    ctx.lineWidth = lw * 0.6;
-    ctx.strokeStyle = '#7f8a2c';
-    for (const y of [-0.2, -0.42, -0.64]) {
-      ctx.beginPath();
-      ctx.moveTo(-w, y);
-      ctx.lineTo(w, y);
-      ctx.stroke();
+  const bw = 0.1 + k * 0.01;
+  if (k >= 5) glow(ctx, 0, -0.84, 0.28, 0.32, k === 6 ? CLASS_FX.sss : CLASS_FX.s, t);
+  // the shaft
+  if (k === 0) poly(ctx, [-w, 0, -w, -0.86, w * 0.4, -1, w, -0.84, w, 0]);
+  else rr(ctx, -w, by, w * 2, -by, w);
+  ctx.fillStyle = k >= 4 ? IRON : WOOD;
+  ctx.fill();
+  inside(ctx, () => {
+    ctx.fillStyle = k >= 4 ? IRON_LO : WOOD_LO;
+    ctx.fillRect(w * 0.2, -1.05, w, 1.1);
+    ctx.fillStyle = k >= 4 ? IRON_HI : WOOD_HI;
+    ctx.fillRect(-w * 0.7, -1.05, w * 0.45, 1.1);
+    if (k === 0) {
+      // the fire-hardened point
+      poly(ctx, [-w, -0.84, w * 0.4, -1, w, -0.8]);
+      ctx.fillStyle = WOOD_LO;
+      ctx.fill();
     }
-  }
+  });
+  ctx.lineWidth = lw;
+  ctx.strokeStyle = COLOR.ink;
+  ctx.stroke();
   if (k >= 5) {
     // the tassel swings under the collar
-    const sw = Math.sin(t * 3) * 0.03;
-    const n = k === 6 ? 2 : 1;
-    for (let i = 0; i < n; i++) {
-      const s = i ? 1 : -1;
-      ctx.beginPath();
-      ctx.moveTo(s * w, by + 0.05);
-      ctx.quadraticCurveTo(s * 0.2 + sw, by + 0.1, s * 0.13 + sw * 2, by + 0.33);
-      ctx.quadraticCurveTo(s * 0.04 + sw, by + 0.2, s * w, by + 0.05);
-      fillStroke(ctx, trimOf(k, t, i * 2), lw * 0.8);
-    }
+    const sw = Math.sin(t * 2.6) * 0.03;
+    ctx.beginPath();
+    ctx.moveTo(w, by + 0.05);
+    ctx.quadraticCurveTo(0.18 + sw, by + 0.1, 0.12 + sw * 2, by + 0.3);
+    ctx.quadraticCurveTo(0.03 + sw, by + 0.18, -w, by + 0.05);
+    fillStroke(ctx, trimOf(k, t, 1), lw * 0.8);
   }
   if (k >= 1) {
     if (k >= 4) {
@@ -351,40 +392,36 @@ function spear(ctx: Ctx, k: number, t: number, lw: number) {
       for (const d of [-1, 1]) {
         ctx.beginPath();
         ctx.moveTo(d * w, by + 0.01);
-        ctx.quadraticCurveTo(d * 0.2 * s, by, d * 0.23 * s, by - 0.15 * s);
+        ctx.quadraticCurveTo(d * 0.19 * s, by, d * 0.22 * s, by - 0.14 * s);
         ctx.quadraticCurveTo(d * 0.1 * s, by - 0.07, d * w, by - 0.08);
         ctx.closePath();
-        fillStroke(ctx, STEEL, lw * 0.85);
+        fillStroke(ctx, d < 0 ? STEEL_HI : STEEL_LO, lw * 0.8);
       }
     }
-    // the blade: a leaf with a ridge
+    // the blade: a leaf with a ridge, its left face lit and its right face in shade
     ctx.beginPath();
     ctx.moveTo(0, -1);
     ctx.quadraticCurveTo(bw * 1.25, -1 + bl * 0.5, bw * 0.55, by);
     ctx.lineTo(-bw * 0.55, by);
     ctx.quadraticCurveTo(-bw * 1.25, -1 + bl * 0.5, 0, -1);
     ctx.closePath();
-    fillStroke(ctx, k === 1 ? '#c8ccd4' : STEEL, lw);
-    ctx.lineWidth = lw * 0.6;
-    ctx.strokeStyle = k >= 4 ? TIER.metal[k] : STEEL_SHADE;
-    ctx.beginPath();
-    ctx.moveTo(0, -1 + bl * 0.25);
-    ctx.lineTo(0, by);
+    ctx.fillStyle = STEEL;
+    ctx.fill();
+    inside(ctx, () => {
+      ctx.fillStyle = STEEL_LO;
+      ctx.fillRect(0, -1.02, bw * 1.5, bl + 0.04);
+      ctx.fillStyle = STEEL_HI;
+      ctx.fillRect(-bw * 0.62, -1.02, bw * 0.3, bl + 0.04);
+    });
+    ctx.lineWidth = lw;
+    ctx.strokeStyle = COLOR.ink;
     ctx.stroke();
     // the collar that binds blade to shaft, and a butt cap
-    rr(ctx, -w * 1.7, by - 0.005, w * 3.4, 0.065, 0.02);
-    fillStroke(ctx, tr, lw * 0.9);
-    if (k >= 2) {
-      rr(ctx, -w * 1.4, -0.06, w * 2.8, 0.06, 0.02);
-      fillStroke(ctx, tr, lw * 0.9);
-    }
-    if (k >= 3) {
-      ctx.fillStyle = TIER.metalLight[k];
-      ctx.fillRect(-w + lw / 2, -0.4, w * 2 - lw, 0.03);
-      ctx.fillRect(-w + lw / 2, -0.33, w * 2 - lw, 0.03);
-    }
+    band(ctx, -w * 1.7, by - 0.005, w * 3.4, 0.06, k, t, lw * 0.8);
+    if (k >= 2) band(ctx, -w * 1.4, -0.055, w * 2.8, 0.055, k, t, lw * 0.8);
+    if (k >= 3) band(ctx, -w * 1.15, -0.4, w * 2.3, 0.035, k, t, lw * 0.6);
   }
-  if (k >= 4) sparkle(ctx, 0.04, -0.93, k === 6 ? 0.16 : 0.1, t, 4);
+  if (k === 6) sparkle(ctx, -0.02, -0.9, 0.16, t, 4);
 }
 
 /**
@@ -397,7 +434,7 @@ export function drawWeapon(ctx: Ctx, type: WeaponType, level: number, len: numbe
   ctx.scale(len, len);
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
-  const lw = Math.max(1.15 / len, 0.05);
+  const lw = Math.max(0.8 / len, 0.035);
   if (type === 'knife') knife(ctx, k, t, lw);
   else if (type === 'bat') bat(ctx, k, t, lw);
   else if (type === 'shield') shield(ctx, k, t, lw);

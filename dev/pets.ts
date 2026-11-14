@@ -1,5 +1,5 @@
 import type { GearType, PetType, Team, WeaponType } from '../src/types';
-import { COLOR, TIER } from '../src/theme';
+import { UI } from '../src/theme';
 import { label, seeded } from '../src/util';
 import { restPose, type PetLook, type PetPose } from '../src/draw/petTypes';
 import { petArt } from '../src/draw/pets';
@@ -9,13 +9,17 @@ import { param, stage } from './harness';
 
 /*
  * Sheets for looking at the pets, weapons and gear:
- *   ?sheet=lineup | battle | gear | poses | items | perf   (&t=1.2 freezes time; perf: &flush=1 also counts painting)
+ *   ?sheet=lineup | battle | gear | poses | items | perf | live   (&t=1.2 freezes time; perf: &flush=1 also counts painting)
+ * The sheets stand on the interface's slate; battle, perf and live stand on the night pitch's green.
  */
 type Ctx = CanvasRenderingContext2D;
 const CLASSES = ['E', 'D', 'C', 'B', 'A', 'S', 'SSS'];
 const WEAPONS: WeaponType[] = ['knife', 'bat', 'shield', 'spear'];
 const GEAR: GearType[] = ['helmet', 'sneakers', 'chili'];
-const SAKURA = '#fbeaf0';
+const SLATE = UI.surfaceAlt;
+/** the pitch under the floodlights: two mowing stripes */
+const PITCH = ['#3f8f4a', '#3a8745'];
+const CAP = { color: UI.textDim };
 
 const mk = (pet: PetType, level: number, team: Team, o: Partial<PetLook> = {}): PetLook => ({
   pet,
@@ -39,7 +43,7 @@ function put(ctx: Ctx, x: number, y: number, l: PetLook, p: PetPose, r: number, 
   petArt.drawShadow(ctx, l, r, p.hop);
   petArt.drawPet(ctx, l, p, r);
   ctx.restore();
-  if (cap) label(ctx, cap, x, y + 13, 11, { color: COLOR.textInk, outline: COLOR.white, lw: 2.5 });
+  if (cap) label(ctx, cap, x, y + 13, 11, CAP);
 }
 
 /** A fighter going through its moves: walk (or hop), wind up, strike. */
@@ -53,7 +57,7 @@ function act(p: PetPose, t: number, i: number, frog: boolean) {
 }
 
 function lineup(ctx: Ctx, t: number) {
-  CLASSES.forEach((c, i) => label(ctx, c, 85 + i * 138, 24, 22, { color: TIER.metal[i] }));
+  CLASSES.forEach((c, i) => label(ctx, c, 85 + i * 138, 24, 22, { color: UI.tierText[i] }));
   for (let row = 0; row < 4; row++) {
     const pet: PetType = row < 2 ? 'ant' : 'frog';
     for (let i = 0; i < 7; i++) put(ctx, 85 + i * 138, [150, 300, 465, 625][row], mk(pet, i + 1, (row % 2) as Team), ps(t), row < 2 ? 30 : 40);
@@ -183,10 +187,10 @@ function poses(ctx: Ctx, t: number) {
 }
 
 function items(ctx: Ctx, t: number) {
-  CLASSES.forEach((c, i) => label(ctx, c, 110 + i * 62, 16, 16, { color: TIER.metal[i] }));
+  CLASSES.forEach((c, i) => label(ctx, c, 110 + i * 62, 16, 16, { color: UI.tierText[i] }));
   [...WEAPONS, ...GEAR].forEach((kind, row) => {
     const y = 62 + row * 64;
-    label(ctx, kind, 40, y, 12, { color: COLOR.textInk, outline: COLOR.white, lw: 2.5 });
+    label(ctx, kind, 40, y, 12, CAP);
     for (let i = 0; i < 7; i++) {
       for (const [x, size] of [[110 + i * 62, 46], [560 + i * 22, 14]] as const) {
         ctx.save();
@@ -203,14 +207,42 @@ function items(ctx: Ctx, t: number) {
   });
 }
 
+/** Big fighters going through their moves in real time, to watch the small things (blinks, feelers, throats). */
+function live(ctx: Ctx, t: number) {
+  const cast: [PetLook, number, number][] = [
+    [mk('ant', 1, 0), 110, 0],
+    [mk('ant', 5, 1, { weapon: 'spear', weaponLevel: 5 }), 330, 1],
+    [mk('frog', 3, 0), 110, 2],
+    [mk('frog', 7, 1, { weapon: 'bat', weaponLevel: 7, chili: 6 }), 330, 3],
+  ];
+  cast.forEach(([l, x, i]) => {
+    const p = ps(t + i * 0.9, { face: i % 2 ? -1 : 1, aimY: i % 2 ? 0.5 : -0.5 });
+    const c = ((t * 0.25 + i * 0.3) % 1) * 4;
+    if (c < 1.6) {
+      p.walk = t * 40;
+      p.moving = 1;
+      if (l.pet === 'frog') p.hop = Math.max(0, Math.sin(((t * 1.6) % 1) * Math.PI));
+    } else if (c > 2.4 && c < 3.2) act(p, t, i, l.pet === 'frog');
+    put(ctx, x + (c < 1.6 ? Math.sin(c * 2) * 20 : 0), i < 2 ? 190 : 400, l, p, l.pet === 'ant' ? 40 : 46);
+  });
+}
+
+function pitch(ctx: Ctx, w: number, h: number) {
+  for (let y = 0; y < h; y += 40) {
+    ctx.fillStyle = PITCH[(y / 40) % 2];
+    ctx.fillRect(0, y, w, 40);
+  }
+}
+
 const sheet = param('sheet', 'lineup');
 const SIZE: Record<string, [number, number, string]> = {
-  lineup: [1000, 640, SAKURA],
-  battle: [460, 520, COLOR.grassLight],
-  gear: [1000, 720, SAKURA],
-  poses: [1000, 560, SAKURA],
-  items: [720, 480, SAKURA],
-  perf: [460, 820, COLOR.grassLight],
+  lineup: [1000, 640, SLATE],
+  battle: [460, 520, PITCH[0]],
+  gear: [1000, 720, SLATE],
+  poses: [1000, 560, SLATE],
+  items: [720, 480, SLATE],
+  perf: [460, 820, PITCH[0]],
+  live: [460, 520, PITCH[0]],
 };
 const [w, h, bg] = SIZE[sheet] ?? SIZE.lineup;
 const fighters = sheet === 'battle' ? army(50, w, h, 11) : sheet === 'perf' ? army(200, w, h, 5) : [];
@@ -221,7 +253,9 @@ void stage({
   h,
   bg,
   draw(ctx, t) {
+    if (sheet === 'battle' || sheet === 'perf' || sheet === 'live') pitch(ctx, w, h);
     if (sheet === 'battle') drawArmy(ctx, fighters, t, false);
+    else if (sheet === 'live') live(ctx, t);
     else if (sheet === 'gear') gear(ctx, t);
     else if (sheet === 'poses') poses(ctx, t);
     else if (sheet === 'items') items(ctx, t);

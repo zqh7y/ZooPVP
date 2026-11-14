@@ -1,7 +1,9 @@
 import { stage, param } from './harness';
 import { Arena } from '../src/draw/arena';
-import { W, H, FIELD, TEAM, S, TYPE } from '../src/theme';
-import { circle, fillStroke, label, seeded } from '../src/util';
+import { W, H, TEAM, S, TYPE } from '../src/theme';
+import { ARENA } from '../src/data';
+import { project } from '../src/draw/camera';
+import { circle, ellipse, fillStroke, label, seeded } from '../src/util';
 
 // ?view=battle|stage|lobby|dusk  &cheer=1 to see the crowd jump
 const view = param('view', 'battle');
@@ -14,8 +16,9 @@ const dots = Array.from({ length: 12 }, (_, i) => {
   return {
     team,
     r: 8 + Math.floor(rnd() * 16),
-    x: FIELD.x + 40 + rnd() * (FIELD.w - 80),
-    y: team ? FIELD.y + 60 + rnd() * 300 : FIELD.y + FIELD.h - 60 - rnd() * 300,
+    // arena points, drawn through the match camera like the real fighters
+    ax: 30 + rnd() * (ARENA.w - 60),
+    ay: team ? 40 + rnd() * 340 : ARENA.h - 40 - rnd() * 340,
   };
 });
 
@@ -60,7 +63,12 @@ stage({
     else {
       arena.drawBattle(ctx, t);
       for (const d of dots) {
-        circle(ctx, d.x, d.y, d.r);
+        const p = project(d.ax, d.ay);
+        const r = d.r * p.s;
+        ellipse(ctx, p.x + r * 0.3, p.y, r, r * 0.35);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+        ctx.fill();
+        circle(ctx, p.x, p.y - r, r);
         fillStroke(ctx, TEAM[d.team].main, S.line.ui);
       }
       arena.drawBattleFront(ctx, t);

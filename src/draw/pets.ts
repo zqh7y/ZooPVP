@@ -1,56 +1,103 @@
 import type { GearType, PetType, WeaponType } from '../types';
 import type { PetArt, PetLook, PetPose } from './petTypes';
-import { CLASS_FX, COLOR, RAINBOW, TEAM } from '../theme';
+import { CLASS_FX, COLOR, TIER } from '../theme';
 import { circle, clamp, ellipse, fillStroke, lerp, poly, smooth } from '../util';
-import { cls, drawWeapon, flame, glow, sparkle, trimOf } from './weapons';
+import { cls, drawWeapon, glow, heat, rgba, sparkle, trimOf } from './weapons';
 import { drawGear } from './gear';
 
 /*
  * The two pets. Each is drawn from the side in "body units" (1 = its radius r) with its feet on the origin,
  * facing right; drawPet turns the pose into one transform (hop, squash, spin, lean) and a few numbers the
  * body is built from (puff, limp, wind, strike), so every pose is the same drawing bent a different way.
- * Team reads from the body colour: your ants are dark blue and your frogs teal, the opponent's ants are
- * fire red and its frogs tomato orange. The ant also wears a scarf and the frog a belt in the team colour.
+ *
+ * Light: one key light from the floodlights at the upper left. Every round part is cel-shaded: its colour, a
+ * soft shade band low on the right, a cool rim of light bounced up from the pitch along the lower right edge,
+ * and a crisp gloss on the upper left. The parts that look the same every frame are kept as pictures.
+ * Team reads from the body: yours are a deep navy ant and a steel-blue frog, the opponent's a deep crimson ant
+ * and a brick-red frog. Class reads as material: plain, light marks (D, C), a steel band (B), gold (A),
+ * more gold and a glow (S), white-gold armour and a halo (SSS).
  */
 type Ctx = CanvasRenderingContext2D;
 
 interface Pal {
   main: string;
+  /** the soft step between lit and shade */
+  mid: string;
   shade: string;
+  /** the marks of D and C */
   light: string;
+  /** the crisp gloss */
+  spec: string;
+  /** the cool bounce light along the lower right edge */
+  rim: string;
   belly: string;
+  bellyLo: string;
   limb: string;
+  /** the far legs, a step darker: they are in the body's shadow */
+  far: string;
+  /** the outline */
   ink: string;
+  /** inner lines, a little lighter than the outline */
+  line: string;
+  eye: string;
 }
-
-const BASE: Record<PetType, readonly [Pal, Pal]> = {
-  ant: [
-    { main: '#3a5fd6', shade: '#27409e', light: '#86a6ff', belly: '#a5d6ff', limb: '#1a2562', ink: COLOR.ink },
-    { main: '#f04a30', shade: '#b82c22', light: '#ffa184', belly: '#ffd0b8', limb: '#6a1414', ink: COLOR.ink },
-  ],
-  frog: [
-    { main: '#25b9cf', shade: '#1787a6', light: '#9cf0fa', belly: '#e8fcff', limb: '#1787a6', ink: COLOR.ink },
-    { main: '#ff8038', shade: '#d6541f', light: '#ffc994', belly: '#fff1d6', limb: '#d6541f', ink: COLOR.ink },
-  ],
-};
-const STONE: Pal = { main: '#aaa5b5', shade: '#857f93', light: '#d2cedb', belly: '#c2bdcc', limb: '#6f697c', ink: '#4a4356' };
-const WHITE = '#ffffff';
-/** armour by class index (B, A, S, SSS) */
-const PLATE = ['', '', '', '#c9cfd9', '#ffc93c', '#b3162f', '#fff6ff'];
-/** the halo of an S and an SSS pet */
-const AURA = ['', '', '', '', '', '#ff9db0', '#ffb8f4'];
-const TONGUE = '#ff7fa3';
-const MOUTH = '#7a1f3a';
 
 const rgb = (h: string) => {
   const n = parseInt(h.slice(1), 16);
   return [n >> 16, (n >> 8) & 255, n & 255];
 };
+const hex2 = (v: number) => Math.round(clamp(v, 0, 255)).toString(16).padStart(2, '0');
 function mix(a: string, b: string, k: number) {
   const x = rgb(a);
   const y = rgb(b);
-  return `rgb(${Math.round(lerp(x[0], y[0], k))},${Math.round(lerp(x[1], y[1], k))},${Math.round(lerp(x[2], y[2], k))})`;
+  return `#${hex2(lerp(x[0], y[0], k))}${hex2(lerp(x[1], y[1], k))}${hex2(lerp(x[2], y[2], k))}`;
 }
+
+const RIM = '#c4d8ee';
+const EYE = '#f3f0e8';
+const PUPIL = '#141820';
+function pal(main: string, shade: string, light: string, spec: string, limb: string): Pal {
+  return {
+    main,
+    mid: mix(main, shade, 0.5),
+    shade,
+    light,
+    spec,
+    rim: mix(main, RIM, 0.42),
+    belly: '#ebe4d4',
+    bellyLo: '#c7bda9',
+    limb,
+    far: mix(limb, COLOR.ink, 0.3),
+    ink: COLOR.ink,
+    line: mix(COLOR.ink, shade, 0.45),
+    eye: EYE,
+  };
+}
+const BASE: Record<PetType, readonly [Pal, Pal]> = {
+  ant: [pal('#2f5193', '#1c3468', '#5a80c4', '#dbe7ff', '#22396a'), pal('#a5303c', '#6c1b26', '#cd5965', '#ffe1dc', '#5a1922')],
+  frog: [pal('#4a86c4', '#2d5d93', '#80b0e2', '#f0f6ff', '#2d5d93'), pal('#c25540', '#883427', '#e2806a', '#fff1ea', '#883427')],
+};
+const STONE: Pal = {
+  main: '#9ca2aa',
+  mid: '#868c95',
+  shade: '#6f757e',
+  light: '#b8bdc4',
+  spec: '#e3e6ea',
+  rim: '#b3bac3',
+  belly: '#b4b9bf',
+  bellyLo: '#8d939b',
+  limb: '#5e646c',
+  far: '#4c5259',
+  ink: '#353a41',
+  line: '#4f555d',
+  eye: '#c3c8ce',
+};
+const KEYS = Object.keys(STONE) as (keyof Pal)[];
+const WHITE = '#ffffff';
+const MOUTH = '#3b1c22';
+const TONGUE = '#d58a80';
+const AO = 'rgba(8, 11, 18, 0.28)';
+const HALO_SOFT = rgba(CLASS_FX.s, 0.32);
 
 const PALS = new Map<string, Pal>();
 /** The body colours right now: washed white while hurt, greyed while turning to stone. */
@@ -63,8 +110,10 @@ function palette(look: PetLook, pose: PetPose): Pal {
   let p = PALS.get(key);
   if (!p) {
     const k = st ? st / 5 : (hu / 4) * 0.8;
-    const to = (c: keyof Pal) => mix(base[c], st ? STONE[c] : WHITE, k);
-    p = { main: to('main'), shade: to('shade'), light: to('light'), belly: to('belly'), limb: to('limb'), ink: st ? to('ink') : base.ink };
+    const q = {} as Pal;
+    for (const c of KEYS) q[c] = mix(base[c], st ? STONE[c] : WHITE, k);
+    if (!st) q.ink = base.ink;
+    p = q;
     PALS.set(key, p);
   }
   return p;
@@ -188,44 +237,83 @@ function heldWeapon(ctx: Ctx, look: PetLook, r: number, t: number, grey: boolean
 
 // ------------------------------------------------------------------ shared pieces
 
-/** A rounded body part: one shade low on the far side, one gloss up top, an ink outline. */
-function blob(ctx: Ctx, x: number, y: number, rx: number, ry: number, rot: number, P: Pal, lw: number, hi: boolean) {
-  ellipse(ctx, x, y, rx, ry, rot);
-  if (!hi) {
-    fillStroke(ctx, P.main, lw, P.ink);
+/** A round body part under the key light: shade low right with a soft edge, a cool rim, a crisp gloss, an outline. */
+function blob(c: Ctx, x: number, y: number, rx: number, ry: number, rot: number, P: Pal, lw: number, det: boolean) {
+  ellipse(c, x, y, rx, ry, rot);
+  if (!det) {
+    fillStroke(c, P.main, lw, P.ink);
     return;
   }
-  ctx.fillStyle = P.shade;
-  ctx.fill();
-  ellipse(ctx, x - rx * 0.09, y - ry * 0.13, rx * 0.84, ry * 0.8, rot);
-  ctx.fillStyle = P.main;
-  ctx.fill();
-  ellipse(ctx, x - rx * 0.36, y - ry * 0.5, rx * 0.25, ry * 0.13, rot - 0.6);
-  ctx.fillStyle = P.light;
-  ctx.fill();
-  ellipse(ctx, x, y, rx, ry, rot);
-  ctx.lineWidth = lw;
-  ctx.strokeStyle = P.ink;
-  ctx.stroke();
+  c.fillStyle = P.shade;
+  c.fill();
+  // the lit part leans toward the light; two steps soften the edge of the shade
+  ellipse(c, x - rx * 0.06, y - ry * 0.08, rx * 0.93, ry * 0.91, rot);
+  c.fillStyle = P.mid;
+  c.fill();
+  ellipse(c, x - rx * 0.12, y - ry * 0.15, rx * 0.84, ry * 0.81, rot);
+  c.fillStyle = P.main;
+  c.fill();
+  // the bounce from the pitch along the lower right edge
+  c.beginPath();
+  c.ellipse(x, y, Math.max(0.01, rx - lw * 1.25), Math.max(0.01, ry - lw * 1.25), rot, -0.1, 1.55);
+  c.lineWidth = lw * 0.9;
+  c.strokeStyle = P.rim;
+  c.stroke();
+  // the gloss
+  ellipse(c, x - rx * 0.42, y - ry * 0.5, rx * 0.19, ry * 0.095, rot - 0.7);
+  c.fillStyle = P.spec;
+  c.fill();
+  ellipse(c, x, y, rx, ry, rot);
+  c.lineWidth = lw;
+  c.strokeStyle = P.ink;
+  c.stroke();
 }
 
-/** An armour plate hugging one side of an oval part: a band of trim under a plate. */
-function plate(ctx: Ctx, x: number, y: number, rx: number, ry: number, rot: number, a0: number, a1: number, fill: string, trim: string, lw: number, ink: string) {
-  ctx.beginPath();
-  ctx.ellipse(x, y, rx, ry, rot, a0, a1);
-  ctx.closePath();
-  fillStroke(ctx, trim, lw, ink);
-  ctx.beginPath();
-  ctx.ellipse(x, y, rx, ry, rot, a0 + 0.3, a1 - 0.3);
-  ctx.closePath();
-  fillStroke(ctx, fill, lw * 0.8, ink);
+/**
+ * An armour plate on the upper side of an oval part (angles a0..a1 of its outline, closed by a chord): the class
+ * metal, a lit edge along the top, a darker strip along the chord.
+ */
+function plate(c: Ctx, x: number, y: number, rx: number, ry: number, rot: number, a0: number, a1: number, k: number, t: number, lw: number, P: Pal, stony: boolean) {
+  c.beginPath();
+  c.ellipse(x, y, rx, ry, rot, a0, a1);
+  c.closePath();
+  fillStroke(c, stony ? P.shade : trimOf(k, t), lw, P.ink);
+  c.beginPath();
+  c.ellipse(x, y, rx - lw * 1.5, ry - lw * 1.5, rot, a0 + 0.12, a0 + (a1 - a0) * 0.62);
+  c.lineWidth = lw * 1.3;
+  c.strokeStyle = stony ? P.light : TIER.metalLight[k];
+  c.stroke();
+  if (k === 3 && !stony) {
+    // brushed steel: two fine lines along it
+    c.beginPath();
+    c.ellipse(x, y, rx * 0.86, ry * 0.86, rot, a0 + 0.2, a1 - 0.25);
+    c.ellipse(x, y, rx * 0.76, ry * 0.76, rot, a1 - 0.25, a0 + 0.2, true);
+    c.lineWidth = lw * 0.4;
+    c.strokeStyle = TIER.tileDark[3];
+    c.stroke();
+  }
 }
 
-function spike(ctx: Ctx, x: number, y: number, a: number, w: number, len: number, fill: string, lw: number, ink: string) {
-  const cx = Math.cos(a);
-  const cy = Math.sin(a);
-  poly(ctx, [x - cy * w, y + cx * w, x + cx * len, y + cy * len, x + cy * w, y - cx * w]);
-  fillStroke(ctx, fill, lw, ink);
+/** A band of the class metal across a round part, kept inside its outline (cx..: the arc it follows). */
+function bandAcross(c: Ctx, ox: number, oy: number, orx: number, ory: number, rot: number, cx: number, cy: number, crx: number, cry: number, wd: number, k: number, t: number, lw: number, P: Pal, stony: boolean) {
+  c.save();
+  ellipse(c, ox, oy, orx, ory, rot);
+  c.clip();
+  c.beginPath();
+  c.ellipse(cx, cy, crx, cry, rot, -1.6, 1.6);
+  c.lineCap = 'butt';
+  c.lineWidth = wd + lw * 2;
+  c.strokeStyle = P.ink;
+  c.stroke();
+  c.lineWidth = wd;
+  c.strokeStyle = stony ? P.shade : trimOf(k, t);
+  c.stroke();
+  c.beginPath();
+  c.ellipse(cx - wd * 0.22, cy, crx, cry, rot, -1.6, -0.2);
+  c.lineWidth = wd * 0.3;
+  c.strokeStyle = stony ? P.light : TIER.metalLight[k];
+  c.stroke();
+  c.restore();
 }
 
 /** A thick limb: an ink line with a coloured line inside. */
@@ -241,20 +329,15 @@ function limb(ctx: Ctx, x0: number, y0: number, x1: number, y1: number, w: numbe
   ctx.stroke();
 }
 
-function crown(ctx: Ctx, x: number, y: number, w: number, rot: number, lw: number, t: number, ink: string) {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(rot);
-  const h = w * 0.5;
-  poly(ctx, [-h, 0, -h * 1.1, -w * 0.6, -h * 0.45, -w * 0.3, 0, -w * 0.78, h * 0.45, -w * 0.3, h * 1.1, -w * 0.6, h, 0]);
-  fillStroke(ctx, COLOR.gold, lw, ink);
-  ctx.fillStyle = COLOR.goldDark;
-  ctx.fillRect(-h + lw * 0.5, -w * 0.14, w - lw, w * 0.1);
-  for (let i = 0; i < 3; i++) {
-    circle(ctx, (i - 1) * h * 1.1, i === 1 ? -w * 0.78 : -w * 0.6, w * 0.09);
-    fillStroke(ctx, RAINBOW[(i * 2 + Math.floor(t * 4)) % 5], lw * 0.6, ink);
-  }
-  ctx.restore();
+/** The SSS halo: a thin white-gold ring floating over the head, bobbing slowly, with a soft glow. */
+function halo(ctx: Ctx, x: number, y: number, w: number, t: number, lw: number) {
+  ellipse(ctx, x, y + Math.sin(t * 1.7) * 0.035, w, w * 0.27, -0.12);
+  ctx.lineWidth = lw * 3.4;
+  ctx.strokeStyle = HALO_SOFT;
+  ctx.stroke();
+  ctx.lineWidth = lw * 1.35;
+  ctx.strokeStyle = CLASS_FX.sss;
+  ctx.stroke();
 }
 
 type Face = 'open' | 'blink' | 'x' | 'pinch' | 'happy' | 'spiral' | 'wide' | 'stone' | 'droop';
@@ -266,79 +349,102 @@ function faceOf(look: PetLook, pose: PetPose): Face {
   if (pose.mood === 'cheer') return 'happy';
   if (pose.mood === 'scared' || pose.puff > 0.25) return 'wide';
   if (pose.limp > 0.4) return 'droop';
-  if (pose.mood === 'idle' && (pose.t * 0.9 + Math.abs(look.seed) * 0.37) % 3 < 0.11) return 'blink';
+  // a blink every few seconds, each fighter on its own beat
+  if (pose.mood === 'idle' && !pose.wind && (pose.t + (((look.seed * 0.618) % 1) + 1) * 2.9) % 3.7 < 0.13) return 'blink';
   return 'open';
 }
 
-function eye(ctx: Ctx, x: number, y: number, rad: number, e: Face, P: Pal, lw: number, t: number, brow: boolean, hi: boolean) {
+/** Where the eyes look: forward and along the aim while attacking (a few steps, so the pictures can be kept). */
+function gazeOf(pose: PetPose) {
+  const a = Math.max(pose.wind, pose.strike);
+  return a > 0.05 ? Math.round(clamp(pose.aimY, -1, 1) * 2) / 2 : 0;
+}
+
+function eye(c: Ctx, x: number, y: number, rad: number, e: Face, P: Pal, lw: number, t: number, brow: boolean, hi: boolean, gy: number) {
   if (e === 'x' || e === 'pinch' || e === 'happy' || e === 'blink') {
     const s = rad * 0.75;
-    ctx.lineWidth = Math.max(lw, rad * 0.36);
-    ctx.strokeStyle = P.ink;
-    ctx.beginPath();
+    c.lineWidth = Math.max(lw * 1.2, rad * 0.32);
+    c.strokeStyle = P.ink;
+    c.beginPath();
     if (e === 'x') {
-      ctx.moveTo(x - s, y - s);
-      ctx.lineTo(x + s, y + s);
-      ctx.moveTo(x + s, y - s);
-      ctx.lineTo(x - s, y + s);
+      c.moveTo(x - s, y - s);
+      c.lineTo(x + s, y + s);
+      c.moveTo(x + s, y - s);
+      c.lineTo(x - s, y + s);
     } else if (e === 'pinch') {
-      ctx.moveTo(x - s, y - s);
-      ctx.lineTo(x + s * 0.7, y);
-      ctx.lineTo(x - s, y + s);
-    } else if (e === 'happy') ctx.arc(x, y + s * 0.45, s, Math.PI * 1.1, Math.PI * 1.9);
+      c.moveTo(x - s, y - s);
+      c.lineTo(x + s * 0.7, y);
+      c.lineTo(x - s, y + s);
+    } else if (e === 'happy') c.arc(x, y + s * 0.45, s, Math.PI * 1.1, Math.PI * 1.9);
     else {
-      ctx.moveTo(x - s, y);
-      ctx.lineTo(x + s, y);
+      // shut: a lid line with a little droop
+      c.moveTo(x - s, y);
+      c.quadraticCurveTo(x, y + s * 0.35, x + s, y);
     }
-    ctx.stroke();
+    c.stroke();
     return;
   }
   const R = rad * (e === 'wide' ? 1.14 : 1);
-  circle(ctx, x, y, R);
-  ctx.fillStyle = e === 'stone' ? P.light : WHITE;
-  ctx.fill();
-  ctx.lineWidth = lw * 0.85;
-  ctx.strokeStyle = P.ink;
-  ctx.stroke();
+  circle(c, x, y, R);
+  c.fillStyle = P.eye;
+  c.fill();
+  if (hi && e !== 'stone') {
+    // the white is round too: a little shade low right
+    c.beginPath();
+    c.arc(x, y, R * 0.8, -0.2, Math.PI * 0.75);
+    c.lineWidth = R * 0.32;
+    c.strokeStyle = mix(P.eye, '#9aa3b0', 0.45);
+    c.stroke();
+  }
+  circle(c, x, y, R);
+  c.lineWidth = lw * 0.9;
+  c.strokeStyle = P.line;
+  c.stroke();
   if (e === 'stone') return;
   if (e === 'spiral') {
-    ctx.beginPath();
+    c.beginPath();
     for (let i = 0; i <= 12; i++) {
       const a = i * 0.95 - t * 8;
       const d = (R * 0.78 * i) / 12;
-      if (i) ctx.lineTo(x + Math.cos(a) * d, y + Math.sin(a) * d);
-      else ctx.moveTo(x, y);
+      if (i) c.lineTo(x + Math.cos(a) * d, y + Math.sin(a) * d);
+      else c.moveTo(x, y);
     }
-    ctx.lineWidth = Math.max(lw * 0.7, R * 0.16);
-    ctx.stroke();
+    c.lineWidth = Math.max(lw * 0.7, R * 0.16);
+    c.strokeStyle = P.ink;
+    c.stroke();
     return;
   }
-  const pr = R * (e === 'wide' ? 0.3 : 0.54);
-  const px = x + (e === 'wide' ? 0 : R * 0.3);
-  const py = y + (e === 'droop' ? R * 0.3 : 0);
-  circle(ctx, px, py, pr);
-  ctx.fillStyle = P.ink;
-  ctx.fill();
+  const pr = R * (e === 'wide' ? 0.3 : 0.52);
+  const px = x + (e === 'wide' ? 0 : R * 0.3 + Math.abs(gy) * R * 0.06);
+  const py = y + (e === 'droop' ? R * 0.3 : gy * R * 0.3);
+  circle(c, px, py, pr);
+  c.fillStyle = PUPIL;
+  c.fill();
   if (hi) {
-    circle(ctx, px - pr * 0.3, py - pr * 0.4, pr * 0.38);
-    ctx.fillStyle = WHITE;
-    ctx.fill();
+    // a crisp catch of the floodlight
+    circle(c, px - pr * 0.32, py - pr * 0.38, pr * 0.36);
+    c.fillStyle = WHITE;
+    c.fill();
   }
   if (e === 'droop') {
     // a heavy lid
-    ctx.beginPath();
-    ctx.arc(x, y, R, Math.PI * 0.95, Math.PI * 0.05);
-    ctx.closePath();
-    fillStroke(ctx, P.shade, lw * 0.85, P.ink);
+    c.beginPath();
+    c.arc(x, y, R, Math.PI * 0.95, Math.PI * 0.05);
+    c.closePath();
+    fillStroke(c, P.shade, lw * 0.85, P.ink);
   }
   if (brow) {
-    ctx.beginPath();
-    ctx.moveTo(x - R * 1.1, y - R * 1.25);
-    ctx.lineTo(x + R * 1.0, y - R * 0.3);
-    ctx.lineWidth = Math.max(lw, rad * 0.4);
-    ctx.stroke();
+    c.beginPath();
+    c.moveTo(x - R * 1.1, y - R * 1.25);
+    c.lineTo(x + R * 1.0, y - R * 0.3);
+    c.lineWidth = Math.max(lw * 1.2, rad * 0.36);
+    c.strokeStyle = P.ink;
+    c.stroke();
   }
 }
+
+/** How hot a chili of a class makes its eater: one wisp of heat, two from A, three at SSS. */
+const heatLines = (level: number) => (level >= 7 ? 3 : level >= 5 ? 2 : 1);
 
 function shoe(ctx: Ctx, x: number, y: number, size: number, look: PetLook, r: number, t: number, grey: boolean) {
   ctx.save();
@@ -350,16 +456,18 @@ function shoe(ctx: Ctx, x: number, y: number, size: number, look: PetLook, r: nu
 // ------------------------------------------------------------------ parts that look the same every frame
 
 const PIECES = new Map<string, HTMLCanvasElement>();
+/** The size a part's picture is made for: steps of about 10%, so a camera that scales fighters does not flood the cache. */
+const bucket = (r: number) => Math.round(Math.log(Math.max(1, r)) * 10);
 /**
  * Draws a part of a body through a cached picture of it. (x, y, w, h) is the part's box in body units when
- * the pet stands at rest; (dx, dy) is how far the part has moved from there this frame.
+ * the pet stands at rest; (dx, dy) is how far the part has moved from there this frame. rb is the size step.
  */
-function piece(ctx: Ctx, key: string, r: number, x: number, y: number, w: number, h: number, dx: number, dy: number, draw: (c: Ctx) => void) {
+function piece(ctx: Ctx, key: string, rb: number, x: number, y: number, w: number, h: number, dx: number, dy: number, draw: (c: Ctx) => void) {
   let c = PIECES.get(key);
   if (!c) {
-    if (PIECES.size > 400) PIECES.clear();
+    if (PIECES.size > 500) PIECES.clear();
     c = document.createElement('canvas');
-    const s = r * SPR_SCALE;
+    const s = Math.exp(rb / 10) * SPR_SCALE;
     c.width = Math.ceil(w * s);
     c.height = Math.ceil(h * s);
     const g = c.getContext('2d')!;
@@ -382,7 +490,7 @@ const ANT_TY = -0.72;
 const ANT_HX = 0.02 + 0.66 * 0.8;
 const ANT_HY = ANT_TY - 0.75 * 0.8;
 
-function drawAnt(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw: number) {
+function drawAnt(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw: number, lt: number) {
   const k = cls(look.level);
   const t = pose.t;
   const p = clamp(pose.puff, 0, 1.5);
@@ -391,6 +499,7 @@ function drawAnt(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw: 
   const q = Math.min(1, p * 1.6);
   const stony = pose.stone > 0.5;
   const e = faceOf(look, pose);
+  const gy = gazeOf(pose);
   const angry = pose.mood === 'angry';
   // a plain frame at a fight size: the body and the head come from cached pictures
   const cached = r <= 26 && !p && !L && e !== 'spiral' && P === BASE.ant[look.team];
@@ -400,9 +509,6 @@ function drawAnt(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw: 
   const bw = w ? 0 : pose.wind;
   const bs = w ? 0 : pose.strike;
   const cheer = pose.mood === 'cheer' ? 1 : 0;
-  const tr = stony ? P.shade : trimOf(k, t);
-  const tc = stony ? P.light : TEAM[look.team].light;
-  const pl = stony ? P.light : PLATE[k];
   const ph = pose.walk / (r * 0.55);
 
   // the parts: thorax (the ball it blows up into), abdomen behind, head in front
@@ -419,7 +525,7 @@ function drawAnt(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw: 
   const hx = tx + 0.66 * hd - 0.16 * bw + 0.24 * bs;
   const hy = ty - 0.75 * hd - 0.06 * bw + 0.12 * bs + L * 0.45;
 
-  if (k >= 5 && !stony && big) glow(ctx, 0, ty - 0.25, 1.5, 1.35, AURA[k], t);
+  if (k >= 5 && !stony) glow(ctx, -0.12, ty - 0.2, 1.75, 1.45, k === 6 ? CLASS_FX.sss : CLASS_FX.s, t);
 
   // one walking leg added to the current path; blown up, it sticks straight out of the ball
   const leg = (i: number, hip: number, foot: number, off: number, a: number) => {
@@ -437,7 +543,7 @@ function drawAnt(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw: 
     }
     ctx.moveTo(x0, y0);
     ctx.quadraticCurveTo((x0 + x1) / 2 + (foot < 0 ? -0.2 : 0.2) * (1 - q), (y0 + y1) / 2 - 0.22 * (1 - q), x1, y1);
-    if (!q && big) ctx.lineTo(x1 + 0.14, y1);
+    if (!q && big) ctx.lineTo(x1 + 0.13, y1);
     FEET[i * 2] = x1;
     FEET[i * 2 + 1] = y1;
   };
@@ -469,42 +575,49 @@ function drawAnt(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw: 
   }
   const shx = lerp(tx + 0.2, tx + trx * 0.85, q);
   const shy = ty - 0.04 + 0.3 * tryy * q;
-  // far legs and the far arm in one stroke
+  // far legs and the far arm in one stroke, a step darker: they are in the body's shadow
   if (two || q > 0) {
     ctx.moveTo(shx + 0.08, shy - 0.04);
     ctx.quadraticCurveTo((shx + h2x) / 2, (shy + h2y) / 2 + 0.12, h2x, h2y);
   }
-  ctx.lineWidth = lw * 1.3;
-  ctx.strokeStyle = P.limb;
+  ctx.lineWidth = lt * 1.3;
+  ctx.strokeStyle = P.far;
   ctx.stroke();
   if (look.sneakers && big && !q) for (let i = 0; i < 2; i++) shoe(ctx, FEET[i * 2] + 0.07, FEET[i * 2 + 1], 0.52, look, r, t, stony);
 
-  if (k === 6 && !stony) flame(ctx, ax - arx * 0.9, ay - ary * 0.2, 0.55, t, CLASS_FX.sss, CLASS_FX.spark, lw * 0.8);
-  // abdomen and thorax: stinger and spikes behind, stripes and armour on top
+  // abdomen and thorax, with the class on them
   const body = (c: Ctx) => {
-    if (k >= 2) spike(c, ax - arx * 0.86, ay - ary * 0.3, Math.PI + 0.5, 0.1, 0.3, tr, lw, P.ink);
-    if (k >= 5) {
-      for (let i = 0; i < 3; i++) {
-        const a = -2.45 + i * 0.5;
-        spike(c, ax + Math.cos(a) * arx * 0.85, ay + Math.sin(a) * ary * 0.85, a + 0.15, 0.12, k === 6 ? 0.36 : 0.3, stony ? P.shade : trimOf(k, t, i), lw, P.ink);
-      }
-    }
     blob(c, ax, ay, arx, ary, -0.3, P, lw, det);
-    if (k >= 1) {
+    if (k === 1 || k === 2) {
+      // D and C: one or two clean stripes in a lighter tone of the shell
+      c.save();
+      ellipse(c, ax, ay, arx, ary, -0.3);
+      c.clip();
       c.beginPath();
-      c.ellipse(ax - arx * 0.32, ay + ary * 0.08, arx * 0.3, ary * 0.86, -0.3, -1.15, 1.25);
-      if (k >= 2) {
-        c.moveTo(ax + arx * 0.42, ay - ary * 0.72);
-        c.ellipse(ax + arx * 0.12, ay, arx * 0.3, ary * 0.9, -0.3, -1.15, 1.25);
+      c.ellipse(ax - arx * 0.3, ay + ary * 0.06, arx * 0.3, ary * 0.95, -0.3, -1.6, 1.6);
+      if (k === 2) {
+        c.moveTo(ax + arx * 0.28, ay - ary * 0.95);
+        c.ellipse(ax + arx * 0.05, ay - ary * 0.02, arx * 0.3, ary * 0.95, -0.3, -1.6, 1.6);
       }
-      c.lineWidth = lw * 1.7;
+      c.lineWidth = lt * 1.5;
       c.strokeStyle = P.light;
       c.stroke();
+      c.restore();
+    } else if (k === 3 || k === 4) {
+      // B: a brushed-steel band; A: a gold one
+      bandAcross(c, ax, ay, arx, ary, -0.3, ax - arx * 0.12, ay + ary * 0.04, arx * 0.32, ary * 0.98, 0.17, k, t, lw, P, stony);
+    } else if (k >= 5) {
+      // S: a gold shell over the back; SSS: white-gold
+      plate(c, ax, ay, arx * 1.03, ary * 1.05, -0.3, Math.PI * 1.0, Math.PI * 1.92, k, t, lw, P, stony);
     }
-    if (k >= 3) plate(c, ax, ay, arx * 1.03, ary * 1.05, -0.3, Math.PI * 1.02, Math.PI * 1.9, pl, tr, lw, P.ink);
-    if (k === 2) spike(c, tx - trx * 0.45, ty - tryy * 0.8, -2.0, 0.1, 0.26, tr, lw, P.ink);
     blob(c, tx, ty, trx, tryy, 0, P, lw, det);
-    if (k >= 3) plate(c, tx, ty, trx * 1.08, tryy * 1.1, 0, Math.PI * 1.0, Math.PI * 1.86, pl, stony ? P.shade : trimOf(k, t, 2), lw, P.ink);
+    if (k >= 5) plate(c, tx, ty, trx * 1.06, tryy * 1.08, 0, Math.PI * 1.02, Math.PI * 1.85, k, t, lw, P, stony);
+    if (det && !q) {
+      // where the head meets the thorax, a little shadow
+      ellipse(c, tx + trx * 0.55, ty - tryy * 0.55, trx * 0.42, tryy * 0.36, 0.6);
+      c.fillStyle = AO;
+      c.fill();
+    }
     if (p > 0.2) {
       // tight and shiny
       c.fillStyle = WHITE;
@@ -514,48 +627,53 @@ function drawAnt(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw: 
       c.fill();
     }
   };
-  const rk = r.toFixed(1);
-  if (cached) piece(ctx, `ab${look.team}${k}|${rk}`, r, -1.55, -1.6, 2.1, 1.65, 0, ty - ANT_TY, body);
+  const rb = bucket(r);
+  if (cached) piece(ctx, `ab${look.team}${k}|${rb}`, rb, -1.55, -1.6, 2.1, 1.65, 0, ty - ANT_TY, body);
   else body(ctx);
 
   // near legs
   ctx.beginPath();
   leg(2, -0.2, -0.7, 0, 2.05);
   leg(3, 0.1, 0.34, Math.PI, 1.15);
-  ctx.lineWidth = lw * 1.7;
+  ctx.lineWidth = lt * 1.7;
   ctx.strokeStyle = P.limb;
   ctx.stroke();
+  if (big) {
+    // a thin sheen down the near legs: they are round too
+    ctx.lineWidth = lt * 0.5;
+    ctx.strokeStyle = P.mid;
+    ctx.stroke();
+  }
   if (look.sneakers && !q) for (let i = 2; i < 4; i++) shoe(ctx, FEET[i * 2] + 0.07, FEET[i * 2 + 1], 0.64, look, r, t, stony);
 
-  // the scarf in the team colour: two tails streaming back from the knot (the band goes on with the head)
-  const nx = hx - hr * 0.6;
-  const ny = hy + hr * 0.68;
-  const fl = Math.sin(t * 7 + look.seed) * 0.07 * (0.4 + m) + L * 0.3;
-  poly(ctx, [nx - 0.14, ny - 0.22, nx - 0.62, ny - 0.4 + fl, nx - 0.46, ny - 0.2 + fl, nx - 0.64, ny - 0.02 + fl * 1.5, nx - 0.1, ny - 0.02]);
-  fillStroke(ctx, tc, lw, P.ink);
-
-  // feelers
-  const aw = Math.sin(t * 3.1 + look.seed) * 0.08 - 0.3 * clamp(pose.hurt, 0, 1) - m * 0.12 - bw * 0.2 + bs * 0.2;
+  // feelers: they wobble on their own and trail a beat behind the walk
+  const sway = Math.sin(ph - 1.2) * 0.1 * m;
+  const bob = Math.cos(ph * 2 - 1.0) * 0.05 * m;
+  const aw = Math.sin(t * 2.3 + look.seed) * 0.05 + Math.sin(t * 5.3 + look.seed * 2) * 0.018 + sway - 0.3 * clamp(pose.hurt, 0, 1) - m * 0.16 - bw * 0.2 + bs * 0.24;
   ctx.beginPath();
   for (let i = 0; i < 2; i++) {
     const x0 = hx - hr * 0.15 + i * hr * 0.4;
     const y0 = hy - hr * 0.85;
-    TIPS[i * 2] = x0 + 0.4 + i * 0.1 + aw - L * 0.1;
-    TIPS[i * 2 + 1] = y0 - 0.5 + i * 0.1 + L * 1.0 + cheer * -0.08;
+    TIPS[i * 2] = x0 + 0.4 + i * 0.1 + aw * (1 + i * 0.25) - L * 0.1;
+    TIPS[i * 2 + 1] = y0 - 0.5 + i * 0.1 + L * 1.0 + bob - cheer * 0.08;
     ctx.moveTo(x0, y0);
-    ctx.quadraticCurveTo(x0 - 0.04, y0 - 0.56 + L * 0.3, TIPS[i * 2], TIPS[i * 2 + 1]);
+    ctx.quadraticCurveTo(x0 - 0.05 + aw * 0.35, y0 - 0.56 + L * 0.3, TIPS[i * 2], TIPS[i * 2 + 1]);
   }
-  ctx.lineWidth = lw * 1.1;
+  ctx.lineWidth = lt * 0.95;
   ctx.strokeStyle = P.limb;
   ctx.stroke();
   ctx.beginPath();
   for (let i = 0; i < 2; i++) {
-    ctx.moveTo(TIPS[i * 2] + 0.09, TIPS[i * 2 + 1]);
-    ctx.arc(TIPS[i * 2], TIPS[i * 2 + 1], 0.09, 0, Math.PI * 2);
+    ctx.moveTo(TIPS[i * 2] + 0.08, TIPS[i * 2 + 1]);
+    ctx.arc(TIPS[i * 2], TIPS[i * 2 + 1], 0.08, 0, Math.PI * 2);
   }
-  ctx.fillStyle = k >= 2 ? tr : P.limb;
+  ctx.fillStyle = k >= 3 && !stony ? trimOf(k, t, 1) : P.limb;
   ctx.fill();
-  if (big) ctx.stroke();
+  if (big) {
+    ctx.lineWidth = lw * 0.8;
+    ctx.strokeStyle = P.ink;
+    ctx.stroke();
+  }
 
   // jaws under the head
   const mo = 0.15 + 1.0 * bw - 0.15 * bs + (e === 'wide' ? 0.35 : 0);
@@ -568,39 +686,43 @@ function drawAnt(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw: 
   ctx.quadraticCurveTo(mx + 0.3 * Math.cos(ua - 0.5), my + 0.3 * Math.sin(ua - 0.5), mx + 0.4 * Math.cos(ua), my + 0.4 * Math.sin(ua));
   ctx.moveTo(mx - 0.1, my);
   ctx.quadraticCurveTo(mx + 0.22 * Math.cos(la + 0.5), my + 0.22 * Math.sin(la + 0.5), mx + 0.32 * Math.cos(la), my + 0.32 * Math.sin(la));
-  ctx.lineWidth = lw * 1.5;
+  ctx.lineWidth = lt * 1.4;
   ctx.strokeStyle = P.limb;
-  if (k >= 4 && big) {
-    ctx.lineWidth = lw * 2.6;
+  if (k >= 4 && big && !stony) {
+    // gold-tipped jaws from A
+    ctx.lineWidth = lt * 1.4 + lw * 2;
     ctx.strokeStyle = P.ink;
     ctx.stroke();
-    ctx.lineWidth = lw * 1.1;
-    ctx.strokeStyle = stony ? P.shade : tr;
+    ctx.lineWidth = lt * 1.1;
+    ctx.strokeStyle = trimOf(k, t);
   }
   ctx.stroke();
 
-  // the head: crest (A and S) behind it, scarf band, face, helmet or crown
+  // the head: crest (A and S) behind it, face, then a helmet or the SSS brow plate
   const head = (c: Ctx) => {
     if ((k === 4 || k === 5) && !look.helmet) {
-      for (let i = 0; i < 3; i++) {
-        const a = -2.75 + i * 0.5;
-        spike(c, hx + Math.cos(a) * hr * 0.86, hy + Math.sin(a) * hr * 0.86, a + 0.25, 0.14, 0.42 - Math.abs(i - 1) * 0.1, stony ? P.shade : k === 4 ? COLOR.gold : tr, lw, P.ink);
-      }
+      // a swept-back gold crest
+      c.beginPath();
+      c.moveTo(hx - hr * 0.7, hy - hr * 0.5);
+      c.quadraticCurveTo(hx - hr * 0.62, hy - hr * (k === 5 ? 1.55 : 1.35), hx + hr * 0.12, hy - hr * (k === 5 ? 1.32 : 1.18));
+      c.quadraticCurveTo(hx - hr * 0.2, hy - hr * 1.0, hx - hr * 0.1, hy - hr * 0.8);
+      c.closePath();
+      fillStroke(c, stony ? P.shade : trimOf(k, t), lw, P.ink);
+      c.beginPath();
+      c.moveTo(hx - hr * 0.6, hy - hr * 0.72);
+      c.quadraticCurveTo(hx - hr * 0.56, hy - hr * (k === 5 ? 1.4 : 1.22), hx - hr * 0.05, hy - hr * (k === 5 ? 1.26 : 1.12));
+      c.lineWidth = lw * 1.1;
+      c.strokeStyle = stony ? P.light : TIER.metalLight[k];
+      c.stroke();
     }
     blob(c, hx, hy, hr, hr * 0.96, 0, P, lw, det);
-    ellipse(c, nx, ny, 0.4, 0.15, 0.72);
-    fillStroke(c, tc, lw, P.ink);
-    if (look.chili && !stony) {
-      circle(c, hx + hr * 0.02, hy + hr * 0.46, hr * 0.2);
-      c.fillStyle = '#ff7a2a';
-      c.fill();
-    }
+    if (k === 6 && !look.helmet) plate(c, hx, hy, hr * 1.04, hr, 0, Math.PI * 1.08, Math.PI * 1.62, k, t, lw, P, stony);
     const fierce = (k >= 5 || angry) && e === 'open';
     const es = 1 + 0.3 * p;
-    eye(c, hx + hr * 0.76, hy - hr * 0.12, hr * 0.2 * es, e, P, lw, t, fierce, det);
-    eye(c, hx + hr * 0.2, hy - hr * 0.02, hr * 0.39 * es, e, P, lw, t, fierce, det);
+    eye(c, hx + hr * 0.76, hy - hr * 0.12, hr * 0.2 * es, e, P, lw, t, fierce, det, gy);
+    eye(c, hx + hr * 0.2, hy - hr * 0.02, hr * 0.39 * es, e, P, lw, t, fierce, det, gy);
     if (e === 'x' || e === 'pinch' || e === 'happy' || e === 'wide') {
-      circle(c, hx + hr * 0.56, hy + hr * 0.52, hr * (e === 'happy' ? 0.22 : 0.15));
+      circle(c, hx + hr * 0.56, hy + hr * 0.52, hr * (e === 'happy' ? 0.2 : 0.14));
       c.fillStyle = stony ? P.shade : MOUTH;
       c.fill();
       if (e === 'x') {
@@ -610,8 +732,8 @@ function drawAnt(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw: 
     } else if (det) {
       c.beginPath();
       if (angry) c.arc(hx + hr * 0.56, hy + hr * 0.64, hr * 0.16, Math.PI * 1.15, Math.PI * 1.85);
-      else c.arc(hx + hr * 0.54, hy + hr * 0.4, hr * 0.16, Math.PI * 0.1, Math.PI * 0.8);
-      c.lineWidth = lw * 0.8;
+      else c.arc(hx + hr * 0.54, hy + hr * 0.4, hr * 0.15, Math.PI * 0.1, Math.PI * 0.8);
+      c.lineWidth = lw * 0.9;
       c.strokeStyle = P.ink;
       c.stroke();
     }
@@ -621,18 +743,18 @@ function drawAnt(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw: 
       c.rotate(-0.14);
       item(c, 'helmet', look.helmet, hr * 2.75, r, t, stony);
       c.restore();
-    } else if (k === 6) crown(c, hx - hr * 0.2, hy - hr * 0.86, hr * 1.0, -0.22, lw, t, P.ink);
+    }
   };
-  if (cached) piece(ctx, `ah${look.team}${k}|${look.helmet}|${look.chili ? 1 : 0}|${e}${angry ? 1 : 0}|${rk}`, r, ANT_HX - 1.0, ANT_HY - 1.35, 1.9, 2.2, hx - ANT_HX, hy - ANT_HY, head);
+  if (cached) piece(ctx, `ah${look.team}${k}|${look.helmet}|${e}${angry ? 1 : 0}${gy}|${rb}`, rb, ANT_HX - 1.0, ANT_HY - 1.35, 1.9, 2.2, hx - ANT_HX, hy - ANT_HY, head);
   else head(ctx);
-  if (look.chili && !stony) flame(ctx, hx - hr * 0.75, hy - hr * 0.55, 0.34 + look.chili * 0.045, t, '#ff7a1e', '#ffe066', lw * 0.7);
+  if (look.chili && !stony) heat(ctx, hx - hr * 0.1, hy - hr * 1.0, 1.1, t, lt * 0.75, heatLines(look.chili));
 
   // weapon, then the near arm over its grip
   if (w && w !== 'shield') heldWeapon(ctx, look, r, t, stony);
   ctx.beginPath();
   ctx.moveTo(shx, shy);
   ctx.quadraticCurveTo((shx + H.x) / 2 - 0.05, (shy + H.y) / 2 + 0.16, H.x, H.y);
-  ctx.lineWidth = lw * 1.7;
+  ctx.lineWidth = lt * 1.7;
   ctx.strokeStyle = P.limb;
   ctx.stroke();
   circle(ctx, H.x, H.y, 0.12);
@@ -640,9 +762,11 @@ function drawAnt(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw: 
   ctx.fill();
   if (w === 'shield') heldWeapon(ctx, look, r, t, stony);
 
-  if (!stony && big) {
-    if (k === 4 && !look.helmet) sparkle(ctx, hx - hr * 0.5, hy - hr * 1.3, 0.3, t, look.seed);
-    if (k === 6) for (let i = 0; i < 3; i++) sparkle(ctx, Math.cos(t * 1.3 + i * 2.1) * 1.3, ty - 0.3 + Math.sin(t * 1.3 + i * 2.1) * 1.0, 0.26, t, i * 2);
+  if (k === 6 && !stony) {
+    if (!look.helmet) halo(ctx, hx - hr * 0.12, hy - hr * 1.38, hr * 0.62, t, lw);
+    // a slow glint runs over the white-gold
+    const g = (t * 0.35 + look.seed * 0.13) % 1;
+    sparkle(ctx, ax - arx * 0.6 + g * arx * 1.0, ay - ary * 0.92 + Math.abs(g - 0.5) * ary * 0.5, 0.32, t, look.seed);
   }
   if (pose.stone > 0.25 || L > 0.3) marks(ctx, pose, lw, P, ax, ay, arx, ary, hx, hy, hr);
 }
@@ -672,14 +796,14 @@ function marks(ctx: Ctx, pose: PetPose, lw: number, P: Pal, ax: number, ay: numb
       ctx.quadraticCurveTo(x, ay - ary * 0.36 + (i % 2) * ary * 0.3, x + arx * 0.14, ay - ary * 0.1 + (i % 2) * ary * 0.3);
     }
   }
-  ctx.lineWidth = lw * 0.75;
+  ctx.lineWidth = lw * 1.05;
   ctx.strokeStyle = P.ink;
   ctx.stroke();
 }
 
 // ------------------------------------------------------------------ the frog
 
-function drawFrog(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw: number) {
+function drawFrog(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw: number, lt: number) {
   const k = cls(look.level);
   const t = pose.t;
   const p = clamp(pose.puff, 0, 1.5);
@@ -687,6 +811,7 @@ function drawFrog(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw:
   const q = Math.min(1, p * 1.6);
   const stony = pose.stone > 0.5;
   const e = faceOf(look, pose);
+  const gy = gazeOf(pose);
   const angry = pose.mood === 'angry';
   const w = look.weapon;
   const tw = w ? 0 : pose.wind;
@@ -698,9 +823,6 @@ function drawFrog(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw:
   const det = cached || r >= 11;
   const cheer = pose.mood === 'cheer' ? 1 : 0;
   const air = smooth(clamp((clamp(pose.hop, 0, 1) - 0.15) / 0.85, 0, 1));
-  const tr = stony ? P.shade : trimOf(k, t);
-  const tc = stony ? P.shade : TEAM[look.team].dark;
-  const pl = stony ? P.light : PLATE[k];
 
   const brx = 0.98 * (1 + 0.5 * p);
   const bry = 0.86 * (1 + 0.65 * p);
@@ -720,48 +842,54 @@ function drawFrog(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw:
   const my = by - 0.26 * bry;
   const mmx = (m0x + m1x) / 2 + 0.1;
 
-  if (k === 6 && !stony) {
-    at(3.05, 1, TIPS);
-    flame(ctx, TIPS[0], TIPS[1] + 0.1, 0.6, t, CLASS_FX.sss, CLASS_FX.spark, lw * 0.8);
-  }
+  if (k >= 5 && !stony) glow(ctx, 0, by, brx * 1.65, bry * 1.7, k === 6 ? CLASS_FX.sss : CLASS_FX.s, t);
   // far foot peeking out in front
   if (!q) limb(ctx, 0.2, -0.07 + air * 0.3, 0.52 - air * 0.3, -0.07 + air * 0.5, 0.16, P.shade, lw, P.ink);
 
   const body = (c: Ctx) => {
-    if (k >= 5 && !stony) glow(c, 0, by, brx * 1.5, bry * 1.55, AURA[k], cached ? 0 : t);
-    // along the back: bumps (C), a gold fin (A), spikes (S, SSS)
-    if (k >= 2 && k !== 3) {
-      const n = k >= 4 ? 4 : 3;
-      for (let i = 0; i < n; i++) {
-        const a = 3.25 + i * 0.36;
-        at(a, 0.97, TIPS);
-        if (k === 2) {
-          circle(c, TIPS[0], TIPS[1], 0.12);
-          fillStroke(c, tr, lw, P.ink);
-        } else spike(c, TIPS[0], TIPS[1], a + 0.25, 0.16, (k === 4 ? 0.34 : 0.44) - Math.abs(i - 1.5) * 0.06, stony ? P.shade : k === 4 ? COLOR.gold : trimOf(k, t, i), lw, P.ink);
-      }
-    }
     // eye domes: the far one stays behind the head, the near one is joined to it below
     const fierce = (k >= 5 || angry) && e === 'open';
     circle(c, dfx, dfy, 0.27 * es);
-    fillStroke(c, P.shade, lw, P.ink);
-    eye(c, dfx + 0.05, dfy - 0.03, 0.17 * es, e, P, lw, t, fierce, det);
+    fillStroke(c, P.mid, lw, P.ink);
+    eye(c, dfx + 0.05, dfy - 0.03, 0.17 * es, e, P, lw, t, fierce, det, gy);
     circle(c, dnx, dny, 0.34 * es);
     fillStroke(c, P.main, lw, P.ink);
 
     blob(c, bx, by, brx, bry, 0, P, lw, det);
-    // belly: it swells as the tongue winds up
-    ellipse(c, bx + 0.22 * brx, by + 0.24 * bry, brx * (0.6 + 0.06 * twv), bry * (0.6 + 0.06 * twv));
-    c.fillStyle = P.belly;
+    // belly: cream, round, it swells as the tongue winds up
+    const bex = bx + 0.22 * brx;
+    const bey = by + 0.24 * bry;
+    const berx = brx * (0.6 + 0.06 * twv);
+    const bery = bry * (0.6 + 0.06 * twv);
+    c.save();
+    ellipse(c, bx, by, brx - lw * 0.5, bry - lw * 0.5);
+    c.clip();
+    ellipse(c, bex, bey, berx, bery);
+    c.fillStyle = det ? P.bellyLo : P.belly;
     c.fill();
-    if (k >= 1) {
-      c.fillStyle = P.shade;
-      circle(c, bx - 0.5 * brx, by - 0.42 * bry, 0.13);
+    if (det) {
+      ellipse(c, bex - berx * 0.1, bey - bery * 0.14, berx * 0.86, bery * 0.82);
+      c.fillStyle = P.belly;
       c.fill();
-      circle(c, bx - 0.74 * brx, by - 0.05 * bry, 0.09);
+    }
+    // the hip, where the thigh sits on the body, in a little shadow
+    if (det && !q) {
+      ellipse(c, -0.5, -0.46, 0.46, 0.3, -0.35);
+      c.fillStyle = AO;
       c.fill();
-      if (k >= 2) {
-        circle(c, bx - 0.26 * brx, by - 0.66 * bry, 0.08);
+    }
+    c.restore();
+    if (k === 1 || k === 2) {
+      // D and C: clean marks in a lighter tone of the skin
+      c.fillStyle = P.light;
+      circle(c, bx - 0.52 * brx, by - 0.4 * bry, 0.11);
+      c.fill();
+      circle(c, bx - 0.72 * brx, by - 0.04 * bry, 0.075);
+      c.fill();
+      if (k === 2) {
+        circle(c, bx - 0.24 * brx, by - 0.66 * bry, 0.08);
+        c.fill();
+        circle(c, bx - 0.36 * brx, by - 0.14 * bry, 0.06);
         c.fill();
       }
     }
@@ -772,30 +900,8 @@ function drawFrog(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw:
       circle(c, bx - brx * 0.7, by - bry * 0.14, brx * 0.06);
       c.fill();
     }
-    // the belt in the team colour
-    c.lineCap = 'butt';
-    c.beginPath();
-    c.ellipse(bx, by + 0.08 * bry, brx * 0.9, bry * 0.4, 0, 0, Math.PI);
-    c.lineWidth = 0.2 + lw;
-    c.strokeStyle = P.ink;
-    c.stroke();
-    c.lineWidth = 0.2 - lw;
-    c.strokeStyle = tc;
-    c.stroke();
-    c.lineCap = 'round';
-    // armour on the back from B
-    if (k >= 3) {
-      c.beginPath();
-      c.ellipse(bx, by, brx * 1.02, bry * 1.02, 0, Math.PI * 0.98, Math.PI * 1.42);
-      c.ellipse(bx, by, brx * 0.62, bry * 0.62, 0, Math.PI * 1.42, Math.PI * 0.98, true);
-      c.closePath();
-      fillStroke(c, tr, lw, P.ink);
-      c.beginPath();
-      c.ellipse(bx, by, brx * 1.02, bry * 1.02, 0, Math.PI * 1.04, Math.PI * 1.37);
-      c.ellipse(bx, by, brx * 0.74, bry * 0.74, 0, Math.PI * 1.37, Math.PI * 1.04, true);
-      c.closePath();
-      fillStroke(c, pl, lw * 0.8, P.ink);
-    }
+    // a shell plate on the back from B: steel, gold, white-gold
+    if (k >= 3) plate(c, bx, by, brx * 1.03, bry * 1.03, 0, Math.PI * (k >= 5 ? 0.86 : 0.9), Math.PI * (k >= 5 ? 1.46 : 1.42), k, t, lw, P, stony);
     ellipse(c, bx, by, brx, bry);
     c.lineWidth = lw;
     c.strokeStyle = P.ink;
@@ -807,13 +913,20 @@ function drawFrog(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw:
       c.rotate(-0.16);
       item(c, 'helmet', look.helmet, 1.5, r, t, stony);
       c.restore();
-    } else if (k === 6) crown(c, bx - 0.3 * brx, by - bry * 0.9, 0.62, -0.3, lw, t, P.ink);
+    }
 
     // the near eye, joined to the head
     circle(c, dnx, dny, 0.34 * es - lw * 0.5);
     c.fillStyle = P.main;
     c.fill();
-    eye(c, dnx + 0.05, dny - 0.02, 0.24 * es, e, P, lw, t, fierce, det);
+    if (det) {
+      c.beginPath();
+      c.arc(dnx, dny, 0.34 * es - lw * 1.3, Math.PI * 1.1, Math.PI * 1.55);
+      c.lineWidth = lw * 0.9;
+      c.strokeStyle = P.spec;
+      c.stroke();
+    }
+    eye(c, dnx + 0.05, dny - 0.02, 0.24 * es, e, P, lw, t, fierce, det, gy);
 
     // mouth: a wide line that opens into a maw
     let open = twv * 0.7 + (ts > 0.02 ? 0.45 : 0);
@@ -832,22 +945,32 @@ function drawFrog(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw:
       }
     } else {
       c.quadraticCurveTo(mmx, my + (angry || k >= 5 ? -0.06 : q ? 0 : 0.2), m1x, my - 0.02);
-      c.lineWidth = lw * 1.1;
+      c.lineWidth = lw * 1.25;
       c.strokeStyle = P.ink;
       c.stroke();
     }
-    // nostril and cheek
-    circle(c, bx + 0.84 * brx, by - 0.45 * bry, 0.035);
+    // nostril
+    circle(c, bx + 0.84 * brx, by - 0.45 * bry, 0.032);
     c.fillStyle = P.ink;
     c.fill();
-    if ((look.chili || k >= 1) && !stony) {
-      ellipse(c, bx + 0.2 * brx, by - 0.1 * bry, 0.15, 0.1);
-      c.fillStyle = look.chili ? '#ff5a1e' : look.team ? '#ffb0a8' : '#ffb7d0';
-      c.fill();
-    }
   };
-  if (cached) piece(ctx, `f${look.team}${k}|${look.helmet}|${look.chili ? 1 : 0}|${e}${angry ? 1 : 0}${twv * 4}${ts > 0.02 ? 1 : 0}|${r.toFixed(1)}`, r, -1.7, -2.8, 3.4, 3.35, 0, 0, body);
+  const rb = bucket(r);
+  if (cached) piece(ctx, `f${look.team}${k}|${look.helmet}|${e}${angry ? 1 : 0}${twv * 4}${ts > 0.02 ? 1 : 0}${gy}|${rb}`, rb, -1.7, -2.8, 3.4, 3.35, 0, 0, body);
   else body(ctx);
+
+  // the throat pulses while it sits and breathes
+  if (det && !q && !L && air < 0.05 && !tw && !ts && !stony && (pose.mood === 'idle' || pose.mood === 'scared')) {
+    const th = Math.pow(Math.max(0, Math.sin(t * 2.1 + look.seed * 1.7)), 3) * (pose.mood === 'scared' ? 1.3 : 1);
+    if (th > 0.06) {
+      const sx = bx + 0.74 * brx + 0.03 * th;
+      const sy = by + 0.1 + 0.04 * th;
+      ellipse(ctx, sx, sy, 0.09 + 0.09 * th, 0.07 + 0.08 * th, 0.3);
+      fillStroke(ctx, P.belly, lw * 0.8, P.line);
+      ellipse(ctx, sx - 0.05 * th, sy - 0.04 * th, 0.04 * th, 0.02 * th, -0.4);
+      ctx.fillStyle = WHITE;
+      ctx.fill();
+    }
+  }
 
   // near hind leg: folded when sitting, trailing in the air, a stub on a blown-up body
   let thx = lerp(-0.52, -0.78, air);
@@ -870,20 +993,20 @@ function drawFrog(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw:
     f1x = lerp(f1x, cx + ux * 0.6, q);
     f1y = lerp(f1y, cy + uy * 0.6, q);
   }
-  limb(ctx, f0x, f0y, f1x, f1y, 0.2 * ls, P.main, lw, P.ink);
+  limb(ctx, f0x, f0y, f1x, f1y, 0.2 * ls, P.mid, lw, P.ink);
   const thigh = (c: Ctx) => {
     blob(c, 0, 0, 0.5 * ls, 0.36 * ls, 0, P, lw, det);
-    if (k >= 3) plate(c, 0, 0, 0.52 * ls, 0.38 * ls, 0, Math.PI * 1.0, Math.PI * 1.7, pl, stony ? P.shade : trimOf(k, t, 3), lw, P.ink);
+    if (k >= 5) plate(c, 0, 0, 0.52 * ls, 0.38 * ls, 0, Math.PI * 1.0, Math.PI * 1.7, k, t, lw, P, stony);
   };
   ctx.save();
   ctx.translate(thx, thy);
   ctx.rotate(thr);
-  if (cached) piece(ctx, `ft${look.team}${k}|${r.toFixed(1)}`, r, -0.68, -0.54, 1.36, 1.08, 0, 0, thigh);
+  if (cached) piece(ctx, `ft${look.team}${k}|${rb}`, rb, -0.68, -0.54, 1.36, 1.08, 0, 0, thigh);
   else thigh(ctx);
   ctx.restore();
   if (look.sneakers && !q) shoe(ctx, f1x - 0.12, f1y + 0.04, 0.82, look, r, t, stony);
 
-  if (look.chili && !stony) flame(ctx, bx + 0.9 * brx, by - 0.52 * bry, 0.36 + look.chili * 0.05, t, '#ff7a1e', '#ffe066', lw * 0.7);
+  if (look.chili && !stony) heat(ctx, bx + 0.3 * brx, by - bry * 1.12, 1.15, t, lt * 0.75, heatLines(look.chili));
 
   // the tongue lashes out
   if (ts > 0.02) {
@@ -918,9 +1041,10 @@ function drawFrog(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw:
   fillStroke(ctx, P.main, lw, P.ink);
   if (w === 'shield') heldWeapon(ctx, look, r, t, stony);
 
-  if (!stony) {
-    if (k === 4 && !look.helmet) sparkle(ctx, bx - 0.6 * brx, by - bry * 1.25, 0.3, t, look.seed);
-    if (k === 6) for (let i = 0; i < 3; i++) sparkle(ctx, Math.cos(t * 1.3 + i * 2.1) * 1.45, by + Math.sin(t * 1.3 + i * 2.1) * 1.1, 0.26, t, i * 2);
+  if (k === 6 && !stony) {
+    if (!look.helmet) halo(ctx, bx + 0.05 * brx, by - bry * 1.42, 0.5, t, lw);
+    const g = (t * 0.35 + look.seed * 0.13) % 1;
+    sparkle(ctx, bx - brx * (0.9 - g * 0.5), by - bry * (0.35 + g * 0.5), 0.3, t, look.seed);
   }
   if (pose.stone > 0.25 || L > 0.3) marks(ctx, pose, lw, P, bx - 0.1, by, brx * 0.9, bry * 0.9, dnx, dny, 0.34);
 }
@@ -946,6 +1070,8 @@ function drawPet(ctx: Ctx, look: PetLook, pose: PetPose, r: number): void {
   const big = look.weapon === 'bat' ? 1.4 : !look.weapon ? 1.2 : 1;
   let lean = (-0.2 * pose.wind + 0.24 * pose.strike) * big - 0.3 * hu;
   let dx = (0.3 * pose.strike - 0.14 * pose.wind) * big - 0.18 * hu;
+  // a little lean into the walk, and forward through the air on a hop
+  lean += frog ? 0.12 * air - 0.05 * crouch : 0.07 * pose.moving;
   if (mood === 'cheer') lift += Math.abs(Math.sin(t * 7 + look.seed)) * r * 0.35;
   else if (mood === 'scared') {
     dx += Math.sin(t * 47) * 0.035;
@@ -970,20 +1096,43 @@ function drawPet(ctx: Ctx, look: PetLook, pose: PetPose, r: number): void {
   if (L > 0) ctx.transform(1, 0, (0.25 + Math.sin(t * 2.4 + look.seed) * 0.3) * L, 1, 0, 0);
   if (lean) ctx.rotate(lean);
   if (dx) ctx.translate(dx, 0);
-  const lw = Math.max(1.2 / r, 0.1);
+  // outlines a little thinner than limbs used to be; limbs keep their weight
+  const lt = Math.max(1.2 / r, 0.1);
+  const lw = Math.max(0.85 / r, 0.07);
   const P = palette(look, pose);
-  if (frog) drawFrog(ctx, look, pose, r, P, lw);
-  else drawAnt(ctx, look, pose, r, P, lw);
+  if (frog) drawFrog(ctx, look, pose, r, P, lw, lt);
+  else drawAnt(ctx, look, pose, r, P, lw, lt);
   ctx.restore();
+}
+
+let SHADOW: HTMLCanvasElement | null = null;
+/** The contact shadow, made once: a soft dark oval with a darker core. */
+function shadowPic(): HTMLCanvasElement {
+  if (!SHADOW) {
+    SHADOW = document.createElement('canvas');
+    SHADOW.width = 96;
+    SHADOW.height = 32;
+    const g = SHADOW.getContext('2d')!;
+    g.scale(1, 32 / 96);
+    const gr = g.createRadialGradient(48, 48, 0, 48, 48, 48);
+    gr.addColorStop(0, 'rgba(6, 10, 14, 0.62)');
+    gr.addColorStop(0.32, 'rgba(6, 10, 14, 0.46)');
+    gr.addColorStop(0.7, 'rgba(6, 10, 14, 0.2)');
+    gr.addColorStop(1, 'rgba(6, 10, 14, 0)');
+    g.fillStyle = gr;
+    g.fillRect(0, 0, 96, 96);
+  }
+  return SHADOW;
 }
 
 function drawShadow(ctx: Ctx, look: PetLook, r: number, lift: number): void {
   const k = 1 / (1 + Math.max(0, lift) * 0.7);
   const a = ctx.globalAlpha;
-  ctx.globalAlpha = a * (0.1 + 0.14 * k);
-  ctx.fillStyle = COLOR.ink;
-  ellipse(ctx, 0, 0, r * (look.pet === 'frog' ? 1.05 : 0.98) * k, r * 0.3 * k);
-  ctx.fill();
+  ctx.globalAlpha = a * (0.35 + 0.65 * k);
+  const rx = r * (look.pet === 'frog' ? 1.2 : 1.12) * k;
+  const ry = r * 0.36 * k;
+  // a touch to the lower right, away from the floodlights
+  ctx.drawImage(shadowPic(), -rx + r * 0.08, -ry + r * 0.03, rx * 2, ry * 2);
   ctx.globalAlpha = a;
 }
 

@@ -1,14 +1,23 @@
 import type { GearType } from '../types';
-import { COLOR, RAINBOW, TIER } from '../theme';
+import { CLASS_FX, COLOR, TIER } from '../theme';
 import { circle, ellipse, fillStroke, poly, rr } from '../util';
-import { cls, flame, glow, rainbowStroke, sparkle, trimOf } from './weapons';
+import { STEEL, STEEL_HI, STEEL_LO, band, cls, glow, heat, sparkle, stud, trimOf } from './weapons';
 
 /*
- * The three pieces of gear, each in seven classes, drawn in a unit box (1 = size) centred on the origin.
+ * The three pieces of gear, each in seven classes, drawn in a unit box (1 = size) centred on the origin, under
+ * the same key light as the weapons (upper left) and in the same class metals: greys, silver, gold, white-gold.
  */
 type Ctx = CanvasRenderingContext2D;
 
-// ------------------------------------------------------------------ helmet: acorn cap, pot -> horned kabuto
+/** Clips to the current path and runs draw. */
+function inside(ctx: Ctx, draw: () => void) {
+  ctx.save();
+  ctx.clip();
+  draw();
+  ctx.restore();
+}
+
+// ------------------------------------------------------------------ helmet: acorn cap, pot -> kabuto
 
 /** The bowl of a helmet: flat and open at y0, rounded above. */
 function dome(ctx: Ctx, rx: number, ry: number, y0: number) {
@@ -18,160 +27,147 @@ function dome(ctx: Ctx, rx: number, ry: number, y0: number) {
   ctx.closePath();
 }
 
+/** A dome with volume: its shade to the lower right, a crisp gloss on the upper left. */
+function shadedDome(ctx: Ctx, rx: number, ry: number, y0: number, base: string, lo: string, hi: string, lw: number) {
+  dome(ctx, rx, ry, y0);
+  ctx.fillStyle = lo;
+  ctx.fill();
+  inside(ctx, () => {
+    ellipse(ctx, -rx * 0.2, y0 - ry * 0.55, rx * 1.02, ry * 0.98);
+    ctx.fillStyle = base;
+    ctx.fill();
+    ellipse(ctx, -rx * 0.42, y0 - ry * 0.66, rx * 0.2, ry * 0.08, -0.85);
+    ctx.fillStyle = hi;
+    ctx.fill();
+  });
+  dome(ctx, rx, ry, y0);
+  ctx.lineWidth = lw;
+  ctx.strokeStyle = COLOR.ink;
+  ctx.stroke();
+}
+
 function helmet(ctx: Ctx, k: number, t: number, lw: number) {
-  const tr = trimOf(k, t);
   if (k === 0) {
     // an acorn cap with its stalk
-    ctx.lineWidth = lw * 2.4;
-    ctx.strokeStyle = COLOR.ink;
     ctx.beginPath();
     ctx.moveTo(0, -0.26);
     ctx.quadraticCurveTo(0, -0.42, -0.12, -0.44);
+    ctx.lineWidth = lw * 2.6;
+    ctx.strokeStyle = COLOR.ink;
     ctx.stroke();
-    ctx.lineWidth = lw * 0.9;
-    ctx.strokeStyle = COLOR.woodDark;
+    ctx.lineWidth = lw * 1.1;
+    ctx.strokeStyle = '#6f4a2a';
     ctx.stroke();
-    dome(ctx, 0.42, 0.36, 0.16);
-    fillStroke(ctx, '#b98548', lw);
-    ctx.lineWidth = lw * 0.6;
-    ctx.strokeStyle = COLOR.woodDark;
-    for (const x of [-0.2, 0.02, 0.24]) {
-      ctx.beginPath();
-      ctx.arc(x, 0.02, 0.1, Math.PI * 1.1, Math.PI * 1.9);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(x - 0.11, -0.12, 0.09, Math.PI * 1.15, Math.PI * 1.85);
-      ctx.stroke();
+    shadedDome(ctx, 0.42, 0.36, 0.16, '#9a6b3f', '#6f4a2a', '#d0a273', lw);
+    ctx.lineWidth = lw * 0.55;
+    ctx.strokeStyle = '#5e3d22';
+    ctx.beginPath();
+    for (const x of [-0.18, 0.04, 0.25]) {
+      ctx.moveTo(x - 0.09, -0.01);
+      ctx.arc(x, 0.04, 0.1, Math.PI * 1.2, Math.PI * 1.8);
     }
+    ctx.stroke();
     rr(ctx, -0.45, 0.1, 0.9, 0.1, 0.05);
-    fillStroke(ctx, COLOR.woodDark, lw);
+    fillStroke(ctx, '#7d5636', lw);
+    ctx.fillStyle = '#a97c52';
+    ctx.fillRect(-0.4, 0.11, 0.42, 0.03);
     return;
   }
   if (k === 1) {
     // a cooking pot worn upside down: its handle sticks out behind
-    rr(ctx, -0.52, -0.02, 0.2, 0.08, 0.03);
-    fillStroke(ctx, COLOR.woodDark, lw);
+    rr(ctx, -0.53, -0.02, 0.22, 0.075, 0.03);
+    fillStroke(ctx, '#3f3630', lw);
     rr(ctx, -0.36, -0.28, 0.72, 0.44, 0.1);
-    fillStroke(ctx, '#aeb7c4', lw);
-    ctx.fillStyle = '#e4e9f0';
-    rr(ctx, -0.27, -0.21, 0.09, 0.24, 0.03);
+    ctx.fillStyle = STEEL;
     ctx.fill();
-    ctx.fillStyle = tr;
-    ctx.fillRect(-0.36 + lw / 2, -0.04, 0.72 - lw, 0.07);
-    rr(ctx, -0.42, 0.09, 0.84, 0.09, 0.04);
-    fillStroke(ctx, '#8f99a8', lw);
-    circle(ctx, 0, -0.31, 0.06);
-    fillStroke(ctx, COLOR.woodDark, lw);
+    inside(ctx, () => {
+      ctx.fillStyle = STEEL_LO;
+      ctx.fillRect(0.14, -0.3, 0.3, 0.5);
+      ctx.fillStyle = STEEL_HI;
+      ctx.fillRect(-0.27, -0.3, 0.08, 0.5);
+    });
+    rr(ctx, -0.36, -0.28, 0.72, 0.44, 0.1);
+    ctx.lineWidth = lw;
+    ctx.strokeStyle = COLOR.ink;
+    ctx.stroke();
+    band(ctx, -0.42, 0.09, 0.84, 0.085, 1, t, lw);
     return;
   }
   // from C: one helmet growing into a kabuto
-  const bowl = ['', '', '#a3acbb', '#7a7391', '#3d3550', '#c2203d', '#f6f0ff'][k];
-  const dark = ['', '', '#7d8696', '#58516e', '#2a2438', '#8a1228', '#d9cdf0'][k];
-  const gold = k >= 4;
-  if (k >= 5) glow(ctx, 0, -0.05, 0.56, 0.5, TIER.metalLight[k], t);
+  const gold = k >= 5;
+  const base = gold ? TIER.tile[k] : k === 4 ? '#5a636e' : k === 3 ? TIER.metal[3] : STEEL;
+  const lo = gold ? TIER.tileDark[k] : k === 4 ? '#363c45' : k === 3 ? TIER.tile[3] : STEEL_LO;
+  const hi = gold ? TIER.metalLight[k] : STEEL_HI;
+  if (k >= 5) glow(ctx, 0, -0.06, 0.6, 0.54, k === 6 ? CLASS_FX.sss : CLASS_FX.s, t);
   // horns rise from the brow (S and SSS)
   if (k >= 5) {
-    const s = k === 6 ? 1 : 0.8;
-    ctx.beginPath();
-    ctx.moveTo(0.14, -0.1);
-    ctx.quadraticCurveTo(-0.06, -0.2 * s - 0.05, -0.04, -0.5 * s);
-    ctx.quadraticCurveTo(0.12, -0.34 * s, 0.28, -0.14);
-    ctx.closePath();
-    fillStroke(ctx, COLOR.gold, lw);
-    ctx.beginPath();
-    ctx.moveTo(0.26, -0.12);
-    ctx.quadraticCurveTo(0.44, -0.22 * s - 0.04, 0.48, -0.5 * s);
-    ctx.quadraticCurveTo(0.54, -0.22 * s, 0.4, -0.04);
-    ctx.closePath();
-    fillStroke(ctx, COLOR.gold, lw);
+    const s = k === 6 ? 1 : 0.85;
+    for (let i = 0; i < 2; i++) {
+      const x = i ? 0.3 : 0.12;
+      ctx.beginPath();
+      ctx.moveTo(x - 0.06, -0.08);
+      ctx.quadraticCurveTo(x - 0.1 + i * 0.14, -0.22 * s, x - 0.04 + i * 0.16, -0.5 * s);
+      ctx.quadraticCurveTo(x + 0.04 + i * 0.06, -0.24 * s, x + 0.08, -0.06);
+      ctx.closePath();
+      fillStroke(ctx, i ? trimOf(k, t) : TIER.metalLight[k], lw);
+    }
   }
-  // neck guard: plates flaring out behind
-  const lames = k - 2 > 3 ? 3 : k - 2;
+  // neck guard: plates flaring out behind, edged in the class metal
+  const lames = Math.min(3, k - 1);
   for (let i = lames - 1; i >= 0; i--) {
-    const y = 0.13 + i * 0.1;
-    poly(ctx, [-0.34, y - 0.04, 0.0, y - 0.04, 0.0, y + 0.09, -0.44 - i * 0.03, y + 0.11]);
-    fillStroke(ctx, dark, lw);
+    const y = 0.13 + i * 0.09;
+    poly(ctx, [-0.34, y - 0.04, 0.0, y - 0.04, 0.0, y + 0.08, -0.43 - i * 0.03, y + 0.1]);
+    fillStroke(ctx, lo, lw);
     ctx.fillStyle = trimOf(k, t, i);
-    ctx.fillRect(-0.4 - i * 0.02, y + 0.045, 0.38 + i * 0.02, 0.035);
+    ctx.fillRect(-0.4 - i * 0.025, y + 0.05, 0.38 + i * 0.025, 0.03);
   }
   // the peak in front
-  poly(ctx, [0.26, 0.06, 0.53, 0.15, 0.26, 0.19]);
-  fillStroke(ctx, gold ? COLOR.gold : dark, lw);
-  dome(ctx, 0.4, 0.37, 0.14);
-  fillStroke(ctx, bowl, lw);
-  // one shade behind, one gloss in front, two ribs
-  ctx.fillStyle = dark;
-  ctx.beginPath();
-  ctx.moveTo(-0.4 + lw / 2, 0.13);
-  ctx.bezierCurveTo(-0.4, -0.3, -0.15, -0.33, -0.1, -0.33);
-  ctx.bezierCurveTo(-0.26, -0.2, -0.26, 0, -0.24, 0.13);
-  ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,0.45)';
-  ellipse(ctx, 0.17, -0.2, 0.1, 0.045, -0.5);
-  ctx.fill();
-  if (k >= 3) {
-    ctx.lineWidth = lw * 0.6;
-    ctx.strokeStyle = gold ? COLOR.goldDark : dark;
+  poly(ctx, [0.26, 0.06, 0.52, 0.15, 0.26, 0.19]);
+  fillStroke(ctx, k >= 4 ? trimOf(k, t) : lo, lw);
+  shadedDome(ctx, 0.4, 0.37, 0.14, base, lo, hi, lw);
+  if (k === 3) {
+    // a raised comb from the nape over the crown
     ctx.beginPath();
-    ctx.moveTo(0, -0.33);
-    ctx.lineTo(0, 0.08);
-    ctx.stroke();
+    ctx.moveTo(-0.3, -0.18);
+    ctx.quadraticCurveTo(-0.12, -0.44, 0.1, -0.4);
+    ctx.quadraticCurveTo(0.2, -0.36, 0.24, -0.26);
+    ctx.quadraticCurveTo(0.0, -0.32, -0.3, -0.18);
+    ctx.closePath();
+    fillStroke(ctx, trimOf(k, t), lw * 0.8);
   }
-  // the brow band in the class colour
-  rr(ctx, -0.43, 0.06, 0.86, 0.1, 0.04);
-  fillStroke(ctx, tr, lw);
-  if (k === 6) {
-    rr(ctx, -0.43, 0.06, 0.86, 0.1, 0.04);
-    rainbowStroke(ctx, 0.05, t, 0.14);
-    rr(ctx, -0.43, 0.06, 0.86, 0.1, 0.04);
-    ctx.lineWidth = lw * 0.5;
-    ctx.strokeStyle = COLOR.ink;
-    ctx.stroke();
-  }
-  // top knob, then the gold crest on the brow (A and up)
-  circle(ctx, 0, -0.34, 0.055);
-  fillStroke(ctx, gold ? COLOR.gold : tr, lw);
-  if (gold) {
-    if (k === 4) {
-      // a crescent
-      ctx.beginPath();
-      ctx.arc(0.26, -0.12, 0.17, Math.PI * 0.05, Math.PI * 0.95, true);
-      ctx.quadraticCurveTo(0.26, -0.04, 0.428, -0.094);
-      ctx.closePath();
-      fillStroke(ctx, COLOR.gold, lw);
+  // the brow band in the class metal, its rivets
+  band(ctx, -0.43, 0.06, 0.86, 0.1, k, t, lw);
+  if (k < 4) {
+    ctx.fillStyle = TIER.tileDark[k];
+    for (const x of [-0.26, 0.0, 0.26]) {
+      circle(ctx, x, 0.11, 0.018);
+      ctx.fill();
     }
-    circle(ctx, 0.27, 0.0, 0.085);
-    fillStroke(ctx, k === 4 ? COLOR.goldLight : tr, lw);
-    sparkle(ctx, 0.36, -0.3, k === 6 ? 0.2 : 0.13, t, 5);
   }
+  if (k === 4) {
+    // a gold crescent on the brow
+    ctx.beginPath();
+    ctx.arc(0.27, -0.12, 0.16, Math.PI * 0.05, Math.PI * 0.95, true);
+    ctx.quadraticCurveTo(0.27, -0.05, 0.43, -0.1);
+    ctx.closePath();
+    fillStroke(ctx, trimOf(k, t), lw);
+  }
+  if (k >= 4) stud(ctx, 0.27, 0.0, 0.07, k, t, lw);
+  if (k === 6) sparkle(ctx, -0.16, -0.22, 0.2, t, 5);
 }
 
-// ------------------------------------------------------------------ sneakers: plain -> winged
+// ------------------------------------------------------------------ sneakers: canvas shoe -> gold-striped high-top
 
 function sneaker(ctx: Ctx, k: number, t: number, lw: number) {
-  const tr = trimOf(k, t);
   const top = k >= 3 ? -0.36 : -0.22; // high-tops from B
-  const upper = k === 0 ? '#efe9dd' : k === 1 ? COLOR.white : k === 6 ? '#fff6ff' : TIER.tile[k];
-  if (k >= 5) glow(ctx, 0, 0.05, 0.6, 0.48, TIER.metalLight[k], t);
-  if (k >= 4) {
-    // a wing at the heel: small at A, full at SSS
-    const n = k === 4 ? 2 : 3;
-    const s = k === 6 ? 1.15 : k === 5 ? 0.95 : 0.75;
-    const fl = Math.sin(t * 6) * 0.12;
-    for (let i = n - 1; i >= 0; i--) {
-      const a = -0.5 - i * 0.42 - fl;
-      const l = (0.3 - i * 0.045) * s;
-      ellipse(ctx, -0.3 - Math.cos(a) * l * 0.55, -0.12 + Math.sin(a) * l * 0.75, l * 0.62, 0.075 * s, -a);
-      fillStroke(ctx, k === 6 ? RAINBOW[i + 1] : COLOR.white, lw * 0.85);
-    }
-  }
-  // sole
+  const upper = k === 0 ? '#e2ddd2' : '#f3f4f6';
+  const upperLo = k === 0 ? '#b9b2a4' : '#c6ccd4';
+  if (k >= 5) glow(ctx, 0, 0.05, 0.62, 0.5, k === 6 ? CLASS_FX.sss : CLASS_FX.s, t);
+  // sole: light on top, grey where it meets the ground
   rr(ctx, -0.48, 0.3, 0.98, 0.2, 0.1);
-  fillStroke(ctx, k === 0 ? '#d8d2c4' : COLOR.white, lw);
-  if (k >= 2) {
-    ctx.fillStyle = tr;
-    ctx.fillRect(-0.4, 0.385, 0.82, 0.045);
-  }
+  fillStroke(ctx, k === 0 ? '#cfc9bc' : '#e7eaee', lw);
+  ctx.fillStyle = k === 0 ? '#a49d8f' : '#aab2bc';
+  ctx.fillRect(-0.44, 0.42, 0.9, 0.05);
   // upper
   ctx.beginPath();
   ctx.moveTo(-0.45, 0.33);
@@ -181,76 +177,110 @@ function sneaker(ctx: Ctx, k: number, t: number, lw: number) {
   ctx.quadraticCurveTo(-0.02, top + 0.2, 0.14, 0.02);
   ctx.quadraticCurveTo(0.5, 0.06, 0.49, 0.33);
   ctx.closePath();
-  fillStroke(ctx, upper, lw);
-  // toe cap
+  ctx.fillStyle = upper;
+  ctx.fill();
+  inside(ctx, () => {
+    // the shade low on the toe and down the heel
+    ellipse(ctx, 0.3, 0.36, 0.34, 0.14);
+    ctx.fillStyle = upperLo;
+    ctx.fill();
+    ctx.fillRect(-0.5, 0.24, 0.98, 0.1);
+    // a crisp gloss at the top of the toe
+    ellipse(ctx, 0.25, 0.08, 0.08, 0.025, 0.25);
+    ctx.fillStyle = COLOR.white;
+    ctx.fill();
+    // the stripe in the class metal from D
+    if (k >= 1) {
+      poly(ctx, [-0.27, 0.32, -0.12, top + 0.13, 0.01, top + 0.2, -0.12, 0.32]);
+      ctx.fillStyle = trimOf(k, t);
+      ctx.fill();
+      ctx.lineWidth = lw * 0.6;
+      ctx.strokeStyle = COLOR.ink;
+      ctx.stroke();
+      poly(ctx, [-0.25, 0.3, -0.12, top + 0.15, -0.08, top + 0.17, -0.21, 0.3]);
+      ctx.fillStyle = TIER.metalLight[k];
+      ctx.fill();
+    }
+  });
   ctx.beginPath();
-  ctx.moveTo(0.27, 0.33);
-  ctx.quadraticCurveTo(0.24, 0.16, 0.33, 0.07);
-  ctx.quadraticCurveTo(0.5, 0.1, 0.49, 0.33);
+  ctx.moveTo(-0.45, 0.33);
+  ctx.lineTo(-0.47, top + 0.06);
+  ctx.quadraticCurveTo(-0.46, top, -0.38, top);
+  ctx.lineTo(-0.12, top + 0.04);
+  ctx.quadraticCurveTo(-0.02, top + 0.2, 0.14, 0.02);
+  ctx.quadraticCurveTo(0.5, 0.06, 0.49, 0.33);
   ctx.closePath();
-  fillStroke(ctx, k === 0 ? '#c9cfd9' : k < 4 ? COLOR.white : COLOR.goldLight, lw * 0.8);
-  // one slanted band in the class colour
-  if (k >= 1) {
-    poly(ctx, [-0.25, 0.3, -0.12, top + 0.14, 0.0, top + 0.2, -0.1, 0.3]);
-    fillStroke(ctx, tr, lw * 0.8);
-  }
+  ctx.lineWidth = lw;
+  ctx.strokeStyle = COLOR.ink;
+  ctx.stroke();
   // heel tab and laces
-  ctx.fillStyle = k === 0 ? '#b9b3c2' : tr;
-  ctx.fillRect(-0.47 + lw / 2, top + 0.08, 0.1, 0.12);
+  rr(ctx, -0.48, top + 0.07, 0.1, 0.13, 0.03);
+  fillStroke(ctx, k >= 4 ? trimOf(k, t) : k === 0 ? '#a49d8f' : '#d4d9df', lw * 0.7);
   ctx.lineWidth = lw * 0.9;
-  ctx.strokeStyle = k < 2 ? COLOR.ink : COLOR.white;
+  ctx.strokeStyle = '#3a4350';
+  ctx.beginPath();
   for (let i = 0; i < 2; i++) {
-    ctx.beginPath();
-    ctx.moveTo(0.04 + i * 0.1, top + 0.24 + (k >= 3 ? 0.14 : 0) + i * 0.05);
-    ctx.lineTo(0.13 + i * 0.1, top + 0.16 + (k >= 3 ? 0.14 : 0) + i * 0.05);
-    ctx.stroke();
+    const y = top + 0.24 + (k >= 3 ? 0.14 : 0) + i * 0.05;
+    ctx.moveTo(0.03 + i * 0.1, y);
+    ctx.lineTo(0.12 + i * 0.1, y - 0.08);
   }
-  if (k === 6) {
-    rr(ctx, -0.48, 0.3, 0.98, 0.2, 0.1);
-    rainbowStroke(ctx, 0.045, t, 0.14);
-  }
-  if (k >= 4) sparkle(ctx, 0.34, -0.14, k === 6 ? 0.2 : 0.13, t, 6);
+  ctx.stroke();
+  if (k === 6) sparkle(ctx, 0.3, -0.06, 0.2, t, 6);
 }
 
-// ------------------------------------------------------------------ chili: small pepper -> a blazing one
+// ------------------------------------------------------------------ chili: one glossy red pepper
 
 function chili(ctx: Ctx, k: number, t: number, lw: number) {
-  const tr = trimOf(k, t);
-  // it ripens as it rises: green, amber, red, then burning
-  const body = ['#7cc24a', '#f2a52c', '#f0452e', '#e8322a', '#e02828', '#c4122e', '#ff3b2e'][k];
-  const lite = ['#c4ee9a', '#ffd98a', '#ff9a7a', '#ff8a6b', '#ff8a6b', '#ff6a7e', '#ffd84a'][k];
-  const s = 0.74 + k * 0.045;
-  if (k >= 5) glow(ctx, 0, 0, 0.6, 0.6, k === 6 ? '#ffd84a' : TIER.metalLight[k], t);
-  if (k >= 5) {
-    // it burns: flames lick up behind it
-    flame(ctx, -0.22, 0.2, 0.5, t, '#ff5a1e', '#ffb02e', lw);
-    flame(ctx, 0.22, 0.26, k === 6 ? 0.66 : 0.5, t + 1, '#ff5a1e', '#ffb02e', lw);
-    if (k === 6) flame(ctx, 0, 0.0, 0.52, t + 2, '#ff7a1e', '#ffe066', lw);
-  }
+  const s = 0.76 + k * 0.035;
+  if (k >= 5) glow(ctx, 0, 0.04, 0.58, 0.58, k === 6 ? CLASS_FX.sss : CLASS_FX.s, t);
+  // it gets hotter as it rises: a faint shimmer of heat above it from A
+  if (k >= 4) heat(ctx, 0.0, -0.3 * s, 0.62, t, Math.max(lw * 1.2, 0.035), k >= 5 ? 3 : 2);
   ctx.save();
   ctx.scale(s, s);
   // the curled stalk
-  ctx.lineWidth = lw * 2.6;
-  ctx.strokeStyle = COLOR.ink;
   ctx.beginPath();
   ctx.moveTo(-0.2, -0.3);
   ctx.quadraticCurveTo(-0.26, -0.48, -0.1, -0.5);
+  ctx.lineWidth = lw * 2.6;
+  ctx.strokeStyle = COLOR.ink;
   ctx.stroke();
   ctx.lineWidth = lw * 1.1;
-  ctx.strokeStyle = '#4f9a3a';
+  ctx.strokeStyle = '#5b8f3e';
   ctx.stroke();
-  // the pepper
+  // the pepper: deep red, its shade low on the curve, a crisp wet gloss on top
   ctx.beginPath();
   ctx.moveTo(-0.36, -0.2);
   ctx.bezierCurveTo(-0.46, 0.24, 0.02, 0.56, 0.42, 0.42);
   ctx.bezierCurveTo(0.14, 0.3, 0.12, -0.02, 0.02, -0.28);
   ctx.closePath();
-  fillStroke(ctx, body, lw);
-  ctx.strokeStyle = lite;
-  ctx.lineWidth = 0.06;
+  ctx.fillStyle = '#c9352a';
+  ctx.fill();
+  inside(ctx, () => {
+    ctx.beginPath();
+    ctx.moveTo(-0.5, 0.05);
+    ctx.bezierCurveTo(-0.2, 0.36, 0.1, 0.4, 0.5, 0.36);
+    ctx.lineTo(0.5, 0.6);
+    ctx.lineTo(-0.5, 0.6);
+    ctx.closePath();
+    ctx.fillStyle = '#8f1d18';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(-0.26, -0.1);
+    ctx.quadraticCurveTo(-0.27, 0.14, -0.1, 0.27);
+    ctx.lineWidth = 0.065;
+    ctx.strokeStyle = '#f2b2a6';
+    ctx.stroke();
+    circle(ctx, -0.13, -0.17, 0.035);
+    ctx.fillStyle = COLOR.white;
+    ctx.fill();
+  });
   ctx.beginPath();
-  ctx.moveTo(-0.24, -0.06);
-  ctx.quadraticCurveTo(-0.22, 0.2, -0.04, 0.33);
+  ctx.moveTo(-0.36, -0.2);
+  ctx.bezierCurveTo(-0.46, 0.24, 0.02, 0.56, 0.42, 0.42);
+  ctx.bezierCurveTo(0.14, 0.3, 0.12, -0.02, 0.02, -0.28);
+  ctx.closePath();
+  ctx.lineWidth = lw;
+  ctx.strokeStyle = COLOR.ink;
   ctx.stroke();
   // the green cap
   ctx.beginPath();
@@ -260,15 +290,17 @@ function chili(ctx: Ctx, k: number, t: number, lw: number) {
   ctx.quadraticCurveTo(-0.04, -0.26, -0.12, -0.16);
   ctx.quadraticCurveTo(-0.22, -0.24, -0.4, -0.16);
   ctx.closePath();
-  fillStroke(ctx, '#5fae4a', lw);
-  // a ring in the class colour around the stalk
+  fillStroke(ctx, '#4d8238', lw);
+  ellipse(ctx, -0.2, -0.3, 0.1, 0.03, -0.3);
+  ctx.fillStyle = '#7fb062';
+  ctx.fill();
+  // a ring of the class metal around the stalk from D
   if (k >= 1) {
-    ellipse(ctx, -0.2, -0.36, 0.085, 0.04, -0.2);
-    fillStroke(ctx, tr, lw * 0.8);
+    ellipse(ctx, -0.2, -0.37, 0.085, 0.04, -0.2);
+    fillStroke(ctx, trimOf(k, t), lw * 0.8);
   }
   ctx.restore();
-  if (k === 3 || k === 4) flame(ctx, -0.04, -0.3, k === 4 ? 0.3 : 0.22, t, '#ff7a1e', '#ffe066', lw * 0.8);
-  if (k >= 4) sparkle(ctx, 0.3, -0.1, k === 6 ? 0.2 : 0.13, t, 7);
+  if (k === 6) sparkle(ctx, 0.2, -0.05, 0.2, t, 7);
 }
 
 /**
@@ -281,7 +313,7 @@ export function drawGear(ctx: Ctx, type: GearType, level: number, size: number, 
   ctx.scale(size, size);
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
-  const lw = Math.max(1.15 / size, 0.05);
+  const lw = Math.max(0.8 / size, 0.035);
   if (type === 'helmet') helmet(ctx, k, t, lw);
   else if (type === 'sneakers') sneaker(ctx, k, t, lw);
   else chili(ctx, k, t, lw);
