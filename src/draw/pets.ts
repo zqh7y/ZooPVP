@@ -1051,7 +1051,22 @@ function drawFrog(ctx: Ctx, look: PetLook, pose: PetPose, r: number, P: Pal, lw:
 
 // ------------------------------------------------------------------ the contract
 
+/** Below this radius the drawing's fine details would get negative sizes, so tiny pets are drawn at it and scaled down. */
+const MIN_R = 5;
+
 function drawPet(ctx: Ctx, look: PetLook, pose: PetPose, r: number): void {
+  if (r < MIN_R) {
+    if (!(r > 0)) return;
+    ctx.save();
+    ctx.scale(r / MIN_R, r / MIN_R);
+    drawPetAt(ctx, look, pose, MIN_R);
+    ctx.restore();
+    return;
+  }
+  drawPetAt(ctx, look, pose, r);
+}
+
+function drawPetAt(ctx: Ctx, look: PetLook, pose: PetPose, r: number): void {
   if (pose.alpha <= 0.01 || r <= 0) return;
   const frog = look.pet === 'frog';
   const t = pose.t;
