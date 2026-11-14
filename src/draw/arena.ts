@@ -107,8 +107,10 @@ const TOWER_Z = 290;
 const TOWER_AT: P[] = [
   [-52, -56],
   [AW + 52, -56],
+  [-2, AH + 58],
+  [AW + 2, AH + 58],
 ];
-const TOWER_BOX = { w: 150, h: 220, dx: 75, dy: 80 };
+const TOWER_BOX = { w: 150, h: 270, dx: 75, dy: 80 };
 // the near stand, in screen px
 const NEAR_TOP = Math.floor(pt(0, NEAR_BOARD + 14)[1]);
 const NEAR_AISLE = 150;
@@ -486,10 +488,11 @@ function cornerFlag(c: Ctx, ax: number, ay: number, dir: number) {
 /** A floodlight tower: a lattice mast and a bank of lamps turned toward the pitch, with its halo. */
 function tower(c: Ctx, at: P) {
   const left = at[0] < AW / 2;
+  const near = at[1] > AH / 2;
   const f = pt(at[0], at[1], BOARD_Z + 2);
   const h = pt(at[0], at[1], TOWER_Z);
-  const g = c.createRadialGradient(h[0], h[1], 2, h[0], h[1], 66);
-  g.addColorStop(0, 'rgba(255, 240, 180, 0.55)');
+  const g = c.createRadialGradient(h[0], h[1] - (near ? 8 : 0), 2, h[0], h[1], 66);
+  g.addColorStop(0, `rgba(255, 240, 180, ${near ? 0.4 : 0.55})`);
   g.addColorStop(0.3, 'rgba(255, 228, 140, 0.16)');
   g.addColorStop(1, 'rgba(255, 220, 120, 0)');
   c.fillStyle = g;
@@ -522,6 +525,20 @@ function tower(c: Ctx, at: P) {
   c.save();
   c.translate(h[0], h[1]);
   c.rotate(left ? 0.2 : -0.2);
+  if (near) {
+    // we see the back of this bank: a dark case, its light leaking round the top edge
+    rr(c, -19, -9, 38, 19, 4);
+    c.fillStyle = '#161b22';
+    c.fill();
+    c.strokeStyle = EDGE;
+    c.lineWidth = 1.6;
+    c.stroke();
+    seg(c, [-16, -9.6], [16, -9.6], LAMP, 1.6);
+    seg(c, [-18.4, -6], [-18.4, 6], STEEL_LIT, 1.1);
+    for (let i = 0; i < 4; i++) seg(c, [-12 + i * 8, -4], [-12 + i * 8, 5], '#232a33', 2.2);
+    c.restore();
+    return;
+  }
   rr(c, -20, 10, 40, 3.5, 1.5);
   c.fillStyle = STEEL;
   c.fill();
@@ -572,6 +589,13 @@ function dugout(c: Ctx, ay0: number, ay1: number, team: number) {
   seg(c, pt(ax0, ay0, z), pt(ax1, ay0, z), 'rgba(255, 255, 255, 0.35)', 1);
   fillShape(c, wall(ax0, ay1, ax1, ay1, 0, z), '#1c232c');
   seg(c, pt(ax0, ay1, z), pt(ax1, ay1, z), LIP, 1);
+  // the manager, out on the touchline in a team scarf
+  const ma = (ay0 + ay1) / 2 + (team ? 14 : -14);
+  const [mx, my] = pt(AW + 4, ma);
+  ellipse(c, mx + 3, my + 1, 5, 1.8);
+  c.fillStyle = SHADOW;
+  c.fill();
+  paintFan(c, { x: mx, y: my, s: 11 * depthScale(ma), kind: team ? 1 : 0, tone: 2, scarf: team, back: false, phone: false, up: false }, 0);
 }
 
 /** A broadcast camera on its tripod on the left apron, with its operator. */
@@ -877,7 +901,7 @@ export class Arena {
       const ar = MX + NEAR_AISLE * spread;
       for (let x = 4 + rnd() * sp * 0.5; x < W + 4; x += sp * (0.9 + rnd() * 0.2)) {
         if (Math.abs(x - al) < 8 * spread + s * 0.45 || Math.abs(x - ar) < 8 * spread + s * 0.45) continue;
-        sec[x < al ? 0 : x < ar ? 1 : 2].push(fan(x, y + (rnd() - 0.5) * 1.5, s, 0, true, 0.1));
+        sec[x < al ? 0 : x < ar ? 1 : 2].push(fan(x, y + (rnd() - 0.5) * 1.5, s, 0, true, 0.065));
       }
       groups.push(...sec);
       y += s * 0.62;
@@ -954,7 +978,7 @@ export class Arena {
     c.rect(0, 0, W, NEAR_TOP);
     c.clip();
     c.globalCompositeOperation = 'lighter';
-    TOWER_AT.forEach((a) => {
+    TOWER_AT.slice(0, 2).forEach((a) => {
       const h = pt(a[0], a[1], TOWER_Z);
       const left = a[0] < AW / 2;
       const aim = project(left ? AW * 0.2 : AW * 0.8, AH * 0.3);
@@ -963,7 +987,7 @@ export class Arena {
       const strong = left ? 1 : 0.65;
       for (const sp of [0.34, 0.22, 0.1]) {
         const g = c.createLinearGradient(h[0], h[1], h[0] + Math.cos(ang) * len, h[1] + Math.sin(ang) * len);
-        g.addColorStop(0, `rgba(255, 228, 150, ${0.035 * strong})`);
+        g.addColorStop(0, `rgba(255, 228, 150, ${0.055 * strong})`);
         g.addColorStop(1, 'rgba(255, 228, 150, 0)');
         c.fillStyle = g;
         shape(c, [h, [h[0] + Math.cos(ang - sp) * len, h[1] + Math.sin(ang - sp) * len], [h[0] + Math.cos(ang + sp) * len, h[1] + Math.sin(ang + sp) * len]]);
@@ -1102,6 +1126,23 @@ export class Arena {
     c.fillStyle = k;
     c.fillRect(0, 0, W, H);
     c.restore();
+    // worn turf where play is hardest: the goal mouths and the centre spot
+    for (const [ay, rx, ry, al] of [
+      [16, 46, 11, 0.09],
+      [AH - 16, 54, 13, 0.09],
+      [AH / 2, 30, 9, 0.05],
+    ]) {
+      const m = project(AW / 2, ay);
+      c.save();
+      c.translate(m.x, m.y);
+      c.scale(1, ry / rx);
+      const g = c.createRadialGradient(0, 0, 0, 0, 0, rx);
+      g.addColorStop(0, `rgba(196, 188, 140, ${al})`);
+      g.addColorStop(1, 'rgba(196, 188, 140, 0)');
+      c.fillStyle = g;
+      c.fillRect(-rx, -rx, rx * 2, rx * 2);
+      c.restore();
+    }
     const lines = layer(W, H, this.ratio, (lc) => markings(lc, 2.2));
     c.globalAlpha = 0.62;
     c.drawImage(lines, 0, 0, W, H);

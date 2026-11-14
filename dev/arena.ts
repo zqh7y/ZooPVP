@@ -8,7 +8,9 @@ import { circle, ellipse, fillStroke, label, seeded } from '../src/util';
 // ?view=battle|stage|lobby|dusk  &cheer=1 to see the crowd jump
 const view = param('view', 'battle');
 const arena = new Arena();
+const b0 = performance.now();
 arena.build(Math.max(1, window.devicePixelRatio || 1));
+const buildMs = performance.now() - b0;
 
 const rnd = seeded(9);
 const dots = Array.from({ length: 12 }, (_, i) => {
@@ -43,7 +45,7 @@ let perf = '';
     arena.drawBattleFront(c, i / 60);
   }
   c.getImageData(0, 0, 1, 1);
-  perf = `${((performance.now() - t0) / 200).toFixed(3)} ms/frame`;
+  perf = `${((performance.now() - t0) / 200).toFixed(3)} ms/frame, build ${buildMs.toFixed(0)} ms`;
   console.log('arena', perf);
 }
 
