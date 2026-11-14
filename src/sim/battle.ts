@@ -10,9 +10,6 @@ import type { Battle, SimEvent, SimSummary, SimUnit } from './types';
  */
 
 const DT = 1 / 60;
-const CELL = 40;
-const GCOLS = Math.ceil(ARENA.w / CELL);
-const GROWS = Math.ceil(ARENA.h / CELL);
 /** how fast a shove dies away, per second */
 const KNOCK_DECAY = 5;
 /** a frog's hop: seconds in the air, then seconds resting */
@@ -105,6 +102,7 @@ function lineUp(list: SimUnit[], team: Team, brains: Brain[]) {
   });
 }
 
+const hyp = (x: number, y: number) => Math.sqrt(x * x + y * y);
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
 
 function angDiff(a: number, b: number) {
@@ -145,7 +143,10 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number): Battle
   for (const team of [0, 1] as Team[]) lineUp(units.filter((u) => u.team === team), team, brains);
   const maxR = units.reduce((m, u) => Math.max(m, u.r), 0);
 
-  // the neighbour grid
+  // the neighbour grid: a cell is at least as wide as the two biggest bodies, so touching pairs are in next cells
+  const CELL = Math.max(32, maxR * 2 + 1);
+  const GCOLS = Math.ceil(ARENA.w / CELL);
+  const GROWS = Math.ceil(ARENA.h / CELL);
   const head = new Int32Array(GCOLS * GROWS);
   const next = new Int32Array(Math.max(1, units.length));
   const cellOf = (x: number, y: number) =>
@@ -216,7 +217,7 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number): Battle
       const found: [number, SimUnit][] = [];
       near(u.x, u.y, u.r + st.reach + maxR, (f) => {
         if (f.team === u.team) return;
-        const d = Math.hypot(f.x - u.x, f.y - u.y);
+        const d = hyp(f.x - u.x, f.y - u.y);
         if (d > u.r + f.r + st.reach) return;
         if (d > 1e-6 && angDiff(Math.atan2(f.y - u.y, f.x - u.x), u.aim) > ARC) return;
         found.push([d, f]);
@@ -236,7 +237,7 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number): Battle
       });
       found.sort((a, c) => a[0] - c[0] || a[1].id - c[1].id);
       for (const [, f] of found.slice(0, st.pierce)) victims.push(f);
-    } else if (tg && tg.alive && Math.hypot(tg.x - u.x, tg.y - u.y) <= (u.r + tg.r + st.reach) * 1.2 + 4) {
+    } else if (tg && tg.alive && hyp(tg.x - u.x, tg.y - u.y) <= (u.r + tg.r + st.reach) * 1.2 + 4) {
       victims.push(tg);
     }
     events.push({ type: 'swing', unit: u.id, weapon: u.weapon, hit: victims.length > 0 });
@@ -301,16 +302,22 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number): Battle
           // no progress for a while: press forward and sidestep
           b.checkT += DT;
           if (b.checkT >= 1) {
-            b.stall = b.lastDist - d < 4 ? Math.min(3, b.stall + 1) : Math.max(0, b.stall - 1);
+            if (b.lastDist - d < 4) {
+              b.stall = Math.min(3, b.stall + 1);
+              if (b.stall === 3) b.side = -b.side;
+            } else b.stall = Math.max(0, b.stall - 1);
             b.lastDist = d;
             b.checkT = 0;
           }
           dirX = d > 1e-6 ? dx / d : 0;
           dirY = d > 1e-6 ? dy / d : u.team === 0 ? -1 : 1;
           if (b.stall > 0) {
-            dirX += b.side * 0.5 * b.stall;
-            dirY += (u.team === 0 ? -0.7 : 0.7) * b.stall;
-            const n = Math.hypot(dirX, dirY) || 1;
+            // press on toward the foe, slipping sideways around whatever is in the way
+            const sx = -dirY * b.side * 0.45 * b.stall;
+            const sy = dirX * b.side * 0.45 * b.stall;
+            dirX += sx;
+            dirY += sy;
+            const n = hyp(dirX, dirY) || 1;
             dirX /= n;
             dirY /= n;
           }
@@ -358,31 +365,40 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number): Battle
     }
   };
 
+  const pair = (u: SimUnit, o: SimUnit) => {
+    const dx = o.x - u.x;
+    const dy = o.y - u.y;
+    const rr = u.r + o.r;
+    const d2 = dx * dx + dy * dy;
+    if (d2 >= rr * rr) return;
+    const d = Math.sqrt(d2);
+    const nx = d > 1e-6 ? dx / d : 1;
+    const ny = d > 1e-6 ? dy / d : 0;
+    const bu = brains[u.id];
+    const bo = brains[o.id];
+    const mu = bu.st.mass;
+    const mo = bo.st.mass;
+    const push = ((rr - d) * 0.4) / (mu + mo);
+    bu.px -= nx * push * mo;
+    bu.py -= ny * push * mo;
+    bo.px += nx * push * mu;
+    bo.py += ny * push * mu;
+  };
+  /** every touching pair once: each cell with itself and its next neighbours (right, below-left, below, below-right) */
   const collide = () => {
-    for (const u of units) {
-      if (!u.alive) continue;
-      near(u.x, u.y, u.r + maxR, (o) => {
-        if (o.id <= u.id) return;
-        const dx = o.x - u.x;
-        const dy = o.y - u.y;
-        const rr = u.r + o.r;
-        const d2 = dx * dx + dy * dy;
-        if (d2 >= rr * rr) return;
-        const d = Math.sqrt(d2);
-        const nx = d > 1e-6 ? dx / d : u.id % 2 ? 1 : -1;
-        const ny = d > 1e-6 ? dy / d : 0;
-        const push = (rr - d) * 0.4;
-        const bu = brains[u.id];
-        const bo = brains[o.id];
-        const mu = bu.st.mass;
-        const mo = bo.st.mass;
-        const su = (push * mo) / (mu + mo);
-        const so = (push * mu) / (mu + mo);
-        bu.px -= nx * su;
-        bu.py -= ny * su;
-        bo.px += nx * so;
-        bo.py += ny * so;
-      });
+    for (let r = 0; r < GROWS; r++) {
+      for (let c = 0; c < GCOLS; c++) {
+        for (let i = head[r * GCOLS + c]; i >= 0; i = next[i]) {
+          const u = units[i];
+          for (let j = next[i]; j >= 0; j = next[j]) pair(u, units[j]);
+          if (c + 1 < GCOLS) for (let j = head[r * GCOLS + c + 1]; j >= 0; j = next[j]) pair(u, units[j]);
+          if (r + 1 < GROWS) {
+            const below = (r + 1) * GCOLS;
+            for (let k = Math.max(0, c - 1); k <= Math.min(GCOLS - 1, c + 1); k++)
+              for (let j = head[below + k]; j >= 0; j = next[j]) pair(u, units[j]);
+          }
+        }
+      }
     }
   };
 
@@ -396,7 +412,7 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number): Battle
       }
       u.x += (u.vx + b.kx) * DT + b.px;
       u.y += (u.vy + b.ky) * DT + b.py;
-      u.walked += Math.hypot(u.vx, u.vy) * DT;
+      u.walked += hyp(u.vx, u.vy) * DT;
       b.kx *= decay;
       b.ky *= decay;
       b.px = b.py = 0;
@@ -438,7 +454,7 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number): Battle
       b.lastWeapon = h.weapon;
       b.lastKnock = dist;
       b.lastDir = h.dir;
-      const stun = h.stun > 0 && v.hp > 0;
+      const stun = h.stun > 0;
       events.push({
         type: 'hit', from: h.from, to: h.to, weapon: h.weapon, dmg: h.dmg, x: v.x, y: v.y, dir: h.dir,
         heavy: h.heavy, blocked: h.blocked, stun,
@@ -447,7 +463,7 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number): Battle
         setPhase(v, 'stun', h.stun);
         b.air = false;
         v.hop = 0;
-      } else if (h.heavy && v.phase === 'windup' && b.st.mass < brains[a.id].st.mass * 1.5) {
+      } else if (h.heavy && v.phase === 'windup' && b.st.mass < brains[a.id].st.mass * 0.8) {
         setPhase(v, 'recover', 0.2);
       }
     }
@@ -473,8 +489,8 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number): Battle
 
   const updateShare = () => {
     const sum: [number, number] = [0, 0];
-    living[0] = [];
-    living[1] = [];
+    living[0].length = 0;
+    living[1].length = 0;
     for (const u of units) {
       if (!u.alive) continue;
       sum[u.team] += u.hp;
@@ -505,7 +521,6 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number): Battle
       enraged = true;
       events.push({ type: 'enrage' });
     }
-    updateShare();
     buildGrid();
     for (const id of tickN % 2 ? forward : backward) if (units[id].alive) think(units[id]);
     collide();

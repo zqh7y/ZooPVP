@@ -81,8 +81,8 @@ export interface PetDef {
 }
 
 export const PETS: Record<PetType, PetDef> = {
-  ant: { hp: 54, dmg: 5, cd: 0.6, reach: 3, speed: 96, radius: 8, mass: 1, move: 'scurry' },
-  frog: { hp: 180, dmg: 13, cd: 1.0, reach: 8, speed: 58, radius: 14, mass: 2.6, move: 'hop' },
+  ant: { hp: 70, dmg: 5, cd: 0.6, reach: 3, speed: 86, radius: 8, mass: 1, move: 'scurry' },
+  frog: { hp: 235, dmg: 13, cd: 1.0, reach: 8, speed: 52, radius: 14, mass: 2.6, move: 'hop' },
 };
 
 /** What a pet's class changes: a higher class is bigger, tougher, stronger and a little slower. */
@@ -121,10 +121,10 @@ export interface WeaponDef {
 export const NO_WEAPON: WeaponDef = { dmg: 1, cd: 1, reach: 0, knock: 14, hp: 1, block: 0, stun: 0, splash: 1, pierce: 1 };
 
 export const WEAPONS: Record<WeaponType, WeaponDef> = {
-  knife: { dmg: 0.95, cd: 0.45, reach: 4, knock: 8, hp: 1, block: 0, stun: 0, splash: 1, pierce: 1 },
-  bat: { dmg: 2.6, cd: 1.6, reach: 9, knock: 120, hp: 1, block: 0, stun: 0, splash: 3, pierce: 1 },
-  shield: { dmg: 0.7, cd: 1.2, reach: 4, knock: 50, hp: 1.35, block: 0.35, stun: 0.18, splash: 1, pierce: 1 },
-  spear: { dmg: 1.7, cd: 1.1, reach: 30, knock: 20, hp: 1, block: 0, stun: 0, splash: 1, pierce: 2 },
+  knife: { dmg: 1.05, cd: 0.42, reach: 4, knock: 8, hp: 1, block: 0, stun: 0, splash: 1, pierce: 1 },
+  bat: { dmg: 2.4, cd: 1.6, reach: 9, knock: 120, hp: 1, block: 0, stun: 0, splash: 3, pierce: 1 },
+  shield: { dmg: 0.7, cd: 1.2, reach: 4, knock: 50, hp: 1.35, block: 0.35, stun: 0.15, splash: 1, pierce: 1 },
+  spear: { dmg: 1.35, cd: 1.1, reach: 30, knock: 20, hp: 1, block: 0, stun: 0, splash: 1, pierce: 2 },
 };
 
 /** What a weapon's class changes: fusing two identical weapons makes it hit harder and faster. */
@@ -197,8 +197,8 @@ export function unitStats(s: SquadSpec): UnitStats {
  */
 export function squadPower(s: SquadSpec): number {
   const u = unitStats(s);
-  const toughness = u.hp / (1 - u.block * 0.6);
-  const dps = (u.dmg / u.cd) * (1 + 0.25 * (u.splash - 1)) * (1 + 0.2 * (u.pierce - 1));
+  const toughness = u.hp / (1 - u.block);
+  const dps = (u.dmg / u.cd) * (1 + 0.25 * (u.splash - 1)) * (1 + 0.2 * (u.pierce - 1)) * (1 + 2 * u.stun);
   const one = Math.sqrt(toughness * dps);
   return one * s.count ** POWER.countExp * POWER.scale;
 }
@@ -215,9 +215,9 @@ export const FIGHT = {
   /** seconds of "3, 2, 1" before anyone moves */
   countdown: 1.6,
   /** from this second on every hit grows stronger, so a fight always ends */
-  enrageAt: 36,
+  enrageAt: 40,
   /** + damage per second after enrageAt */
-  enrageRamp: 0.12,
+  enrageRamp: 0.25,
   /** the fight is called at this second: the side with more health left (as a share) wins */
   timeLimit: 60,
   /** how far from its own edge a team lines up */
