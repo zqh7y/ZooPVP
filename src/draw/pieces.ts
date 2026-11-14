@@ -97,9 +97,9 @@ export function drawPiece(ctx: Ctx, p: Piece | PieceLike, r: Rect, o: PieceOpts)
   if (p.level >= 5 && !o.idle) classFx(ctx, { x: r.x, y: r.y - lift, w: r.w, h: r.h }, p.level, o.t);
   ctx.save();
   if (o.idle) ctx.globalAlpha *= 0.6;
-  const size = r.w * 0.78;
+  const size = r.w * 0.74;
   const cx = r.x + r.w / 2;
-  const cy = r.y + r.h * 0.46 - lift;
+  const cy = r.y + r.h * 0.5 - lift;
   const pop = o.pop ?? 1;
   if (pop !== 1) {
     ctx.translate(cx, cy);
@@ -112,7 +112,8 @@ export function drawPiece(ctx: Ctx, p: Piece | PieceLike, r: Rect, o: PieceOpts)
   const k = r.w / 58;
   ctx.save();
   if (o.idle) ctx.globalAlpha *= 0.75;
-  classBadge(ctx, p.level, r.x + 3 * k, r.y + 11 * k - lift, 0.8 * k, o.t);
-  if (isPet(p.type) && count > 1) countBadge(ctx, count, r.x + r.w - 15 * k, r.y + r.h - 13 * k - lift, 0.85 * k);
+  // the class letter in the top-left corner, the head count in the bottom-right one, both just inside the border
+  classBadge(ctx, p.level, r.x + 4 * k, r.y + 11 * k - lift, 0.8 * k, o.t);
+  if (isPet(p.type) && count > 1) countBadge(ctx, count, r.x + r.w - 14 * k, r.y + r.h - 11 * k - lift, 0.8 * k);
   ctx.restore();
 }

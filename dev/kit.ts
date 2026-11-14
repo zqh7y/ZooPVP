@@ -1,18 +1,18 @@
 import { stage } from './harness';
-import { COLOR, S, TYPE } from '../src/theme';
+import { COLOR, S, TYPE, UI } from '../src/theme';
 import { label, type Ctx, type Rect } from '../src/util';
 import * as I from '../src/draw/icons';
 import * as U from '../src/draw/ui';
 
 const H = 1960;
 const r = (x: number, y: number, w: number, h: number): Rect => ({ x, y, w, h });
-const head = (c: Ctx, s: string, y: number) => label(c, s, 16, y, TYPE.small + 2, { align: 'left', color: COLOR.toast });
+const head = (c: Ctx, s: string, y: number) => label(c, s.toUpperCase(), 16, y, TYPE.small, { align: 'left', color: UI.textDim, track: 1.5 });
 const tokenIcon = (c: Ctx, x: number, y: number, z: number) => I.rollToken(c, x, y, z);
 
 stage({
   w: 540,
   h: H,
-  bg: '#7b6a86',
+  bg: UI.bg,
   draw(c, t) {
     let y = 14;
     head(c, 'mock top bar', y + 4);
@@ -78,7 +78,7 @@ stage({
     U.tugBar(c, r(16, y, 508, 30), 0.58 + 0.06 * Math.sin(t), 0.42, t);
     y += 40;
     U.meter(c, r(16, y, 240, 24), 1, { ticks: 5, full: true });
-    U.progressBar(c, r(284, y, 240, 24), 0.2, { color: COLOR.sakura });
+    U.progressBar(c, r(284, y, 240, 24), 0.2, { color: UI.accent });
     y += 60;
 
     head(c, 'ribbons and toast', y);

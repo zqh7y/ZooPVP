@@ -2,10 +2,10 @@ import type { App, Screen } from '../screen';
 import type { Ctx, Rect } from '../util';
 import type { LinkEdge, Piece, PetType, SquadSpec } from '../types';
 import type { Target } from '../logic/inventory';
-import { W, S, TYPE, COLOR, TOPBAR, STAGE } from '../theme';
-import { clamp, easeOutBack, easeOutCubic, easeOutElastic, inRect, label, rr, fillStroke } from '../util';
+import { W, H, S, TYPE, COLOR, TOPBAR, STAGE, UI } from '../theme';
+import { clamp, easeOutCubic, easeOutElastic, inRect, label, rr } from '../util';
 import { BENCH_SLOTS, GRID, PIECE_DESC, PIECE_NAME, TROPHY_ROAD, TUTORIAL_DONE, cls, gearPct, isGear, isPet, leagueOf, squadPower } from '../data';
-import { button, cell, classColor, gridFrame, hint, inkText, panel, pill, progressBar, toast } from '../draw/ui';
+import { button, cell, classColor, fitLabel, gridFrame, hint, panel, pill, progressBar, toast } from '../draw/ui';
 import type { ButtonOpts, IconFn } from '../draw/ui';
 import { leagueBadge, rollToken, speaker, trash, trophy, wand } from '../draw/icons';
 import { drawPiece } from '../draw/pieces';
@@ -43,9 +43,9 @@ const PILL = {
   trophies: { x: S.pad + 236 + S.gap, y: TOPBAR.y, w: 134, h: TOPBAR.h },
   rolls: { x: S.pad + 236 + S.gap + 134 + S.gap, y: TOPBAR.y, w: W - S.pad * 2 - 236 - 134 - S.gap * 2, h: TOPBAR.h },
 };
-const ROAD_BAR: Rect = { x: S.pad + 8, y: TOPBAR.y + TOPBAR.h + S.gap, w: W - S.pad * 2 - 96, h: 14 };
-const POWER_PILL: Rect = { x: W - S.pad - 168, y: STAGE.y + STAGE.h - 44, w: 168, h: 40 };
-const CARD: Rect = { x: S.pad + 8, y: STAGE.y + 10, w: W - S.pad * 2 - 16, h: 104 };
+const ROAD_BAR: Rect = { x: S.pad, y: TOPBAR.y + TOPBAR.h + S.gap + 6, w: W - S.pad * 2 - 84, h: 4 };
+const POWER_PILL: Rect = { x: W - S.pad - 150, y: STAGE.y + STAGE.h - 44, w: 150, h: 36 };
+const CARD: Rect = { x: S.pad, y: STAGE.y + 10, w: W - S.pad * 2, h: 104 };
 const HINT_RECT: Rect = { x: 40, y: STAGE.y + 12, w: W - 80, h: 64 };
 const ARMY_CAP = 16;
 const DRAG_LIFT = 1.25; // the lifted piece is drawn this much larger
@@ -249,8 +249,8 @@ export function createLobby(app: App): Screen {
     const cx = BTN.trash.x + BTN.trash.w / 2;
     const cy = BTN.trash.y + BTN.trash.h / 2;
     inv.remove(p);
-    fx.burst(cx, cy - 20, { colors: [COLOR.paper, COLOR.stone, COLOR.sakura], n: 14, speed: 160, shape: 'shard', gravity: 500 });
-    fx.word(cx, cy - 50, 'POOF!', { color: COLOR.paper, size: TYPE.h2 });
+    fx.burst(cx, cy - 20, { colors: [UI.text, UI.textDim, UI.borderStrong], n: 10, speed: 140, shape: 'shard', gravity: 500 });
+    fx.word(cx, cy - 50, 'REMOVED', { color: UI.text, size: TYPE.body });
     sfx.play('drop', 0, { x: cx });
     changed();
   }
@@ -328,12 +328,12 @@ export function createLobby(app: App): Screen {
     const i = Math.min(app.state.claimed, TROPHY_ROAD.length - 1);
     const next = TROPHY_ROAD[i];
     const prev = i > 0 ? TROPHY_ROAD[i - 1].at : 0;
-    progressBar(ctx, ROAD_BAR, clamp((app.state.trophies - prev) / (next.at - prev), 0, 1), { color: COLOR.gold, light: COLOR.goldLight });
-    const ex = ROAD_BAR.x + ROAD_BAR.w + 12;
+    progressBar(ctx, ROAD_BAR, clamp((app.state.trophies - prev) / (next.at - prev), 0, 1), { color: UI.accent });
+    // the next reward, right-aligned on the bar's line: a roll at so many trophies
+    const ex = W - S.pad;
     const ey = ROAD_BAR.y + ROAD_BAR.h / 2;
-    trophy(ctx, ex + 8, ey, 20);
-    label(ctx, `${next.at}`, ex + 22, ey + 1, TYPE.small, { align: 'left' });
-    rollToken(ctx, ex + 68, ey, 18);
+    rollToken(ctx, ex - 7, ey, 14);
+    label(ctx, `${next.at}`, ex - 20, ey + 1, TYPE.small, { align: 'right', color: UI.textDim });
   }
 
   function drawArmy(ctx: Ctx) {
@@ -342,7 +342,7 @@ export function createLobby(app: App): Screen {
     for (const s of squads) for (let i = 0; i < s.count && fighters.length < ARMY_CAP; i++) fighters.push({ s, i });
     const n = fighters.length;
     if (!n) {
-      inkText(ctx, 'Your army stands here', W / 2, STAGE_GROUND_Y - 40, TYPE.body, { color: COLOR.white });
+      label(ctx, 'YOUR ARMY STANDS HERE', W / 2, STAGE_GROUND_Y - 40, TYPE.small + 1, { onPitch: true, track: 1.5 });
       return;
     }
     const step = Math.min(64, (W - 80) / Math.max(1, n - 1));
@@ -374,27 +374,20 @@ export function createLobby(app: App): Screen {
     }
   }
 
+  /** A link between two neighbours: a short bar across their shared edge; the accent when the pet uses it. */
   function drawLink(ctx: Ctx, e: LinkEdge) {
     const m = linkMid(e);
     const horiz = e.r1 === e.r2;
-    const len = 22;
-    const th = 10;
+    const len = 18;
+    const th = 4;
     const w = horiz ? th : len;
     const h = horiz ? len : th;
-    rr(ctx, m.x - w / 2, m.y - h / 2, w, h, th / 2);
-    if (e.active) {
-      ctx.save();
-      ctx.shadowColor = COLOR.joint;
-      ctx.shadowBlur = 10 + 4 * Math.sin(t * 5);
-      fillStroke(ctx, COLOR.joint, S.line.thin);
-      ctx.restore();
-      rr(ctx, m.x - w / 2 + 2, m.y - h / 2 + 2, w - 4, (h - 4) * 0.45, 3);
-      ctx.fillStyle = COLOR.goldLight;
-      ctx.fill();
-    } else {
-      ctx.fillStyle = COLOR.jointIdle;
-      ctx.fill();
-    }
+    rr(ctx, m.x - w / 2 - 2, m.y - h / 2 - 2, w + 4, h + 4, 3);
+    ctx.fillStyle = UI.bg;
+    ctx.fill();
+    rr(ctx, m.x - w / 2, m.y - h / 2, w, h, 2);
+    ctx.fillStyle = e.active ? UI.accent : UI.borderStrong;
+    ctx.fill();
   }
 
   function tileOf(ctx: Ctx, p: Piece, r: Rect, idle: boolean) {
@@ -422,12 +415,17 @@ export function createLobby(app: App): Screen {
     // the guide's destination
     const g = !drag && tut() < TUTORIAL_DONE ? guideTarget() : null;
     if (g?.to) {
-      const a = 0.35 + 0.35 * Math.sin(t * 6);
+      const a = 0.5 + 0.5 * Math.sin(t * 5);
       ctx.save();
-      ctx.globalAlpha = a;
       rr(ctx, g.to.x + 3, g.to.y + 3, g.to.w - 6, g.to.h - 6, S.radius.s);
-      ctx.fillStyle = COLOR.valid;
+      ctx.globalAlpha = 0.08 + 0.1 * a;
+      ctx.fillStyle = UI.accent;
       ctx.fill();
+      ctx.globalAlpha = 0.45 + 0.55 * a;
+      ctx.lineWidth = S.line.ui;
+      ctx.strokeStyle = UI.accent;
+      ctx.setLineDash([5, 4]);
+      ctx.stroke();
       ctx.restore();
     }
     for (const p of inv.pieces) {
@@ -445,11 +443,9 @@ export function createLobby(app: App): Screen {
     if (lifted && over) {
       const st = state(over);
       const r = 'slot' in over ? benchSlotRect(over.slot) : cellRect(over.col, over.row);
-      const col = st === 'fuse' ? COLOR.fuse : st === 'bad' ? COLOR.hpBad : COLOR.hpGood;
+      const col = st === 'fuse' ? UI.accent : st === 'bad' ? UI.danger : UI.ok;
       ctx.save();
-      ctx.shadowColor = col;
-      ctx.shadowBlur = 12 + 6 * Math.sin(t * 10);
-      rr(ctx, r.x - 4, r.y - 4, r.w + 8, r.h + 8, S.radius.m);
+      rr(ctx, r.x - 2, r.y - 2, r.w + 4, r.h + 4, S.radius.m);
       ctx.lineWidth = S.line.bold;
       ctx.strokeStyle = col;
       ctx.stroke();
@@ -467,19 +463,20 @@ export function createLobby(app: App): Screen {
     btn(ctx, 'battle', { variant: 'primary', text: 'BATTLE', disabled: !canBattle(), pulse: pulseOn(3) });
     btn(ctx, 'auto', { variant: 'secondary', text: 'AUTO', icon: btnIcon(wand) });
     const overTrash = !!drag?.moved && inRect(drag.x, drag.y, BTN.trash);
-    btn(ctx, 'trash', { variant: overTrash ? 'primary' : 'quiet', text: 'TRASH', icon: btnIcon(trash), pressed: overTrash });
+    btn(ctx, 'trash', { variant: overTrash ? 'danger' : 'quiet', text: 'TRASH', icon: btnIcon(trash), pressed: overTrash });
     btn(ctx, 'mute', { variant: 'quiet', text: sfx.muted ? 'OFF' : 'SOUND', icon: (c, x, y, s) => speaker(c, x, y, s, sfx.muted) });
   }
 
   function drawCard(ctx: Ctx, p: Piece) {
     panel(ctx, CARD);
     const k = p.level;
-    label(ctx, PIECE_NAME[p.type], CARD.x + S.pad + 4, CARD.y + 28, TYPE.h2, { align: 'left' });
-    label(ctx, cls(k), CARD.x + CARD.w - S.pad - 4, CARD.y + 28, TYPE.body, { align: 'right', color: classColor(k, t) });
+    const x0 = CARD.x + S.pad + 4;
+    label(ctx, PIECE_NAME[p.type].toUpperCase(), x0, CARD.y + 27, TYPE.h2 - 3, { align: 'left', weight: 700, track: 1.5 });
+    label(ctx, cls(k).toUpperCase(), CARD.x + CARD.w - S.pad - 4, CARD.y + 27, TYPE.small + 1, { align: 'right', color: classColor(k, t), weight: 700, track: 1.5 });
     let desc = PIECE_DESC[p.type];
     if (isGear(p.type)) desc = desc.replace('{v}', String(gearPct(p.type, k)));
     if (isPet(p.type) && p.count > 1) desc = `${p.count} of them. ${desc}`;
-    inkText(ctx, desc, CARD.x + S.pad + 4, CARD.y + 66, TYPE.body, { align: 'left' });
+    fitLabel(ctx, desc, x0, CARD.y + 58, TYPE.body - 1, CARD.w - S.pad * 2 - 8, { align: 'left' });
     // what the drop would do
     const d = drag ? dropPoint(drag) : null;
     const tg = d ? targetAt(d.x, d.y) : null;
@@ -488,7 +485,7 @@ export function createLobby(app: App): Screen {
     if (pv?.kind === 'fused') tip = pv.fuse === 'stack' ? `FUSE: x${p.count * 2} ${PIECE_NAME[p.type]}s!` : `FUSE: ${cls(k + 1)}!`;
     else if (isPet(p.type) && pv && !('slot' in tg!)) tip = 'Touch weapons and gear to power up';
     else if (!isPet(p.type)) tip = 'Put it right next to a pet';
-    inkText(ctx, tip, CARD.x + S.pad + 4, CARD.y + 90, TYPE.small, { align: 'left', color: pv?.kind === 'fused' ? COLOR.vermilion : COLOR.textInk });
+    fitLabel(ctx, tip, x0, CARD.y + 84, TYPE.small + 1, CARD.w - S.pad * 2 - 8, { align: 'left', color: pv?.kind === 'fused' ? UI.accent : UI.textDim });
   }
 
   function drawGuide(ctx: Ctx) {
@@ -499,14 +496,14 @@ export function createLobby(app: App): Screen {
     ctx.save();
     ctx.globalAlpha = a;
     // the pulse on the thing to touch
-    const pr = 1 + 0.06 * Math.sin(t * 7);
+    const pr = 1 + 0.04 * Math.sin(t * 5);
     const cx = g.at.x + g.at.w / 2;
     const cy = g.at.y + g.at.h / 2;
     rr(ctx, cx - (g.at.w / 2) * pr - 3, cy - (g.at.h / 2) * pr - 3, g.at.w * pr + 6, g.at.h * pr + 6, S.radius.m);
     ctx.lineWidth = S.line.bold;
-    ctx.strokeStyle = COLOR.toast;
+    ctx.strokeStyle = UI.accent;
     ctx.stroke();
-    const sc = easeOutBack(clamp(stepAge / 0.35, 0, 1));
+    const sc = 0.92 + 0.08 * easeOutCubic(clamp(stepAge / 0.25, 0, 1));
     ctx.translate(W / 2, HINT_RECT.y + HINT_RECT.h / 2);
     ctx.scale(sc, sc);
     ctx.translate(-W / 2, -(HINT_RECT.y + HINT_RECT.h / 2));
@@ -547,6 +544,10 @@ export function createLobby(app: App): Screen {
     },
     render(ctx) {
       app.arena.drawLobbyBack(ctx, t);
+      // the interface stands on flat slate: the bar above the pitch strip and everything below it
+      ctx.fillStyle = UI.bg;
+      ctx.fillRect(0, 0, W, STAGE.y);
+      ctx.fillRect(0, STAGE.y + STAGE.h, W, H - STAGE.y - STAGE.h);
       ctx.save();
       ctx.translate(fx.camera.x, fx.camera.y);
       app.arena.drawStage(ctx, t);
@@ -569,13 +570,13 @@ export function createLobby(app: App): Screen {
         const d = dropPoint(drag);
         const s = (CELL - 4) * DRAG_LIFT;
         ctx.save();
-        ctx.globalAlpha = 0.25;
-        ctx.fillStyle = COLOR.ink;
+        ctx.globalAlpha = 0.35;
+        ctx.fillStyle = '#000000';
         ctx.beginPath();
         ctx.ellipse(d.x, d.y + s / 2 + 10, s * 0.4, 7, 0, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
-        const wob = Math.sin(t * 10) * 0.05;
+        const wob = 0; // the lifted piece is held still
         ctx.save();
         ctx.translate(d.x, d.y);
         ctx.rotate(wob);

@@ -8,24 +8,28 @@ import { ARENA } from './data';
 export const W = 540;
 export const H = 1170;
 
-export const FONT = '"Lilita One", "Arial Rounded MT Bold", "Trebuchet MS", sans-serif';
+/** One condensed sans, in two weights: 600 for labels, 700 for numbers and titles. Use util font() to build a canvas font. */
+export const FONT = '"Barlow Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif';
 
-/** Spring in a Japanese garden: warm paper panels, plum ink outlines, cherry pink, torii red, indigo, gold. */
+/**
+ * The art's colours (pets, weapons, gear, effects). The interface does not draw with these any more: it uses
+ * UI below. The few interface entries left here (page, grid, health, bot) are tuned to match UI.
+ */
 export const COLOR = {
-  page: '#1b1522', // behind the canvas
+  page: '#0c1016', // behind the canvas
   ink: '#2b1f33', // every outline
   white: '#ffffff',
-  textDim: '#e6dcec',
+  textDim: '#8a94a3',
   textInk: '#4a3a52', // text on paper
-  toast: '#ffe27a',
-  shade: 'rgba(27, 21, 34, 0.6)', // the veil behind a panel that covers the screen
+  toast: '#ffd84a',
+  shade: 'rgba(8, 11, 16, 0.8)', // the veil behind a panel that covers the screen
 
   // paper: panels, pills and cards
   paper: '#fff6e6',
   paperDark: '#ecd9bd',
   paperEdge: '#c9ad86',
-  well: '#e3cfae', // a recessed window in paper (numbers sit in it)
-  wellShade: 'rgba(90, 60, 30, 0.22)',
+  well: '#1e252f', // a recessed window in paper (numbers sit in it)
+  wellShade: 'rgba(0, 0, 0, 0.25)',
 
   // accents
   sakura: '#ff9ec4',
@@ -55,23 +59,23 @@ export const COLOR = {
   stoneDark: '#7f7890',
 
   // health
-  hpGood: '#5ad66c',
-  hpBad: '#ff4d4d',
-  hpBack: '#3a2f3f',
+  hpGood: '#46c46b',
+  hpBad: '#e5484d',
+  hpBack: '#1a2029',
 
   // the grid
-  gridFrame: '#8a6f5a',
-  gridInner: '#5b4a52',
-  gridInnerEdge: '#3d3038',
-  cell: 'rgba(0, 0, 0, 0.16)',
-  cellLight: 'rgba(255, 255, 255, 0.06)',
-  joint: '#ffc93c', // a link in use
-  jointIdle: 'rgba(255, 255, 255, 0.35)', // a link the pet does not use (it has a better one)
-  valid: 'rgba(110, 230, 120, 0.45)',
-  invalid: 'rgba(255, 80, 80, 0.45)',
-  fuse: '#ffe066',
+  gridFrame: '#151a22',
+  gridInner: '#151a22',
+  gridInnerEdge: '#2b3441',
+  cell: 'rgba(0, 0, 0, 0.28)',
+  cellLight: 'rgba(255, 255, 255, 0.04)',
+  joint: '#ffd21f', // a link in use
+  jointIdle: 'rgba(255, 255, 255, 0.22)', // a link the pet does not use (it has a better one)
+  valid: 'rgba(70, 196, 107, 0.22)',
+  invalid: 'rgba(229, 72, 77, 0.22)',
+  fuse: '#ffd21f',
 
-  bot: '#6b6278', // the BOT tag
+  bot: '#3a4554', // the BOT tag
 };
 
 /** Team colours: 0 = you (blue), 1 = the opponent (red). */
@@ -79,6 +83,40 @@ export const TEAM = [
   { main: '#3fa2ff', light: '#a5d6ff', dark: '#1f6fd1' },
   { main: '#ff5a5a', light: '#ffb0a8', dark: '#c92f3a' },
 ] as const;
+
+/**
+ * The interface: a match-day scoreboard. Dark slate surfaces, off-white text, one grey for secondary text and
+ * one accent (a floodlight yellow that reads on slate and on grass) for the main action and highlights.
+ * Team blue / red appear only where something belongs to a team; class colours only as thin lines and letters.
+ */
+export const UI = {
+  bg: '#0c1016', // the page behind everything
+  surface: '#151a22', // bars, panels, plates
+  surfaceAlt: '#1f2630', // neutral buttons, chips
+  tile: '#28313d', // the tile a piece sits on
+  tileHi: '#343f4d', // a lifted tile
+  track: '#242c37', // the empty part of a bar
+  border: '#2b3441',
+  borderStrong: '#4a5767',
+  text: '#f1f3f5',
+  textDim: '#8a94a3',
+  textMute: '#566170',
+  accent: '#ffd21f',
+  accentDim: '#d9b010', // the accent, pressed
+  accentText: '#11151b', // text on the accent
+  ok: '#46c46b',
+  danger: '#e5484d',
+  /** the thin dark edge of text that sits directly on the pitch */
+  edge: 'rgba(8, 11, 16, 0.8)',
+  /** a see-through slate, for plates that float over the pitch */
+  glass: 'rgba(12, 16, 22, 0.9)',
+  scrim: 'rgba(8, 11, 16, 0.8)',
+  /** class line colours, E..SSS (SSS is drawn as a rainbow) and the lighter ones for letters */
+  tier: ['#5d6878', '#38b653', '#2f86f6', '#9a52f5', '#f5a417', '#ff3b5c', '#ff4fd8'],
+  tierText: ['#aab3c0', '#6fd27a', '#6fb1fb', '#bb93f7', '#ffc94f', '#ff5c77', '#f2a6ff'],
+  /** one muted colour per league, Sprout..Legend */
+  league: ['#8fb59a', '#c58f62', '#c3cad4', '#e8c35a', '#9ed3df', '#86b6f2', '#d7a7f0'],
+};
 
 /** Colours per class: index 0 = E (gray), D green, C blue, B purple, A gold, S crimson, 6 = SSS (prismatic). */
 export const TIER = {
@@ -95,12 +133,12 @@ export const CLASS_FX = { s: '#ff4664', sss: '#ff7af5', spark: '#fff6d8' };
 
 /** Type sizes (px), by role. */
 export const TYPE = {
-  title: 56, // VICTORY, FIGHT!
-  h1: 36, // a screen's main number or name
-  h2: 26, // buttons, panel titles
-  body: 18, // pills, cards
-  small: 14, // captions
-  tiny: 11, // badges on tiles
+  title: 60, // VICTORY, FIGHT!
+  h1: 40, // a screen's main number or name
+  h2: 27, // buttons, panel titles
+  body: 20, // pills, cards
+  small: 15, // captions
+  tiny: 12, // badges on tiles
 };
 
 /** Spacing stands on a base of 4. */
@@ -109,8 +147,8 @@ export const S = {
   gap: 8, // between neighbours
   pad: 12, // inside a panel, and the screen's side margin
   section: 24, // between sections
-  radius: { s: 8, m: 12, l: 18 },
-  line: { thin: 2, ui: 3, bold: 4 }, // outline widths
+  radius: { s: 4, m: 6, l: 8 },
+  line: { thin: 1, ui: 1.5, bold: 2 }, // border widths
   barH: 48, // a top-bar pill
   btnH: 84, // a main button
   btnSmallH: 52,

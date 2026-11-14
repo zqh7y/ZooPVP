@@ -3,14 +3,14 @@ import { Fx } from '../draw/fx';
 import { swords } from '../draw/icons';
 import { petArt } from '../draw/pets';
 import { restPose, type PetLook } from '../draw/petTypes';
-import { classBadge, countBadge, namePlate, panel, pill } from '../draw/ui';
+import { classBadge, countBadge, namePlate, panel, pill, veil } from '../draw/ui';
 import { makeOpponent } from '../logic/bots';
 import { frand, hashSeed, makeRng } from '../rng';
 import type { App, Screen } from '../screen';
-import { COLOR, S, TEAM, TYPE, W } from '../theme';
+import { COLOR, S, TEAM, TYPE, UI, W } from '../theme';
 import type { ArmySpec, Opponent } from '../types';
 import { armyPower } from '../data';
-import { circle, clamp, easeOutBack, easeOutCubic, label, starPath, type Ctx, type Rect } from '../util';
+import { circle, clamp, easeOutCubic, label, rr, textWidth, type Ctx, type Rect } from '../util';
 
 // layout
 const PLATE_W = 320;
@@ -25,9 +25,9 @@ const PET_R = 17;
 const PER_ROW = 8;
 const MAX_TILES = 16;
 const POWER_W = 200;
-const VS = { x: W / 2, y: 585, r: 64 };
-const RADAR = { x: W / 2, y: 520, r: 150 };
-const SEARCH_TEXT_Y = 760;
+const VS = { x: W / 2, y: 585, r: 64, w: 96, h: 64 };
+const RADAR = { x: W / 2, y: 520, r: 140 };
+const SEARCH_TEXT_Y = 720;
 const TAP_Y = 1090;
 
 // timing
@@ -63,44 +63,37 @@ export function createMatch(app: App): Screen {
     app.go('battle');
   }
 
+  /** The search: thin range rings, one sweeping line, and a few faint contacts it lights up. */
   function drawRadar(ctx: Ctx) {
     const { x, y, r } = RADAR;
     ctx.save();
-    circle(ctx, x, y, r);
-    ctx.fillStyle = COLOR.shade;
-    ctx.fill();
-    ctx.lineWidth = S.line.bold;
-    ctx.strokeStyle = TEAM[0].light;
-    ctx.stroke();
     ctx.lineWidth = S.line.thin;
-    ctx.strokeStyle = TEAM[0].main;
-    for (const k of [0.33, 0.66]) {
+    ctx.strokeStyle = UI.borderStrong;
+    for (const k of [0.34, 0.67, 1]) {
       circle(ctx, x, y, r * k);
       ctx.stroke();
     }
-    // the pulse rings out once a second
-    for (let i = 0; i < 2; i++) {
-      const p = ((t + i * 0.5) % PING_EVERY) / PING_EVERY;
-      ctx.globalAlpha = 1 - p;
-      circle(ctx, x, y, r * p);
-      ctx.lineWidth = S.line.ui;
-      ctx.strokeStyle = TEAM[0].light;
-      ctx.stroke();
-    }
+    // one pulse rings out a second
+    const p = (t % PING_EVERY) / PING_EVERY;
+    ctx.globalAlpha = (1 - p) * 0.8;
+    circle(ctx, x, y, r * p);
+    ctx.lineWidth = S.line.ui;
+    ctx.strokeStyle = UI.text;
+    ctx.stroke();
     ctx.globalAlpha = 1;
-    // the sweep and a few blips it lights up
+    // the sweep and the contacts it lights up
     const a = t * 3.4;
     ctx.beginPath();
     ctx.moveTo(x, y);
-    ctx.arc(x, y, r - 2, a - 0.7, a);
+    ctx.arc(x, y, r, a - 0.6, a);
     ctx.closePath();
-    ctx.fillStyle = 'rgba(165, 214, 255, 0.28)';
+    ctx.fillStyle = 'rgba(241, 243, 245, 0.07)';
     ctx.fill();
     ctx.beginPath();
     ctx.moveTo(x, y);
     ctx.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r);
     ctx.lineWidth = S.line.ui;
-    ctx.strokeStyle = COLOR.white;
+    ctx.strokeStyle = UI.text;
     ctx.stroke();
     for (let i = 0; i < 5; i++) {
       const ba = i * 2.4 + 0.6;
@@ -109,17 +102,21 @@ export function createMatch(app: App): Screen {
       const glow = clamp(1 - since / 2.5, 0, 1);
       if (glow <= 0) continue;
       ctx.globalAlpha = glow;
-      circle(ctx, x + Math.cos(ba) * br, y + Math.sin(ba) * br, 5 + 3 * glow);
+      circle(ctx, x + Math.cos(ba) * br, y + Math.sin(ba) * br, 3.5);
       ctx.fillStyle = TEAM[1].main;
       ctx.fill();
     }
     ctx.globalAlpha = 1;
-    circle(ctx, x, y, 8);
-    ctx.fillStyle = COLOR.white;
+    circle(ctx, x, y, 5);
+    ctx.fillStyle = TEAM[0].main;
     ctx.fill();
     ctx.restore();
-    const dots = '.'.repeat(1 + (Math.floor(t * 2.5) % 3));
-    label(ctx, `Searching for an opponent${dots}`, W / 2 - 160, SEARCH_TEXT_Y, TYPE.h2, { align: 'left' });
+    // the dots count up beside a line that stays put
+    const text = 'SEARCHING FOR AN OPPONENT';
+    const size = TYPE.body;
+    const x0 = W / 2 - textWidth(ctx, text, size, 600, 2) / 2;
+    label(ctx, text, x0, SEARCH_TEXT_Y, size, { align: 'left', track: 2 });
+    label(ctx, '.'.repeat(1 + (Math.floor(t * 2.5) % 3)), W / 2 + (W / 2 - x0) + 4, SEARCH_TEXT_Y, size, { align: 'left', color: UI.textDim, track: 2 });
   }
 
   /** One army on a dark panel: up to two rows of its squads as idle pets, and its power. */
@@ -137,11 +134,11 @@ export function createMatch(app: App): Screen {
       const row = Math.floor(i / PER_ROW);
       const inRow = Math.min(PER_ROW, squads.length - row * PER_ROW);
       const col = i % PER_ROW;
-      const k = easeOutBack(clamp((age - i * ROW_STAGGER) / SLIDE, 0, 1));
+      const k = easeOutCubic(clamp((age - i * ROW_STAGGER) / SLIDE, 0, 1));
       if (k <= 0) continue;
       const s = squads[i];
       const x = W / 2 + (col - (inRow - 1) / 2) * SLOT_W;
-      const y = y0 + row * SLOT_H + SLOT_H - S.pad * 2 + dir * (1 - k) * 60;
+      const y = y0 + row * SLOT_H + SLOT_H - S.pad * 2 + dir * (1 - k) * 24;
       const look: PetLook = { pet: s.pet, level: s.level, team, weapon: s.weapon, weaponLevel: s.weaponLevel, helmet: s.helmet, sneakers: s.sneakers, chili: s.chili, seed: i * 1.7 };
       const pose = restPose();
       pose.t = app.t + i * 0.37;
@@ -159,32 +156,28 @@ export function createMatch(app: App): Screen {
     if (pk > 0) {
       ctx.save();
       ctx.globalAlpha = pk;
-      pill(ctx, { x: (W - POWER_W) / 2, y: py, w: POWER_W, h: S.barH }, { icon: (c, x, y, sz) => swords(c, x, y, sz, TEAM[team].main), text: `POWER ${armyPower(army.squads)}` });
+      pill(ctx, { x: (W - POWER_W) / 2, y: py + 4, w: POWER_W, h: S.barH - 8 }, { icon: (c, x, y, sz) => swords(c, x, y, sz, TEAM[team].main), text: `POWER ${armyPower(army.squads)}` });
       ctx.restore();
     }
   }
 
+  /** VS: a small plate on a hairline between the two armies. */
   function drawVs(ctx: Ctx, age: number) {
     const p = clamp((age - VS_AT) / VS_POP, 0, 1);
     if (p <= 0) return;
-    // falls from huge onto the screen
-    const s = p < 1 ? 3 - 2 * easeOutCubic(p) : 1 + 0.04 * Math.sin(age * 6);
+    const k = easeOutCubic(p);
+    const s = 1.5 - 0.5 * k;
     ctx.save();
+    ctx.globalAlpha = k;
+    ctx.fillStyle = UI.borderStrong;
+    const reach = (W / 2 - S.pad * 2) * k;
+    ctx.fillRect(VS.x - reach, VS.y - 0.5, reach * 2, 1);
     ctx.translate(VS.x, VS.y);
     ctx.scale(s, s);
-    ctx.rotate(-0.08);
-    ctx.globalAlpha = Math.min(1, p * 2);
-    starPath(ctx, 0, 0, VS.r * 1.25, VS.r * 0.9, 12, age * 0.6);
-    ctx.fillStyle = COLOR.gold;
+    rr(ctx, -VS.w / 2, -VS.h / 2, VS.w, VS.h, S.radius.m);
+    ctx.fillStyle = UI.text;
     ctx.fill();
-    ctx.lineWidth = S.line.bold;
-    ctx.strokeStyle = COLOR.ink;
-    ctx.stroke();
-    circle(ctx, 0, 0, VS.r * 0.82);
-    ctx.fillStyle = COLOR.vermilion;
-    ctx.fill();
-    ctx.stroke();
-    label(ctx, 'VS', 0, 2, TYPE.title, { lw: 8 });
+    label(ctx, 'VS', 0, 2, TYPE.h1 + 4, { color: UI.accentText, weight: 700, track: 3 });
     ctx.restore();
   }
 
@@ -215,7 +208,7 @@ export function createMatch(app: App): Screen {
         if (t >= searchFor) {
           found = t;
           sfx.play('found');
-          fx.flash(COLOR.white, 0.35, 0.25);
+          fx.flash(COLOR.white, 0.12, 0.25);
         }
         return;
       }
@@ -223,14 +216,14 @@ export function createMatch(app: App): Screen {
       if (!slammed && age >= VS_AT + VS_POP) {
         slammed = true;
         sfx.play('vsSlam');
-        fx.shake(10, 0.35);
-        fx.ring(VS.x, VS.y, COLOR.white, VS.r, VS.r * 2.6, 0.45);
-        fx.burst(VS.x, VS.y, { colors: [COLOR.gold, COLOR.goldLight, COLOR.white], n: 26, speed: 520, size: 8, life: 0.7, gravity: 400, shape: 'star' });
+        fx.shake(3, 0.2);
+        fx.ring(VS.x, VS.y, UI.text, VS.r * 0.8, VS.r * 1.8, 0.35);
       }
       if (age >= HOLD) start();
     },
     render(ctx) {
       app.arena.drawDusk(ctx, app.t);
+      veil(ctx, 0.7); // the stadium stays in the dark behind the match-up
       ctx.save();
       ctx.translate(fx.camera.x, fx.camera.y);
       fx.drawUnder(ctx);
@@ -253,8 +246,8 @@ export function createMatch(app: App): Screen {
         drawVs(ctx, age);
         if (age > TAP_AFTER) {
           ctx.save();
-          ctx.globalAlpha = 0.65 + 0.35 * Math.sin(app.t * 5);
-          label(ctx, 'TAP TO FIGHT!', W / 2, TAP_Y, TYPE.body, { color: COLOR.textDim });
+          ctx.globalAlpha = 0.7 + 0.3 * Math.sin(app.t * 3);
+          label(ctx, 'TAP TO FIGHT', W / 2, TAP_Y, TYPE.small + 1, { color: UI.textDim, track: 2.5 });
           ctx.restore();
         }
       }

@@ -1,30 +1,46 @@
-import { CLASS_FX, COLOR, FONT, RAINBOW, S, TEAM, TIER, TYPE } from '../theme';
+import { H, RAINBOW, S, TEAM, TYPE, UI, W } from '../theme';
 import { CLASSES } from '../data';
-import { clamp, fillStroke, hash, label, poly, rr, starPath, type Ctx, type Rect } from '../util';
-import { hand } from './icons';
+import { clamp, font, label, poly, rr, textWidth, type Ctx, type FontWeight, type Rect } from '../util';
+import { iconTint, trophy } from './icons';
+
+/*
+ * The interface kit: a match-day scoreboard. Flat slate surfaces, thin borders, small radii, one accent.
+ * Every screen draws its interface with these, so the look lives here and in theme UI.
+ */
 
 /** An icon drawer: centre x, y and a box size. */
 export type IconFn = (ctx: Ctx, x: number, y: number, size: number) => void;
 
-const INK = COLOR.ink;
+/** Fill the current path, then give it a thin border. */
+function surface(ctx: Ctx, fill: string | CanvasGradient, border?: string | CanvasGradient, lw: number = S.line.thin) {
+  ctx.fillStyle = fill;
+  ctx.fill();
+  if (!border) return;
+  ctx.lineWidth = lw;
+  ctx.strokeStyle = border;
+  ctx.stroke();
+}
 
 // ------------------------------------------------------------------ text
 
-/** Plain text on paper: ink-brown, no outline. */
-export function inkText(ctx: Ctx, s: string, x: number, y: number, size: number, o: { color?: string; align?: CanvasTextAlign } = {}) {
-  ctx.font = `${Math.round(size)}px ${FONT}`;
-  ctx.textAlign = o.align ?? 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = o.color ?? COLOR.textInk;
-  ctx.fillText(s, x, y);
+/** Plain interface text: off-white, no outline. */
+export function inkText(ctx: Ctx, s: string, x: number, y: number, size: number, o: { color?: string; align?: CanvasTextAlign; weight?: FontWeight; track?: number } = {}) {
+  label(ctx, s, x, y, size, o);
 }
 
-/** Outlined label that shrinks (down to 55%) to fit a width. */
-export function fitLabel(ctx: Ctx, s: string, x: number, y: number, size: number, maxW: number, o: { color?: string; align?: CanvasTextAlign; outline?: string; lw?: number } = {}) {
-  ctx.font = `${Math.round(size)}px ${FONT}`;
-  const wide = ctx.measureText(s).width;
+/** A label that shrinks (down to 55%) to fit a width. */
+export function fitLabel(
+  ctx: Ctx,
+  s: string,
+  x: number,
+  y: number,
+  size: number,
+  maxW: number,
+  o: { color?: string | CanvasGradient; align?: CanvasTextAlign; outline?: string; lw?: number; weight?: FontWeight; track?: number; onPitch?: boolean } = {},
+) {
+  const wide = textWidth(ctx, s, size, o.weight, o.track);
   const k = wide > maxW ? Math.max(0.55, maxW / wide) : 1;
-  label(ctx, s, x, y, size * k, o);
+  label(ctx, s, x, y, size * k, o.track !== undefined ? { ...o, track: o.track * k } : o);
 }
 
 /** 1234 -> 1.2K, 1500000 -> 1.5M. */
@@ -39,12 +55,14 @@ export function shortNumber(n: number) {
 
 // ------------------------------------------------------------------ buttons and pills
 
-export type ButtonVariant = 'primary' | 'roll' | 'secondary' | 'quiet';
+/** primary: the screen's one main action, in the accent. Every other variant is neutral; danger is a warning state. */
+export type ButtonVariant = 'primary' | 'roll' | 'secondary' | 'quiet' | 'danger';
 const VARIANT = {
-  primary: { top: COLOR.vermilion, light: COLOR.vermilionLight, lip: COLOR.vermilionDark, text: COLOR.white },
-  roll: { top: COLOR.jade, light: COLOR.jadeLight, lip: COLOR.jadeDark, text: COLOR.white },
-  secondary: { top: COLOR.indigo, light: COLOR.indigoLight, lip: COLOR.indigoDark, text: COLOR.white },
-  quiet: { top: COLOR.paper, light: COLOR.white, lip: COLOR.paperEdge, text: COLOR.textInk },
+  primary: { fill: UI.accent, press: UI.accentDim, border: '', text: UI.accentText },
+  roll: { fill: UI.surfaceAlt, press: UI.surface, border: UI.borderStrong, text: UI.text },
+  secondary: { fill: UI.surfaceAlt, press: UI.surface, border: UI.border, text: UI.text },
+  quiet: { fill: UI.surface, press: UI.bg, border: UI.border, text: UI.textDim },
+  danger: { fill: UI.danger, press: UI.danger, border: '', text: UI.text },
 };
 
 export interface ButtonOpts {
@@ -57,67 +75,59 @@ export interface ButtonOpts {
   disabled?: boolean;
   /** a count in the top-right corner */
   badge?: number | string;
-  /** 0..1, a throb that tells the player to press this */
+  /** 0..1, a ring that tells the player to press this */
   pulse?: number;
 }
 
-/** Candy button with a darker lip below; pressed sinks onto the lip. Returns the face's centre y. */
+/** A flat button: solid fill, thin border, uppercase label. Pressed darkens. Returns the face's centre y. */
 export function button(ctx: Ctx, r: Rect, o: ButtonOpts = {}) {
-  const v = o.disabled ? { top: '#b9b3c2', light: '#d8d3df', lip: '#8d869a', text: '#efeaf3' } : VARIANT[o.variant ?? 'primary'];
-  const lip = Math.min(8, r.h * 0.1);
-  const sink = o.pressed && !o.disabled ? lip * 0.7 : 0;
-  const rad = Math.min(S.radius.l, r.h * 0.3);
-  const lw = S.line.bold;
-  if (o.pulse) {
+  const v = o.disabled ? { fill: UI.surface, press: UI.surface, border: UI.border, text: UI.textMute } : VARIANT[o.variant ?? 'primary'];
+  const rad = S.radius.m;
+  const down = !!o.pressed && !o.disabled;
+  if (o.pulse && !o.disabled) {
     const k = clamp(o.pulse, 0, 1);
-    rr(ctx, r.x - 6 * k, r.y - 6 * k, r.w + 12 * k, r.h + 12 * k, rad + 6);
-    ctx.lineWidth = 5;
-    ctx.strokeStyle = `rgba(255, 240, 168, ${0.9 - 0.6 * k})`;
+    rr(ctx, r.x - 2 - 5 * k, r.y - 2 - 5 * k, r.w + 4 + 10 * k, r.h + 4 + 10 * k, rad + 2 + 5 * k);
+    ctx.lineWidth = S.line.ui;
+    ctx.globalAlpha *= 1 - k;
+    ctx.strokeStyle = UI.accent;
     ctx.stroke();
+    ctx.globalAlpha /= 1 - k || 1;
   }
-  rr(ctx, r.x, r.y + lip, r.w, r.h - lip, rad);
-  fillStroke(ctx, v.lip, lw);
-  const fy = r.y + sink;
-  const fh = r.h - lip;
-  rr(ctx, r.x, fy, r.w, fh, rad);
-  fillStroke(ctx, v.top, lw);
-  if (!o.disabled) {
-    rr(ctx, r.x + 7, fy + 5, r.w - 14, fh * 0.34, rad * 0.55);
-    ctx.fillStyle = 'rgba(255,255,255,0.3)';
-    ctx.fill();
-  }
-  const cy = fy + fh / 2;
+  rr(ctx, r.x, r.y, r.w, r.h, rad);
+  surface(ctx, down ? v.press : v.fill, v.border || undefined, S.line.ui);
+  const cy = r.y + r.h / 2 + (down ? 1 : 0);
   const big = r.h >= S.btnH - 8;
-  const size = big ? TYPE.h1 : r.h >= 44 ? TYPE.h2 : TYPE.body;
-  const ty = o.sub ? cy - size * 0.28 : cy;
-  const iconSize = Math.min(fh - 14, size * 1.5);
+  const size = big ? TYPE.h1 - 4 : r.h >= 44 ? TYPE.body + 3 : TYPE.body - 2;
+  const weight: FontWeight = big ? 700 : 600;
+  const track = size * 0.07;
+  const ty = o.sub ? cy - size * 0.24 : cy;
+  const iconSize = Math.min(r.h - 22, size * 0.95);
+  const gap = Math.round(size * 0.36);
   const pad = 14;
-  const textColor = v.text;
-  const outline = o.variant === 'quiet' && !o.disabled ? 'rgba(0,0,0,0)' : INK;
-  const lwText = o.variant === 'quiet' && !o.disabled ? 0 : undefined;
-  const draw = (s: string, x: number, y: number, sz: number, maxW: number, align: CanvasTextAlign) => {
-    if (lwText === 0) {
-      ctx.font = `${sz}px ${FONT}`;
-      const k = Math.min(1, maxW / ctx.measureText(s).width);
-      inkText(ctx, s, x, y, sz * k, { align, color: textColor });
-    } else fitLabel(ctx, s, x, y, sz, maxW, { align, color: textColor, outline });
-  };
-  if (o.icon && o.text) {
-    ctx.font = `${size}px ${FONT}`;
-    const tw = Math.min(ctx.measureText(o.text).width + 6, r.w - pad * 2 - iconSize - 8);
-    const total = iconSize + 8 + tw;
-    const x0 = r.x + (r.w - total) / 2;
+  const text = o.text?.toUpperCase();
+  iconTint(v.text);
+  if (o.icon && text) {
+    const tw = Math.min(textWidth(ctx, text, size, weight, track), r.w - pad * 2 - iconSize - gap);
+    const x0 = r.x + (r.w - (iconSize + gap + tw)) / 2;
     o.icon(ctx, x0 + iconSize / 2, cy, iconSize);
-    draw(o.text, x0 + iconSize + 8, ty, size, tw, 'left');
-  } else if (o.icon) o.icon(ctx, r.x + r.w / 2, cy, iconSize);
-  else if (o.text) draw(o.text, r.x + r.w / 2, ty, size, r.w - pad * 2, 'center');
-  if (o.sub) draw(o.sub, r.x + r.w / 2, cy + size * 0.62, TYPE.small, r.w - pad * 2, 'center');
+    fitLabel(ctx, text, x0 + iconSize + gap, ty + 1, size, tw, { align: 'left', color: v.text, weight, track });
+  } else if (o.icon) o.icon(ctx, r.x + r.w / 2, cy, iconSize * 1.15);
+  else if (text) fitLabel(ctx, text, r.x + r.w / 2, ty + 1, size, r.w - pad * 2, { color: v.text, weight, track });
+  iconTint(null);
+  if (o.sub) {
+    ctx.save();
+    ctx.globalAlpha *= 0.7;
+    fitLabel(ctx, o.sub.toUpperCase(), r.x + r.w / 2, cy + size * 0.58, TYPE.small - 2, r.w - pad * 2, { color: v.text, track: 1 });
+    ctx.restore();
+  }
   if (o.badge !== undefined && o.badge !== 0) {
     const s = String(o.badge);
-    const bw = Math.max(26, 14 + s.length * 11);
-    rr(ctx, r.x + r.w - bw + 8, r.y - 9, bw, 26, 13);
-    fillStroke(ctx, COLOR.gold, S.line.ui);
-    label(ctx, s, r.x + r.w - bw / 2 + 8, r.y + 4.5, TYPE.small + 2, { color: COLOR.ink, outline: 'rgba(0,0,0,0)', lw: 0 });
+    const bw = Math.max(24, 14 + textWidth(ctx, s, TYPE.small + 1, 700));
+    const bx = r.x + r.w - bw + 6;
+    rr(ctx, bx, r.y - 8, bw, 22, S.radius.s);
+    const onAccent = !o.disabled && (o.variant ?? 'primary') === 'primary';
+    surface(ctx, o.disabled ? UI.borderStrong : onAccent ? UI.text : UI.accent, UI.bg, 2);
+    label(ctx, s, bx + bw / 2, r.y + 4, TYPE.small + 1, { color: UI.accentText, weight: 700 });
   }
   return cy;
 }
@@ -125,93 +135,85 @@ export function button(ctx: Ctx, r: Rect, o: ButtonOpts = {}) {
 export interface PillOpts {
   icon?: IconFn;
   text: string;
-  /** 0..1, a white flash on the number well when it changes */
+  /** 0..1, a flash on the value when it changes */
   flash?: number;
 }
 
-/** Top-bar pill: paper body, icon at the left, the value in a recessed well. */
+/**
+ * A stat chip: slate plate, a glyph at the left, the value beside it. "POWER 3314" is drawn as a dim caption
+ * and a bright number.
+ */
 export function pill(ctx: Ctx, r: Rect, o: PillOpts) {
-  const h = r.h;
-  rr(ctx, r.x, r.y + 3, r.w, h - 3, h / 2);
-  fillStroke(ctx, COLOR.paperEdge, S.line.ui);
-  rr(ctx, r.x, r.y, r.w, h - 4, h / 2);
-  fillStroke(ctx, COLOR.paper, S.line.ui);
-  const cy = r.y + (h - 4) / 2;
-  const iw = h - 4;
-  const win = { x: r.x + iw - 2, y: cy - 15, w: r.w - iw - 8, h: 30 };
-  rr(ctx, win.x, win.y, win.w, win.h, 15);
-  fillStroke(ctx, COLOR.well, S.line.thin + 0.5);
-  rr(ctx, win.x + 4, win.y + 3, win.w - 8, 5, 2.5);
-  ctx.fillStyle = COLOR.wellShade;
-  ctx.fill();
-  if (o.flash) {
-    rr(ctx, win.x, win.y, win.w, win.h, 15);
-    ctx.fillStyle = `rgba(255,255,255,${0.6 * clamp(o.flash, 0, 1)})`;
-    ctx.fill();
-  }
-  if (o.icon) o.icon(ctx, r.x + iw / 2 + 2, cy, iw - 8);
+  rr(ctx, r.x, r.y, r.w, r.h, S.radius.m);
+  surface(ctx, UI.surface, UI.border);
   const bump = clamp(o.flash ?? 0, 0, 1);
-  ctx.font = `${TYPE.body + 2}px ${FONT}`;
-  const k = Math.min(1, (win.w - 14) / ctx.measureText(o.text).width);
-  inkText(ctx, o.text, win.x + win.w / 2, cy + 1, (TYPE.body + 2) * k * (1 + bump * 0.18), { color: bump > 0.4 ? COLOR.goldDark : COLOR.textInk });
+  if (bump > 0) {
+    rr(ctx, r.x, r.y, r.w, r.h, S.radius.m);
+    ctx.lineWidth = S.line.ui;
+    ctx.globalAlpha *= bump;
+    ctx.strokeStyle = UI.accent;
+    ctx.stroke();
+    ctx.globalAlpha /= bump;
+  }
+  const cy = r.y + r.h / 2;
+  const pad = Math.min(14, r.h * 0.3);
+  const size = Math.min(TYPE.body + 3, r.h * 0.5);
+  const color = bump > 0.4 ? UI.accent : UI.text;
+  const cap = /^([A-Za-z ]+) ([\d.,]+[KMB]?)$/.exec(o.text);
+  const iconSize = o.icon ? Math.min(r.h - 22, 26) : 0;
+  let x0 = r.x + pad;
+  if (o.icon) {
+    o.icon(ctx, x0 + iconSize / 2, cy, iconSize);
+    x0 += iconSize + 9;
+  }
+  const room = r.x + r.w - pad - x0;
+  if (cap) {
+    const cs = TYPE.small;
+    const cw = textWidth(ctx, cap[1].toUpperCase(), cs, 600, 1.5);
+    const vw = textWidth(ctx, cap[2], size, 700);
+    const total = cw + 8 + vw;
+    const k = Math.min(1, room / total);
+    const sx = o.icon ? x0 : r.x + (r.w - total * k) / 2;
+    label(ctx, cap[1].toUpperCase(), sx, cy + 1, cs * k, { align: 'left', color: UI.textDim, track: 1.5 * k });
+    label(ctx, cap[2], sx + (cw + 8) * k, cy + 1, size * k, { align: 'left', color, weight: 700 });
+  } else if (o.icon) fitLabel(ctx, o.text, x0, cy + 1, size, room, { align: 'left', color, weight: 700 });
+  else fitLabel(ctx, o.text, r.x + r.w / 2, cy + 1, size, r.w - pad * 2, { color, weight: 700 });
 }
 
 // ------------------------------------------------------------------ panels and cells
 
-/** Washi-paper panel with a plum outline; an optional title sits on a tab above. */
+/** A flat panel with a thin border; 'dark' is see-through slate for panels over the pitch. A title sits on the top edge. */
 export function panel(ctx: Ctx, r: Rect, o: { title?: string; tone?: 'paper' | 'dark' } = {}) {
-  const dark = o.tone === 'dark';
-  rr(ctx, r.x, r.y + 5, r.w, r.h, S.radius.l);
-  fillStroke(ctx, dark ? COLOR.gridInnerEdge : COLOR.paperEdge, S.line.bold);
   rr(ctx, r.x, r.y, r.w, r.h, S.radius.l);
-  fillStroke(ctx, dark ? COLOR.gridInner : COLOR.paper, S.line.bold);
-  rr(ctx, r.x + 6, r.y + 6, r.w - 12, r.h - 12, S.radius.m);
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = dark ? 'rgba(255,255,255,0.1)' : 'rgba(201,173,134,0.55)';
-  ctx.setLineDash([2, 7]);
-  ctx.lineCap = 'round';
-  ctx.stroke();
-  ctx.setLineDash([]);
+  surface(ctx, o.tone === 'dark' ? UI.glass : UI.surface, UI.border);
   if (o.title) {
-    ctx.font = `${TYPE.h2}px ${FONT}`;
-    const w = Math.min(r.w - 40, ctx.measureText(o.title).width + 44);
-    const t = { x: r.x + r.w / 2 - w / 2, y: r.y - 20, w, h: 40 };
-    rr(ctx, t.x, t.y + 4, t.w, t.h, 14);
-    fillStroke(ctx, COLOR.indigoDark, S.line.ui);
-    rr(ctx, t.x, t.y, t.w, t.h, 14);
-    fillStroke(ctx, COLOR.indigo, S.line.ui);
-    fitLabel(ctx, o.title, t.x + t.w / 2, t.y + t.h / 2 + 1, TYPE.h2, t.w - 24);
+    const s = o.title.toUpperCase();
+    const w = Math.min(r.w - 40, textWidth(ctx, s, TYPE.small, 600, 2) + 28);
+    rr(ctx, r.x + r.w / 2 - w / 2, r.y - 13, w, 26, S.radius.s);
+    surface(ctx, UI.surfaceAlt, UI.border);
+    fitLabel(ctx, s, r.x + r.w / 2, r.y + 1, TYPE.small, w - 16, { color: UI.textDim, track: 2 });
   }
 }
 
-/** The dark wooden inset the grid and the bench sit in. */
+/** The slate inset the grid and the bench sit in. */
 export function gridFrame(ctx: Ctx, r: Rect) {
   rr(ctx, r.x - 6, r.y - 6, r.w + 12, r.h + 12, S.radius.l);
-  fillStroke(ctx, COLOR.gridFrame, S.line.bold);
-  rr(ctx, r.x - 6, r.y - 6, r.w + 12, 8, S.radius.m);
-  ctx.fillStyle = 'rgba(255,255,255,0.18)';
-  ctx.fill();
-  rr(ctx, r.x, r.y, r.w, r.h, S.radius.m);
-  fillStroke(ctx, COLOR.gridInner, S.line.ui);
-  rr(ctx, r.x + 2, r.y + 2, r.w - 4, 8, 4);
-  ctx.fillStyle = 'rgba(0,0,0,0.22)';
-  ctx.fill();
+  surface(ctx, UI.surface, UI.border);
 }
 
 /** One grid slot. */
 export function cell(ctx: Ctx, r: Rect, state: 'empty' | 'ok' | 'bad' | 'fuse' = 'empty') {
   rr(ctx, r.x + 1.5, r.y + 1.5, r.w - 3, r.h - 3, S.radius.s);
-  ctx.fillStyle = COLOR.cell;
+  ctx.fillStyle = UI.bg;
   ctx.fill();
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = COLOR.cellLight;
-  ctx.stroke();
   if (state === 'empty') return;
-  rr(ctx, r.x + 1.5, r.y + 1.5, r.w - 3, r.h - 3, S.radius.s);
-  ctx.fillStyle = state === 'ok' ? COLOR.valid : state === 'bad' ? COLOR.invalid : 'rgba(255, 224, 102, 0.45)';
+  const c = state === 'ok' ? UI.ok : state === 'bad' ? UI.danger : UI.accent;
+  ctx.globalAlpha *= 0.2;
+  ctx.fillStyle = c;
   ctx.fill();
+  ctx.globalAlpha /= 0.2;
   ctx.lineWidth = S.line.ui;
-  ctx.strokeStyle = state === 'ok' ? '#6ee678' : state === 'bad' ? '#ff5050' : COLOR.fuse;
+  ctx.strokeStyle = c;
   ctx.stroke();
 }
 
@@ -219,8 +221,8 @@ export function cell(ctx: Ctx, r: Rect, state: 'empty' | 'ok' | 'bad' | 'fuse' =
 export function veil(ctx: Ctx, alpha = 1) {
   ctx.save();
   ctx.globalAlpha *= clamp(alpha, 0, 1);
-  ctx.fillStyle = COLOR.shade;
-  ctx.fillRect(0, 0, 540, 1170);
+  ctx.fillStyle = UI.scrim;
+  ctx.fillRect(0, 0, W, H);
   ctx.restore();
 }
 
@@ -239,251 +241,195 @@ export function rainbow(ctx: Ctx, x0: number, y0: number, x1: number, y1: number
   return g;
 }
 
-/** Text colour for a class (level 1..7): its light colour; SSS cycles hue. */
+/** Text colour for a class (level 1..7), readable on slate; SSS cycles hue slowly. */
 export function classColor(level: number, t: number) {
   const i = clamp(Math.round(level) - 1, 0, 6);
-  return i === 6 ? `hsl(${(t * 140) % 360}, 95%, 72%)` : TIER.metalLight[i];
+  return i === 6 ? `hsl(${(t * 60) % 360}, 85%, 76%)` : UI.tierText[i];
 }
 
-/** Tile a piece sits on, coloured by class (level 1..7 = E..SSS). */
+/**
+ * The tile a piece sits on (level 1..7 = E..SSS): the same dark tile for every class, with the class as a
+ * thin border. SSS has a rainbow border.
+ */
 export function tileFrame(ctx: Ctx, r: Rect, level: number, o: { idle?: boolean; lifted?: boolean; t?: number } = {}) {
   const i = clamp(Math.round(level) - 1, 0, 6);
-  const rad = S.radius.m;
-  const lift = o.lifted ? 4 : 0;
+  const y = r.y - (o.lifted ? 4 : 0);
   ctx.save();
-  if (o.idle) ctx.globalAlpha *= 0.62;
-  const y = r.y - lift;
-  const lip = Math.max(4, r.h * 0.09);
-  rr(ctx, r.x, y + lip, r.w, r.h - lip, rad);
-  fillStroke(ctx, TIER.tileDark[i], S.line.ui);
-  rr(ctx, r.x, y, r.w, r.h - lip, rad);
-  let fill: string | CanvasGradient = TIER.tile[i];
-  if (i === 6) fill = rainbow(ctx, r.x, y, r.x + r.w, y + r.h, (o.t ?? 0) * 0.5);
-  fillStroke(ctx, fill, S.line.ui);
-  if (i === 6) {
-    rr(ctx, r.x + 3, y + 3, r.w - 6, r.h - lip - 6, rad - 2);
-    ctx.fillStyle = 'rgba(255,255,255,0.45)';
-    ctx.fill();
-  }
-  rr(ctx, r.x + 4, y + 4, r.w - 8, (r.h - lip) * 0.3, rad * 0.6);
-  ctx.fillStyle = i === 6 ? 'rgba(255,255,255,0.35)' : TIER.tileLight[i];
-  ctx.globalAlpha *= 0.85;
-  ctx.fill();
+  if (o.idle) ctx.globalAlpha *= 0.5;
+  rr(ctx, r.x + 1.5, y + 1.5, r.w - 3, r.h - 3, S.radius.m);
+  surface(ctx, o.lifted ? UI.tileHi : UI.tile, i === 6 ? rainbow(ctx, r.x, y, r.x + r.w, y + r.h, (o.t ?? 0) * 0.5) : UI.tier[i], i >= 5 ? 2 : S.line.ui);
   ctx.restore();
 }
 
-/** The shine of high classes, over a tile: A sweeps, S glows and twinkles, SSS has a rainbow rim and sparkles. */
+/** What the high classes add over a tile: a slow sheen for A and better, and a restrained glow for S and SSS. */
 export function classFx(ctx: Ctx, r: Rect, level: number, t: number) {
   const lv = Math.round(level);
   if (lv < 5) return;
   const rad = S.radius.m;
-  const pulse = 0.5 + 0.5 * Math.sin(t * 4);
-  if (lv >= 6) {
-    rr(ctx, r.x - 2, r.y - 2, r.w + 4, r.h + 4, rad + 2);
-    ctx.lineWidth = lv >= 7 ? 5 : 4;
-    ctx.strokeStyle = lv >= 7 ? rainbow(ctx, r.x, r.y, r.x + r.w, r.y + r.h, t * 2) : CLASS_FX.s;
-    ctx.globalAlpha *= 0.55 + 0.45 * pulse;
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-    // soft halo made of two wider faint strokes
-    rr(ctx, r.x - 5, r.y - 5, r.w + 10, r.h + 10, rad + 5);
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = lv >= 7 ? CLASS_FX.sss : CLASS_FX.s;
-    ctx.globalAlpha = 0.18 + 0.2 * pulse;
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-  }
-  // the light sweep
   ctx.save();
-  rr(ctx, r.x, r.y, r.w, r.h, rad);
+  if (lv >= 6) {
+    const pulse = 0.5 + 0.5 * Math.sin(t * 2.4);
+    rr(ctx, r.x - 1, r.y - 1, r.w + 2, r.h + 2, rad + 2);
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = lv >= 7 ? rainbow(ctx, r.x, r.y, r.x + r.w, r.y + r.h, t * 0.5) : UI.tier[5];
+    ctx.globalAlpha *= 0.14 + 0.14 * pulse;
+    ctx.stroke();
+  }
+  ctx.restore();
+  // the sheen: one soft band crossing the tile now and then
+  const period = lv === 5 ? 4.5 : lv === 6 ? 3.6 : 2.8;
+  const u = (t / period) % 1;
+  if (u > 0.4) return;
+  ctx.save();
+  rr(ctx, r.x + 1.5, r.y + 1.5, r.w - 3, r.h - 3, rad);
   ctx.clip();
-  const period = lv === 5 ? 3 : lv === 6 ? 2.2 : 1.5;
-  const sw = ((t / period) % 1) * (r.w + r.h + 40) - 20;
-  ctx.globalAlpha = lv === 5 ? 0.4 : 0.55;
+  const sw = (u / 0.4) * (r.w + r.h + 30) - 15;
+  ctx.globalAlpha *= lv === 5 ? 0.1 : 0.14;
   ctx.fillStyle = '#ffffff';
-  poly(ctx, [r.x + sw, r.y, r.x + sw + 12, r.y, r.x + sw + 12 - r.h, r.y + r.h, r.x + sw - r.h, r.y + r.h]);
+  poly(ctx, [r.x + sw, r.y, r.x + sw + 14, r.y, r.x + sw + 14 - r.h, r.y + r.h, r.x + sw - r.h, r.y + r.h]);
   ctx.fill();
   ctx.restore();
-  if (lv < 6) return;
-  const n = lv >= 7 ? 4 : 2;
-  for (let i = 0; i < n; i++) {
-    const ph = t * 1.2 + i / n;
-    const cyc = Math.floor(ph);
-    const a = Math.sin((ph - cyc) * Math.PI);
-    const px = r.x + r.w * (0.12 + 0.76 * hash(cyc * 7.1 + i * 3.3));
-    const py = r.y + r.h * (0.12 + 0.76 * hash(cyc * 5.3 + i * 9.1));
-    const sz = (3 + 5 * a) * (r.w / 60);
-    starPath(ctx, px, py, sz, sz * 0.3, 4);
-    ctx.fillStyle = CLASS_FX.spark;
-    ctx.globalAlpha = a;
-    ctx.fill();
-    ctx.globalAlpha = 1;
-  }
 }
 
-/** Class letter badge, left edge at x, centred on y. k scales it. */
+/** Class letter on a small dark chip, in the class colour. Left edge at x, centred on y; k scales it. */
 export function classBadge(ctx: Ctx, level: number, x: number, y: number, k: number, t = 0) {
   const i = clamp(Math.round(level) - 1, 0, 6);
   const letter = CLASSES[i];
-  const h = 18 * k;
-  const w = letter.length > 1 ? 34 * k : h + 2 * k;
-  rr(ctx, x, y - h / 2, w, h, h / 2);
-  let fill: string | CanvasGradient = TIER.tileDark[i];
-  if (i === 6) fill = rainbow(ctx, x, y, x + w, y, t);
-  else if (i === 4) fill = TIER.metal[4];
-  else if (i === 5) fill = CLASS_FX.s;
-  fillStroke(ctx, fill, Math.max(1.5, 2.2 * k));
-  label(ctx, letter, x + w / 2, y + 0.5 * k, (letter.length > 1 ? 11 : 13) * k, { lw: Math.max(2, 3 * k) });
+  const h = 17 * k;
+  const w = letter.length > 1 ? 30 * k : 17 * k;
+  rr(ctx, x, y - h / 2, w, h, 3 * k);
+  ctx.fillStyle = UI.bg;
+  ctx.fill();
+  const color = i === 6 ? rainbow(ctx, x, y, x + w, y, t * 0.5) : UI.tierText[i];
+  label(ctx, letter, x + w / 2, y + 0.8 * k, 13 * k, { color, weight: 700, track: letter.length > 1 ? 0.6 * k : 0 });
 }
 
-/** "x4" in a small gold bubble, centred on x, y. */
+/** "x4" on a small dark chip, centred on x, y. */
 export function countBadge(ctx: Ctx, count: number, x: number, y: number, k = 1) {
-  const s = `x${count}`;
-  const w = (12 + s.length * 8) * k;
-  const h = 18 * k;
-  rr(ctx, x - w / 2, y - h / 2, w, h, h / 2);
-  fillStroke(ctx, COLOR.gold, Math.max(1.5, 2.2 * k));
-  // a line width of 0 is ignored by canvas (the last width stays), so the outline is the bubble's own gold
-  label(ctx, s, x, y + 0.5 * k, TYPE.small * k, { color: COLOR.ink, outline: COLOR.gold, lw: 1 });
+  const s = `×${count}`;
+  const size = TYPE.small * k;
+  const w = textWidth(ctx, s, size, 700, 0) + 9 * k;
+  const h = 17 * k;
+  rr(ctx, x - w / 2, y - h / 2, w, h, 3 * k);
+  ctx.fillStyle = UI.bg;
+  ctx.fill();
+  label(ctx, s, x, y + 0.8 * k, size, { color: UI.text, weight: 700, track: 0 });
 }
 
 // ------------------------------------------------------------------ battle bars
 
-/** The opponent's or your own name card. The opponent's always shows a BOT tag. */
+/** The opponent's or your own name plate: a team bar on the outer edge, the name, the trophies. The opponent's always shows a BOT tag. */
 export function namePlate(ctx: Ctx, r: Rect, o: { name: string; trophies: number; team: 0 | 1; bot?: boolean; align?: 'left' | 'right' }) {
-  const tm = TEAM[o.team];
   const right = o.align === 'right';
-  rr(ctx, r.x, r.y + 3, r.w, r.h - 3, S.radius.m);
-  fillStroke(ctx, tm.dark, S.line.ui);
-  rr(ctx, r.x, r.y, r.w, r.h - 4, S.radius.m);
-  fillStroke(ctx, COLOR.paper, S.line.ui);
-  // team stripe on the outer edge
+  rr(ctx, r.x, r.y, r.w, r.h, S.radius.m);
+  surface(ctx, UI.glass, UI.border);
   ctx.save();
-  rr(ctx, r.x, r.y, r.w, r.h - 4, S.radius.m);
+  rr(ctx, r.x, r.y, r.w, r.h, S.radius.m);
   ctx.clip();
-  ctx.fillStyle = tm.main;
-  ctx.fillRect(right ? r.x + r.w - 10 : r.x, r.y, 10, r.h);
+  ctx.fillStyle = TEAM[o.team].main;
+  ctx.fillRect(right ? r.x + r.w - 4 : r.x, r.y, 4, r.h);
   ctx.restore();
-  rr(ctx, r.x, r.y, r.w, r.h - 4, S.radius.m);
-  ctx.lineWidth = S.line.ui;
-  ctx.strokeStyle = INK;
-  ctx.stroke();
-  const pad = 20;
+  const pad = 16;
+  const dir = right ? -1 : 1;
   const ax = right ? r.x + r.w - pad : r.x + pad;
   const al: CanvasTextAlign = right ? 'right' : 'left';
-  const tag = o.bot ? 46 : 0;
-  const mid = r.y + (r.h - 4) / 2;
-  const nameY = r.h > 44 ? mid - 9 : mid;
-  ctx.font = `${TYPE.body}px ${FONT}`;
-  const maxW = r.w - pad - 14 - (tag ? tag + 8 : 0);
-  const k = Math.min(1, maxW / ctx.measureText(o.name).width);
-  inkText(ctx, o.name, ax, nameY, TYPE.body * k, { align: al });
-  if (r.h > 44) inkText(ctx, `${shortNumber(o.trophies)} trophies`, ax, mid + 11, TYPE.small, { align: al, color: COLOR.textInk });
+  const tag = o.bot ? 36 : 0;
+  const mid = r.y + r.h / 2;
+  const two = r.h > 44;
+  const nameY = two ? mid - 10 : mid;
+  const size = TYPE.body + 2;
+  fitLabel(ctx, o.name, ax, nameY + 1, size, r.w - pad * 2 - (tag ? tag + 8 : 0), { align: al, weight: 700 });
+  if (two) {
+    trophy(ctx, ax + dir * 7, mid + 13, 15);
+    label(ctx, shortNumber(o.trophies), ax + dir * 20, mid + 14, TYPE.small + 1, { align: al, color: UI.textDim });
+  }
   if (o.bot) {
     // the tag sits on the name's line, at the end away from the name, so it never covers it
-    const bx = right ? r.x + 18 : r.x + r.w - pad - tag + 6;
-    const by = nameY - 10;
-    rr(ctx, bx, by, tag, 20, 8);
-    fillStroke(ctx, COLOR.bot, S.line.thin + 0.5);
-    label(ctx, 'BOT', bx + tag / 2, by + 10.5, TYPE.small, { lw: 3 });
+    const bx = right ? r.x + pad - 4 : r.x + r.w - pad - tag + 4;
+    rr(ctx, bx, nameY - 9, tag, 19, S.radius.s);
+    ctx.fillStyle = UI.borderStrong;
+    ctx.fill();
+    label(ctx, 'BOT', bx + tag / 2, nameY + 1.5, TYPE.small - 1, { weight: 700, track: 1.5 });
   }
 }
 
 /** A plain fill bar, 0..1. */
 export function progressBar(ctx: Ctx, r: Rect, value: number, o: { color?: string; light?: string; back?: string } = {}) {
   const v = clamp(value, 0, 1);
-  rr(ctx, r.x, r.y, r.w, r.h, r.h / 2);
-  fillStroke(ctx, o.back ?? COLOR.hpBack, S.line.ui);
-  if (v <= 0.001) return;
-  const w = Math.max(r.h - 6, (r.w - 6) * v);
-  ctx.save();
-  rr(ctx, r.x + 3, r.y + 3, r.w - 6, r.h - 6, (r.h - 6) / 2);
-  ctx.clip();
-  rr(ctx, r.x + 3, r.y + 3, w, r.h - 6, (r.h - 6) / 2);
-  ctx.fillStyle = o.color ?? COLOR.hpGood;
+  const rad = Math.min(3, r.h / 2);
+  rr(ctx, r.x, r.y, r.w, r.h, rad);
+  ctx.fillStyle = o.back ?? UI.track;
   ctx.fill();
-  ctx.fillStyle = o.light ?? 'rgba(255,255,255,0.35)';
-  ctx.fillRect(r.x + 3, r.y + 4, w, (r.h - 6) * 0.35);
+  if (v <= 0.001) return;
+  ctx.save();
+  ctx.clip();
+  ctx.fillStyle = o.color ?? UI.ok;
+  ctx.fillRect(r.x, r.y, r.w * v, r.h);
   ctx.restore();
 }
 
-/** Tug-of-war health: blue grows from the left, red from the right, a bright seam between. */
-export function tugBar(ctx: Ctx, r: Rect, share0: number, share1: number, t: number) {
+/** Tug-of-war health: blue grows from the left, red from the right, a white marker at the seam. */
+export function tugBar(ctx: Ctx, r: Rect, share0: number, share1: number, _t: number) {
   const tot = Math.max(1e-6, share0 + share1);
   const f = clamp(share0 / tot, 0.04, 0.96);
-  rr(ctx, r.x, r.y, r.w, r.h, r.h / 2);
-  fillStroke(ctx, COLOR.hpBack, S.line.bold);
+  const sx = Math.round(r.x + r.w * f);
   ctx.save();
-  rr(ctx, r.x + 3, r.y + 3, r.w - 6, r.h - 6, (r.h - 6) / 2);
+  rr(ctx, r.x, r.y, r.w, r.h, 3);
   ctx.clip();
-  const ix = r.x + 3;
-  const iw = r.w - 6;
-  const sx = ix + iw * f;
-  ctx.fillStyle = TEAM[1].main;
-  ctx.fillRect(ix, r.y, iw, r.h);
   ctx.fillStyle = TEAM[0].main;
-  ctx.fillRect(ix, r.y, sx - ix, r.h);
-  ctx.fillStyle = 'rgba(255,255,255,0.3)';
-  ctx.fillRect(ix, r.y + 4, iw, (r.h - 6) * 0.32);
-  ctx.fillStyle = TEAM[0].dark;
-  ctx.fillRect(ix, r.y + r.h - 8, sx - ix, 5);
-  ctx.fillStyle = TEAM[1].dark;
-  ctx.fillRect(sx, r.y + r.h - 8, ix + iw - sx, 5);
-  // the seam
-  const pulse = 0.7 + 0.3 * Math.sin(t * 8);
-  ctx.fillStyle = `rgba(255,255,255,${pulse})`;
-  poly(ctx, [sx - 3, r.y, sx + 6, r.y, sx + 3, r.y + r.h, sx - 6, r.y + r.h]);
-  ctx.fill();
+  ctx.fillRect(r.x, r.y, sx - r.x, r.h);
+  ctx.fillStyle = TEAM[1].main;
+  ctx.fillRect(sx, r.y, r.x + r.w - sx, r.h);
   ctx.restore();
-  rr(ctx, r.x, r.y, r.w, r.h, r.h / 2);
-  ctx.lineWidth = S.line.bold;
-  ctx.strokeStyle = INK;
-  ctx.stroke();
+  ctx.fillStyle = UI.bg;
+  ctx.fillRect(sx - 3, r.y - 3, 6, r.h + 6);
+  ctx.fillStyle = UI.text;
+  ctx.fillRect(sx - 1, r.y - 3, 2, r.h + 6);
 }
 
-/** A segmented gold meter (the roll meter). value 0..1; `ticks` equal segments. */
+/** A segmented meter (the roll meter). value 0..1; `ticks` equal segments; the accent when full. */
 export function meter(ctx: Ctx, r: Rect, value: number, o: { ticks?: number; color?: string; full?: boolean } = {}) {
-  const n = o.ticks ?? 5;
-  progressBar(ctx, r, value, { color: o.full ? COLOR.gold : (o.color ?? COLOR.jade), back: COLOR.hpBack });
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = 'rgba(27,21,34,0.7)';
-  for (let i = 1; i < n; i++) {
-    const x = r.x + (r.w * i) / n;
-    ctx.beginPath();
-    ctx.moveTo(x, r.y + 4);
-    ctx.lineTo(x, r.y + r.h - 4);
-    ctx.stroke();
+  const n = Math.max(1, o.ticks ?? 5);
+  const gap = 3;
+  const w = (r.w - gap * (n - 1)) / n;
+  const v = clamp(value, 0, 1) * n;
+  for (let i = 0; i < n; i++) {
+    const x = r.x + i * (w + gap);
+    rr(ctx, x, r.y, w, r.h, 2);
+    ctx.fillStyle = UI.track;
+    ctx.fill();
+    const part = clamp(v - i, 0, 1);
+    if (part <= 0.001) continue;
+    ctx.save();
+    ctx.clip();
+    ctx.fillStyle = o.full ? UI.accent : (o.color ?? UI.text);
+    ctx.fillRect(x, r.y, w * part, r.h);
+    ctx.restore();
   }
 }
 
 // ------------------------------------------------------------------ banners, toasts, hints
 
-/** A banner ribbon with notched ends (VICTORY, DEFEAT, FIGHT!, +1 ROLL). */
+/**
+ * A title slab (VICTORY, DEFEAT, FIGHT!, +1 ROLL): a flat dark plate with a thin rule under big letters.
+ * gold and jade are the accent (a win, a reward); red and indigo stay neutral.
+ */
 export function ribbon(ctx: Ctx, cx: number, cy: number, w: number, text: string, o: { color?: 'red' | 'gold' | 'indigo' | 'jade'; size?: number } = {}) {
-  const c = {
-    red: [COLOR.vermilion, COLOR.vermilionDark, COLOR.vermilionLight],
-    gold: [COLOR.gold, COLOR.goldDark, COLOR.goldLight],
-    indigo: [COLOR.indigo, COLOR.indigoDark, COLOR.indigoLight],
-    jade: [COLOR.jade, COLOR.jadeDark, COLOR.jadeLight],
-  }[o.color ?? 'red'];
+  const tone = o.color ?? 'red';
+  const hot = tone === 'gold' || tone === 'jade';
   const size = o.size ?? TYPE.title;
-  const h = size * 1.25;
-  const tail = h * 0.45;
+  const h = Math.round(size * 1.3);
   const x0 = cx - w / 2;
   const y0 = cy - h / 2;
-  // tails behind the body
-  for (const s of [-1, 1]) {
-    const ex = s < 0 ? x0 + 8 : x0 + w - 8;
-    const out = s * (tail + 16);
-    poly(ctx, [ex, y0 + 12, ex + out, y0 + 12, ex + out - s * 16, y0 + h / 2 + 12, ex + out, y0 + h + 12, ex, y0 + h + 12]);
-    fillStroke(ctx, c[1], S.line.bold);
-  }
-  rr(ctx, x0, y0, w, h, 10);
-  fillStroke(ctx, c[0], S.line.bold);
-  rr(ctx, x0 + 6, y0 + 5, w - 12, h * 0.3, 7);
-  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.save();
+  rr(ctx, x0, y0, w, h, S.radius.s);
+  ctx.fillStyle = UI.glass;
   ctx.fill();
-  fitLabel(ctx, text, cx, cy + 2, size, w - 28, { lw: size * 0.16 });
+  ctx.clip();
+  ctx.fillStyle = hot ? UI.accent : tone === 'red' ? UI.text : UI.textDim;
+  ctx.fillRect(x0, y0 + h - 3, w, 3);
+  ctx.restore();
+  fitLabel(ctx, text.toUpperCase(), cx, cy + 1, size, w - 32, { color: hot ? UI.accent : UI.text, weight: 700, track: size * 0.06 });
 }
 
 /** A floating line of text that rises and fades; age in seconds (about 0..1.4). */
@@ -492,50 +438,40 @@ export function toast(ctx: Ctx, text: string, x: number, y: number, age: number)
   if (a <= 0) return;
   ctx.save();
   ctx.globalAlpha *= a;
-  const pop = age < 0.2 ? 0.7 + 1.5 * age : 1;
-  ctx.translate(x, y - age * 36);
-  ctx.scale(pop, pop);
-  label(ctx, text, 0, 0, TYPE.h2, { color: COLOR.toast });
+  label(ctx, text, x, y - age * 30, TYPE.h2 - 3, { color: UI.accent, weight: 700, onPitch: true });
   ctx.restore();
 }
 
-/** A speech bubble inside rect r with a pointing hand aimed at (pointAt.x, pointAt.y). */
+/** A callout inside rect r with a small arrow toward (pointAt.x, pointAt.y), and a marker bobbing at the target. */
 export function hint(ctx: Ctx, r: Rect, text: string, pointAt: { x: number; y: number }, t = 0) {
-  const bob = Math.sin(t * 6) * 4;
-  const cx = r.x + r.w / 2;
   const below = pointAt.y > r.y + r.h / 2;
-  const tipX = clamp(pointAt.x, r.x + 30, r.x + r.w - 30);
-  rr(ctx, r.x, r.y + 4, r.w, r.h, S.radius.l);
-  fillStroke(ctx, COLOR.paperEdge, S.line.ui);
-  // tail toward the target
-  const ty = below ? r.y + r.h : r.y;
   const dir = below ? 1 : -1;
-  poly(ctx, [tipX - 12, ty - dir, tipX + 12, ty - dir, tipX, ty + dir * 16]);
-  fillStroke(ctx, COLOR.paper, S.line.ui);
-  rr(ctx, r.x, r.y, r.w, r.h, S.radius.l);
-  fillStroke(ctx, COLOR.paper, S.line.ui);
-  poly(ctx, [tipX - 9, ty - dir * 2, tipX + 9, ty - dir * 2, tipX, ty + dir * 11]);
-  ctx.fillStyle = COLOR.paper;
+  const tipX = clamp(pointAt.x, r.x + 24, r.x + r.w - 24);
+  const ty = below ? r.y + r.h : r.y;
+  ctx.fillStyle = UI.text;
+  rr(ctx, r.x, r.y, r.w, r.h, S.radius.m);
   ctx.fill();
-  ctx.save();
-  ctx.font = `${TYPE.body}px ${FONT}`;
-  const words = text.split(' ');
+  poly(ctx, [tipX - 9, ty - dir, tipX + 9, ty - dir, tipX, ty + dir * 9]);
+  ctx.fill();
+  const size = TYPE.body;
   const lines: string[] = [];
   let cur = '';
-  for (const w of words) {
-    if (cur && ctx.measureText(`${cur} ${w}`).width > r.w - 36) {
+  for (const w of text.split(' ')) {
+    if (cur && textWidth(ctx, `${cur} ${w}`, size) > r.w - 36) {
       lines.push(cur);
       cur = w;
     } else cur = cur ? `${cur} ${w}` : w;
   }
   lines.push(cur);
-  ctx.restore();
-  const lh = TYPE.body + 4;
-  lines.forEach((l, i) => inkText(ctx, l, cx, r.y + r.h / 2 + (i - (lines.length - 1) / 2) * lh, TYPE.body));
-  // the hand, beyond the tail, pointing at the target
-  ctx.save();
-  ctx.translate(pointAt.x, pointAt.y + (below ? -36 + bob : 36 - bob));
-  if (below) ctx.rotate(Math.PI);
-  hand(ctx, 0, 0, 46);
-  ctx.restore();
+  const lh = size + 5;
+  lines.forEach((l, i) => label(ctx, l, r.x + r.w / 2, r.y + r.h / 2 + 1 + (i - (lines.length - 1) / 2) * lh, size, { color: UI.accentText }));
+  // the marker at the target: a small accent arrow, pointing at it from the callout's side
+  const bob = Math.sin(t * 5) * 3;
+  const my = pointAt.y - dir * (30 - bob);
+  ctx.fillStyle = UI.bg;
+  poly(ctx, [pointAt.x - 12, my - dir * 10, pointAt.x + 12, my - dir * 10, pointAt.x, my + dir * 10]);
+  ctx.fill();
+  ctx.fillStyle = UI.accent;
+  poly(ctx, [pointAt.x - 8, my - dir * 7, pointAt.x + 8, my - dir * 7, pointAt.x, my + dir * 6]);
+  ctx.fill();
 }

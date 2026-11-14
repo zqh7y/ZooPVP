@@ -1,10 +1,10 @@
 import type { App, Screen } from '../screen';
 import type { Ctx, Rect } from '../util';
 import type { PieceType, RollResult } from '../types';
-import { W, S, TYPE, COLOR, TOPBAR, TIER, CLASS_FX } from '../theme';
-import { circle, clamp, easeOutBack, fillStroke, label, inRect } from '../util';
+import { W, H, S, TYPE, COLOR, TOPBAR, UI } from '../theme';
+import { clamp, easeOutCubic, label, inRect, rr } from '../util';
 import { MAX_LEVEL, PIECE_NAME, PIECE_TYPES, cls, classOf } from '../data';
-import { button, classBadge, classColor, inkText, panel, pill, ribbon } from '../draw/ui';
+import { button, classBadge, classColor, panel, pill } from '../draw/ui';
 import type { ButtonOpts } from '../draw/ui';
 import { rollToken, trophy } from '../draw/icons';
 import { drawPiece } from '../draw/pieces';
@@ -16,7 +16,8 @@ import { benchSlotRect, CELL } from './lobby';
 
 // ------------------------------------------------------------------ layout and timing
 
-const MED = { x: W / 2, y: 420, r: 128 };
+const MED = { x: W / 2, y: 400, r: 128 };
+const TITLE_Y = 150;
 const TOKEN_FALL = 0.55; // the daruma drops in
 const OPEN = 0.8; // it bursts open
 const FLICK_TIME = 2.1; // how long the medallion flicks
@@ -25,7 +26,7 @@ const FLICK_SLOW = 1.12;
 const CRACK = 0.75; // a landed rare prize waits, then cracks
 const BREAK = 1.05; // and breaks through this long after it landed
 const SETTLE = 0.55; // after the last landing, the prize goes to the bench
-const ODDS_RECT: Rect = { x: S.pad + 28, y: 720, w: W - S.pad * 2 - 56, h: 236 };
+const ODDS_RECT: Rect = { x: S.pad * 3, y: 712, w: W - S.pad * 6, h: 244 };
 const BTN_Y = 990;
 const BTN = {
   again: { x: S.pad, y: BTN_Y, w: (W - S.pad * 3) / 2, h: S.btnH },
@@ -113,14 +114,14 @@ export function createRoll(app: App): Screen {
     if (breaking) {
       sfx.play('breakthrough', l.level);
       fx.fuseBurst(MED.x, MED.y, l.level);
-      fx.flash(COLOR.white, 0.7, 0.3);
+      fx.flash(COLOR.white, 0.25, 0.3);
     } else sfx.play('reveal', l.level);
-    fx.revealRays(MED.x, MED.y, l.level);
-    fx.ring(MED.x, MED.y, TIER.metal[l.level - 1], MED.r * 0.8, MED.r * 1.8, 0.5);
-    fx.shake(SHAKE[l.level - 1] * (breaking ? 1.3 : 1));
+    if (l.level >= 6) fx.revealRays(MED.x, MED.y, l.level); // only S and SSS keep a glow
+    fx.ring(MED.x, MED.y, UI.tier[l.level - 1], MED.r * 0.8, MED.r * 1.5, 0.45);
+    fx.shake(SHAKE[l.level - 1] * (breaking ? 0.6 : 0.45));
     flipAge = 0;
     // the final landing of a rare prize shouts
-    if (prize && i === lands.length - 1 && rare(l.level)) fx.word(MED.x, MED.y - MED.r - 30, l.level === 7 ? 'LEGENDARY!' : `${classOf(l.level)}-CLASS!`, { color: classColor(l.level, t), size: TYPE.h1 });
+    if (prize && i === lands.length - 1 && rare(l.level)) fx.word(MED.x, MED.y - MED.r - 30, l.level === 7 ? 'LEGENDARY' : `${classOf(l.level)}-CLASS`, { color: classColor(l.level, t), size: TYPE.h2 });
   }
 
   function collect() {
@@ -152,20 +153,18 @@ export function createRoll(app: App): Screen {
 
   // -------------------------------------------------------------- drawing
 
+  /** The die drops in and swells a little before it opens. */
   function drawToken(ctx: Ctx) {
     if (tt >= OPEN) return;
-    const k = clamp(tt / TOKEN_FALL, 0, 1);
-    const y = -80 + (MED.y + 80) * easeOutBack(k);
-    const wob = tt > TOKEN_FALL ? Math.sin((tt - TOKEN_FALL) * 60) * 0.12 * ((tt - TOKEN_FALL) / (OPEN - TOKEN_FALL)) : 0;
-    const swell = tt > TOKEN_FALL ? 1 + 0.25 * ((tt - TOKEN_FALL) / (OPEN - TOKEN_FALL)) : 1;
+    const k = easeOutCubic(clamp(tt / TOKEN_FALL, 0, 1));
+    const swell = tt > TOKEN_FALL ? 1 + 0.12 * ((tt - TOKEN_FALL) / (OPEN - TOKEN_FALL)) : 1;
     ctx.save();
-    ctx.translate(MED.x, y);
-    ctx.rotate(wob);
-    ctx.scale(swell, 2 - swell);
-    rollToken(ctx, 0, 0, 170);
+    ctx.globalAlpha = k;
+    rollToken(ctx, MED.x, MED.y - (1 - k) * 60, 150 * swell, UI.text);
     ctx.restore();
   }
 
+  /** The prize: one big tile, its class as the thin border. It flicks through pieces, lands, and may break through. */
   function drawMedallion(ctx: Ctx) {
     if (tt < OPEN) return;
     let idx = 0;
@@ -173,51 +172,35 @@ export function createRoll(app: App): Screen {
     const isLanded = tt >= lands[0].at;
     const card = isLanded ? { type: cards[cards.length - 1].type, level: levelNow() } : cards[idx];
     const lv = card.level;
-    const open = easeOutBack(clamp((tt - OPEN) / 0.3, 0, 1));
+    const open = easeOutCubic(clamp((tt - OPEN) / 0.25, 0, 1));
     // flick squash and the landing punch
-    const flip = 1 - 0.18 * Math.max(0, 1 - flipAge / 0.06);
-    const punch = isLanded ? 1 + 0.25 * Math.max(0, 1 - flipAge / 0.25) : 1;
+    const flip = 1 - 0.1 * Math.max(0, 1 - flipAge / 0.06);
+    const punch = isLanded ? 1 + 0.08 * Math.max(0, 1 - flipAge / 0.25) : 1;
     // trembling before a break-through
     const next = lands.find((l) => l.at > tt);
     const charge = isLanded && next ? clamp((tt - (next.at - BREAK + CRACK)) / (BREAK - CRACK), 0, 1) : 0;
-    const shakeX = charge > 0 ? Math.sin(t * 70) * 4 * charge : 0;
-    const R = MED.r * open * punch;
-    // a slow sunburst behind, in the colour of the piece showing
+    const shakeX = charge > 0 ? Math.sin(t * 70) * 3 * charge : 0;
+    const R = MED.r * (0.9 + 0.1 * open) * punch;
     ctx.save();
-    ctx.translate(MED.x, MED.y);
-    ctx.rotate(t * 0.4);
-    ctx.globalAlpha = 0.16 * open;
-    ctx.fillStyle = TIER.metalLight[lv - 1];
-    for (let i = 0; i < 14; i++) {
-      const a = (i / 14) * Math.PI * 2;
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.arc(0, 0, MED.r * 2.1, a, a + 0.2);
-      ctx.fill();
-    }
-    ctx.restore();
-    ctx.save();
+    ctx.globalAlpha = open;
     ctx.translate(MED.x + shakeX, MED.y);
-    // rim
-    circle(ctx, 0, 6, R + 14);
-    fillStroke(ctx, COLOR.goldDark, S.line.bold);
-    circle(ctx, 0, 0, R + 14);
-    fillStroke(ctx, COLOR.gold, S.line.bold);
-    circle(ctx, 0, 0, R + 4);
-    fillStroke(ctx, isLanded ? TIER.tileDark[lv - 1] : COLOR.gridInner, S.line.ui);
+    // a hairline frame around the tile
+    rr(ctx, -MED.r - 14, -MED.r - 14, MED.r * 2 + 28, MED.r * 2 + 28, S.radius.l + 4);
+    ctx.lineWidth = S.line.thin;
+    ctx.strokeStyle = UI.border;
+    ctx.stroke();
     ctx.scale(1, flip);
-    const z = R * 1.3;
+    const z = R * 2;
     drawPiece(ctx, card, { x: -z / 2, y: -z / 2, w: z, h: z }, { t, bare: true });
     ctx.restore();
     // cracks spreading, glowing in the colour of the class to come
     if (charge > 0 && next) {
       ctx.save();
       ctx.translate(MED.x + shakeX, MED.y);
-      ctx.strokeStyle = next.level === 7 ? classColor(7, t) : next.level === 6 ? CLASS_FX.s : TIER.metalLight[next.level - 1];
-      ctx.lineWidth = 4;
+      ctx.strokeStyle = classColor(next.level, t);
+      ctx.lineWidth = 2;
       ctx.lineCap = 'round';
-      ctx.shadowColor = ctx.strokeStyle as string;
-      ctx.shadowBlur = 14;
+      ctx.lineJoin = 'round';
       for (let i = 0; i < 6; i++) {
         const a0 = i * 1.05 + 0.3;
         const len = R * Math.min(1, charge * 1.6 - i * 0.12);
@@ -238,13 +221,12 @@ export function createRoll(app: App): Screen {
     }
     // the name and class of the landed piece
     if (isLanded) {
-      const k = easeOutBack(clamp(flipAge / 0.3, 0, 1));
+      const k = easeOutCubic(clamp(flipAge / 0.25, 0, 1));
       ctx.save();
-      ctx.translate(MED.x, MED.y + MED.r + 70);
-      ctx.scale(k, k);
-      label(ctx, PIECE_NAME[card.type], 0, 0, TYPE.h1);
-      classBadge(ctx, lv, -66, 40, 1.4, t);
-      label(ctx, cls(lv), -22, 41, TYPE.h2, { align: 'left', color: classColor(lv, t) });
+      ctx.globalAlpha = k;
+      ctx.translate(MED.x, MED.y + MED.r + 62 + (1 - k) * 8);
+      label(ctx, PIECE_NAME[card.type].toUpperCase(), 0, 0, TYPE.h1, { weight: 700, track: 3 });
+      label(ctx, cls(lv).toUpperCase(), 0, 38, TYPE.body, { color: classColor(lv, t), weight: 700, track: 3 });
       ctx.restore();
     }
   }
@@ -253,23 +235,23 @@ export function createRoll(app: App): Screen {
     panel(ctx, ODDS_RECT, { title: 'ODDS' });
     const odds = classOdds(app.state);
     const show = odds.map((p, i) => ({ p, lv: i + 1 })).filter((o) => o.p > 0);
-    const top = ODDS_RECT.y + 40;
-    const rowH = Math.min(28, (ODDS_RECT.h - 52) / Math.max(1, show.length));
+    const top = ODDS_RECT.y + 28;
+    const rowH = Math.min(28, (ODDS_RECT.h - 44) / Math.max(1, show.length));
     const lv = tt >= (lands[0]?.at ?? Infinity) ? levelNow() : 0;
     show.forEach((o, i) => {
       const y = top + rowH * (i + 0.5);
       const hit = o.lv === lv;
       if (hit) {
-        ctx.save();
-        ctx.globalAlpha = 0.5 + 0.3 * Math.sin(t * 6);
-        ctx.fillStyle = COLOR.goldLight;
-        ctx.fillRect(ODDS_RECT.x + 10, y - rowH / 2 + 1, ODDS_RECT.w - 20, rowH - 2);
-        ctx.restore();
+        // the class that came up: a lit row with an accent bar
+        ctx.fillStyle = UI.surfaceAlt;
+        ctx.fillRect(ODDS_RECT.x + 1, y - rowH / 2, ODDS_RECT.w - 2, rowH);
+        ctx.fillStyle = UI.accent;
+        ctx.fillRect(ODDS_RECT.x + 1, y - rowH / 2, 3, rowH);
       }
-      classBadge(ctx, o.lv, ODDS_RECT.x + 28, y, 1, t);
-      inkText(ctx, cls(o.lv), ODDS_RECT.x + 72, y, TYPE.body, { align: 'left' });
+      classBadge(ctx, o.lv, ODDS_RECT.x + 22, y, 1, t);
+      label(ctx, cls(o.lv).toUpperCase(), ODDS_RECT.x + 64, y + 1, TYPE.small + 1, { align: 'left', track: 1.5, color: hit ? UI.text : UI.textDim });
       const n = Math.max(1, Math.round(100 / o.p));
-      inkText(ctx, n <= 1 ? 'every roll' : `1 in ${n}`, ODDS_RECT.x + ODDS_RECT.w - 24, y, TYPE.body, { align: 'right' });
+      label(ctx, n <= 1 ? 'EVERY ROLL' : `1 IN ${n}`, ODDS_RECT.x + ODDS_RECT.w - 22, y + 1, TYPE.small + 1, { align: 'right', track: 1.5, color: hit ? UI.text : UI.textDim });
     });
   }
 
@@ -279,16 +261,16 @@ export function createRoll(app: App): Screen {
 
   function drawButtons(ctx: Ctx) {
     if (!buttonsOn()) {
-      if (!done && tt > OPEN + 0.5) inkText(ctx, 'Tap to skip', W / 2, BTN_Y + S.btnH / 2, TYPE.small, { color: COLOR.textDim });
+      if (!done && tt > OPEN + 0.5) label(ctx, 'TAP TO SKIP', W / 2, BTN_Y + S.btnH / 2, TYPE.small + 1, { color: UI.textDim, track: 2.5 });
       return;
     }
-    const k = easeOutBack(clamp((tt - doneAt - 0.3) / 0.3, 0, 1));
+    const k = easeOutCubic(clamp((tt - doneAt - 0.3) / 0.25, 0, 1));
     ctx.save();
-    ctx.translate(W / 2, BTN_Y + S.btnH / 2);
-    ctx.scale(k, k);
-    ctx.translate(-W / 2, -(BTN_Y + S.btnH / 2));
+    ctx.globalAlpha = k;
+    ctx.translate(0, (1 - k) * 12);
     const b = (id: BtnId, o: ButtonOpts) => button(ctx, BTN[id], { ...o, pressed: pressed === id });
-    if (canAgain()) b('again', { variant: 'roll', text: 'ROLL AGAIN', icon: rollToken, badge: app.state.rolls });
+    // one main action: rolling again while there are rolls, going back when there are none
+    if (canAgain()) b('again', { variant: 'primary', text: 'ROLL AGAIN', badge: app.state.rolls });
     b('back', { variant: canAgain() ? 'secondary' : 'primary', text: 'BACK' });
     ctx.restore();
   }
@@ -311,9 +293,9 @@ export function createRoll(app: App): Screen {
       flipAge += d;
       if (!prize) return;
       if (tt >= OPEN && tt - d < OPEN) {
-        fx.burst(MED.x, MED.y, { colors: [COLOR.vermilion, COLOR.gold, COLOR.paper], n: 26, speed: 380, shape: 'shard', gravity: 600 });
-        fx.ring(MED.x, MED.y, COLOR.gold, 40, 220, 0.4);
-        fx.shake(5);
+        fx.burst(MED.x, MED.y, { colors: [UI.text, UI.textDim, UI.borderStrong], n: 12, speed: 320, shape: 'shard', gravity: 600 });
+        fx.ring(MED.x, MED.y, UI.text, 40, 180, 0.35);
+        fx.shake(2);
       }
       // flicks
       let idx = -1;
@@ -332,17 +314,19 @@ export function createRoll(app: App): Screen {
       if (next && landed > 0 && crackPlayed < landed && tt >= next.at - BREAK + CRACK) {
         crackPlayed = landed;
         sfx.play('crack', next.level);
-        fx.shake(3);
+        fx.shake(1.5);
       }
       if (!done && tt >= lastLand().at + SETTLE) collect();
     },
     render(ctx) {
       app.arena.drawLobbyBack(ctx, t);
+      ctx.fillStyle = UI.bg; // the roll happens on flat slate
+      ctx.fillRect(0, 0, W, H);
       ctx.save();
       ctx.translate(fx.camera.x, fx.camera.y);
       pill(ctx, { x: S.pad, y: TOPBAR.y, w: 160, h: TOPBAR.h }, { icon: rollToken, text: String(app.state.rolls) });
       pill(ctx, { x: W - S.pad - 160, y: TOPBAR.y, w: 160, h: TOPBAR.h }, { icon: trophy, text: String(app.state.trophies) });
-      ribbon(ctx, W / 2, 150, 360, done ? 'NEW PIECE!' : 'ROLL!', { color: done ? 'gold' : 'red' });
+      label(ctx, done ? 'NEW PIECE' : 'ROLLING', W / 2, TITLE_Y, TYPE.body, { color: done ? UI.text : UI.textDim, weight: 700, track: 5 });
       fx.drawUnder(ctx);
       drawToken(ctx);
       drawMedallion(ctx);

@@ -1,56 +1,98 @@
-import { W, H, COLOR, FIELD, STAGE } from '../theme';
+import { W, H, COLOR, FIELD, STAGE, TEAM, FONT } from '../theme';
 import { rr, circle, ellipse, poly, fillStroke, seeded, hash } from '../util';
 import type { Ctx } from '../util';
 
 /*
- * The sakura garden: the battle arena seen from above at a slight angle, the side-on lobby strip, the
- * lobby's quiet background and the evening version. Every static picture is cached once in build().
+ * The stadium: a football ground seen from above for the battle (the pitch is exactly FIELD), its night
+ * version, the side-on pitch-level strip of the lobby and the lobby's quiet background. Everything that
+ * does not move is painted once in build() into offscreen canvases; a frame only copies those and draws
+ * the little spectators, a few flags and camera flashes from cached sprites.
  */
 
 // art colours of this module
-const GROUND = '#e3edc4'; // the battlefield floor: pale and calm
-const GROUND_SPOT = '#d5e4b0';
-const GROUND_LIGHT = '#eef5d8';
-const LAWN = '#9fd27a'; // the garden round the arena
-const LAWN_DARK = '#82bd62';
-const LAWN_LIGHT = '#b9e296';
-const GRAVEL = '#efe3c8';
-const GRAVEL_LINE = '#dccba6';
-const POND = '#7cc7e0';
-const POND_DARK = '#4f9fc0';
-const POND_LIGHT = '#bfe8f4';
-const KOI = '#ff8a4c';
-const BARK = '#7a5030';
-const BLOSSOM_SHADE = '#f27fb0';
-const ROOF = '#5b5a72';
-const LEAF = '#5bb36a';
-const LEAF_DARK = '#3f8f52';
-const LEAF_LIGHT = '#8fd88a';
-const LANTERN_GLOW = '#ffd27a';
-const DUSK = 'rgba(52, 30, 96, 0.46)';
-const NIGHT_INK = '#2b2448';
-const LOBBY_BASE = '#2e2340';
-const LOBBY_EDGE = '#221a30';
+const INK = COLOR.ink;
+const GRASS_A = '#86cd68'; // the two mowing stripes: close on purpose
+const GRASS_B = '#7cc55f';
+const APRON = '#4b9a56'; // the darker turf round the pitch
+const CONCRETE = '#d9d1e3';
+const CONCRETE_DARK = '#aca3be';
+/** Seat colours by team: [a row, the next row]. */
+const SEAT = [
+  ['#3558a8', '#2d4b94'],
+  ['#9b4160', '#863553'],
+];
+const ROOF = '#3d3a6b';
+const ROOF_ALT = '#434073';
+const ROOF_LIGHT = '#55518f';
+const ROOF_DARK = '#2e2b52';
+const STEEL = '#a3a8c6';
+const LAMP = '#fff2a8';
+const GLASS = '#cfeaff';
+const CREAM = COLOR.paper;
+const NAVY = COLOR.indigoDark;
+const GOLD = COLOR.gold;
+const SHADE = 'rgba(27, 21, 34, 0.2)';
+const LOBBY_A = '#1d3f38';
+const LOBBY_B = '#1a3933';
 
 /** Where the pets stand in the lobby strip. */
 export const STAGE_GROUND_Y = STAGE.y + STAGE.h - 46;
 
-/** The stone-and-wood frame round the field. */
-const FRAME = { x: FIELD.x - 14, y: FIELD.y - 24, w: FIELD.w + 28, h: FIELD.h + 40, r: 34 };
-const FIELD_R = 24;
-/** The front layer only covers the near end of the arena. */
-const FRONT_Y = FIELD.y + FIELD.h - 90;
+// ------------------------------------------------------------------ the plan of the ground (screen px)
 
-type Pose = 0 | 1 | 2; // 0 front, 1 cheering, 2 back
-interface Fan {
-  x: number;
-  y: number;
-  kind: number;
-  tone: number;
-  pose: Pose;
-  size: number;
-  phase: number;
-}
+const FX = FIELD.x;
+const FY = FIELD.y;
+const FW = FIELD.w;
+const FH = FIELD.h;
+const FR = FX + FW;
+const FB = FY + FH;
+const MX = W / 2;
+const MY = FY + FH / 2;
+/** The ring of advertising boards (its outer edge) and the apron inside it. */
+const RING = { x: FX - 18, y: FY - 28, w: FW + 36, h: FH + 56 };
+const APR = { x: FX - 9, y: FY - 12, w: FW + 18, h: FH + 24 };
+const SIDE_W = RING.x; // the room of a side stand
+/** Stairs through the end stands. */
+const AISLES = [60, 165, 375, 480];
+/** Where the rows of the end stands stand (the feet of the fans). */
+const TOP_ROWS = [119, 133, 147, 161];
+const BOT_ROWS = [1061, 1078, 1095, 1136, 1153, 1170];
+const BALCONY = { y: 1097, h: 17 }; // the wall between the two tiers of the bottom stand
+/** The side stands, cut by two walkways and the halfway buildings. */
+const SIDE_SEGS = [
+  [166, 374],
+  [386, 586],
+  [614, 814],
+  [826, 1036],
+];
+const DUGOUT = { y0: 526, y1: 674 };
+/** Floodlight towers: x, foot y, lamp-head y. */
+const TOWERS = [
+  [19, 168, 122],
+  [W - 19, 168, 122],
+  [19, 1112, 1064],
+  [W - 19, 1112, 1064],
+];
+const GOAL_W = 88;
+const GOAL_H = 9; // how far the crossbar is lifted on screen
+const GOAL_D = 22; // how deep the net is
+/** The layers over the crowd (roof, towers, banners) and in front of the fighters. */
+const TOP_H = 174;
+const BOT_Y = 1040;
+const FRONT_Y = FB - 30;
+const FRONT_H = 62;
+
+// the lobby strip, in its own pixels (0 is STAGE.y)
+const SG = STAGE_GROUND_Y - STAGE.y; // the ground line
+const S_ROWS = [84, 99, 114, 129];
+const S_WALL = 129; // top of the board wall
+const S_GRASS = 154;
+const S_BACK_H = 132;
+const S_FRONT_Y = 124;
+
+// ------------------------------------------------------------------ helpers
+
+type P = [number, number];
 
 function layer(w: number, h: number, ratio: number, paint: (c: Ctx) => void): HTMLCanvasElement {
   const cv = document.createElement('canvas');
@@ -64,354 +106,491 @@ function layer(w: number, h: number, ratio: number, paint: (c: Ctx) => void): HT
   return cv;
 }
 
-// ------------------------------------------------------------------ garden pieces
+function word(c: Ctx, s: string, x: number, y: number, px: number, color: string) {
+  c.font = `${px}px ${FONT}`;
+  c.textAlign = 'center';
+  c.textBaseline = 'middle';
+  c.fillStyle = color;
+  c.fillText(s, x, y + px * 0.07);
+}
 
-/** Several circles with one shared outline (the sticker look). */
-function blob(c: Ctx, pts: number[][], fill: string, lw: number) {
+/** A white bar with an ink outline through the points (goal frames, poles). */
+function bar(c: Ctx, pts: number[], w: number, color = '#ffffff') {
   c.beginPath();
-  for (const [x, y, r] of pts) {
-    c.moveTo(x + r, y);
-    c.arc(x, y, r, 0, Math.PI * 2);
-  }
-  c.lineWidth = lw * 2;
-  c.strokeStyle = COLOR.ink;
+  c.moveTo(pts[0], pts[1]);
+  for (let i = 2; i < pts.length; i += 2) c.lineTo(pts[i], pts[i + 1]);
+  c.lineWidth = w + 3;
+  c.strokeStyle = INK;
   c.stroke();
-  c.fillStyle = fill;
-  c.fill();
-}
-
-function blobPath(c: Ctx, pts: number[][]) {
-  c.beginPath();
-  for (const [x, y, r] of pts) {
-    c.moveTo(x + r, y);
-    c.arc(x, y, r, 0, Math.PI * 2);
-  }
-}
-
-/** A round canopy (blossom or leaves) with one shade and one highlight. */
-function canopy(c: Ctx, cx: number, cy: number, r: number, rnd: () => number, col: string[], lw = 2.5) {
-  const pts: number[][] = [[cx, cy, r * 0.62]];
-  const n = 7;
-  for (let i = 0; i < n; i++) {
-    const a = (i / n) * Math.PI * 2 + rnd() * 0.5;
-    pts.push([cx + Math.cos(a) * r * 0.5, cy + Math.sin(a) * r * 0.42, r * (0.4 + rnd() * 0.12)]);
-  }
-  blob(c, pts, col[0], lw);
-  c.save();
-  blobPath(c, pts);
-  c.clip();
-  c.fillStyle = col[1];
-  ellipse(c, cx + r * 0.25, cy + r * 0.55, r * 0.95, r * 0.45);
-  c.fill();
-  c.fillStyle = col[2];
-  ellipse(c, cx - r * 0.25, cy - r * 0.38, r * 0.45, r * 0.24, -0.3);
-  c.fill();
-  c.restore();
-}
-
-function blossomTree(c: Ctx, x: number, y: number, r: number, rnd: () => number) {
-  c.fillStyle = 'rgba(40, 60, 30, 0.18)';
-  ellipse(c, x + r * 0.15, y + r * 0.05, r * 0.95, r * 0.32);
-  c.fill();
-  // trunk
-  poly(c, [x - r * 0.12, y, x + r * 0.12, y, x + r * 0.07, y - r * 0.7, x + r * 0.35, y - r * 1.0, x - r * 0.05, y - r * 0.85, x - r * 0.07, y - r * 0.6]);
-  fillStroke(c, BARK, 2.5);
-  canopy(c, x, y - r * 1.05, r, rnd, [COLOR.sakura, BLOSSOM_SHADE, COLOR.sakuraLight]);
-  // a few loose blossoms
-  c.fillStyle = COLOR.white;
-  for (let i = 0; i < 6; i++) {
-    circle(c, x + (rnd() - 0.5) * r * 1.3, y - r * 1.05 + (rnd() - 0.5) * r * 0.8, 1.4 + rnd());
-    c.fill();
-  }
-}
-
-function bush(c: Ctx, x: number, y: number, r: number, rnd: () => number, flowers = true) {
-  c.fillStyle = 'rgba(40, 60, 30, 0.16)';
-  ellipse(c, x + 2, y + r * 0.45, r * 1.1, r * 0.35);
-  c.fill();
-  canopy(c, x, y, r, rnd, [LEAF, LEAF_DARK, LEAF_LIGHT], 2.2);
-  if (!flowers) return;
-  for (let i = 0; i < 5; i++) {
-    c.fillStyle = i % 2 ? COLOR.sakuraLight : COLOR.sakura;
-    circle(c, x + (rnd() - 0.5) * r * 1.2, y + (rnd() - 0.6) * r * 0.8, 1.6);
-    c.fill();
-  }
-}
-
-function rock(c: Ctx, x: number, y: number, rx: number, ry: number) {
-  c.fillStyle = 'rgba(40, 40, 60, 0.18)';
-  ellipse(c, x + 2, y + ry * 0.6, rx, ry * 0.6);
-  c.fill();
-  ellipse(c, x, y, rx, ry);
-  fillStroke(c, COLOR.stone, 2.2);
-  c.save();
-  ellipse(c, x, y, rx, ry);
-  c.clip();
-  c.fillStyle = COLOR.stoneDark;
-  ellipse(c, x + rx * 0.3, y + ry * 0.8, rx, ry * 0.6);
-  c.fill();
-  c.fillStyle = '#ddd8e4';
-  ellipse(c, x - rx * 0.3, y - ry * 0.4, rx * 0.4, ry * 0.25);
-  c.fill();
-  c.restore();
-}
-
-/** A stone garden lantern standing on y; returns the centre of its light window. */
-function lantern(c: Ctx, x: number, y: number, s: number): [number, number] {
-  const u = s / 40;
-  c.fillStyle = 'rgba(40, 40, 60, 0.2)';
-  ellipse(c, x + 3 * u, y, 13 * u, 4 * u);
-  c.fill();
-  rr(c, x - 8 * u, y - 5 * u, 16 * u, 6 * u, 2 * u);
-  fillStroke(c, COLOR.stone, 2);
-  rr(c, x - 3.5 * u, y - 16 * u, 7 * u, 12 * u, 1.5 * u);
-  fillStroke(c, COLOR.stone, 2);
-  rr(c, x - 9 * u, y - 20 * u, 18 * u, 5 * u, 2 * u);
-  fillStroke(c, COLOR.stone, 2);
-  rr(c, x - 6.5 * u, y - 30 * u, 13 * u, 11 * u, 2 * u);
-  fillStroke(c, COLOR.stone, 2);
-  rr(c, x - 3.5 * u, y - 28 * u, 7 * u, 7 * u, 1.5 * u);
-  fillStroke(c, NIGHT_INK, 1.5);
-  // roof with turned-up corners
-  c.beginPath();
-  c.moveTo(x - 14 * u, y - 29 * u);
-  c.quadraticCurveTo(x - 9 * u, y - 31 * u, x - 6 * u, y - 37 * u);
-  c.lineTo(x + 6 * u, y - 37 * u);
-  c.quadraticCurveTo(x + 9 * u, y - 31 * u, x + 14 * u, y - 29 * u);
-  c.closePath();
-  fillStroke(c, ROOF, 2);
-  c.fillStyle = 'rgba(255,255,255,0.25)';
-  c.fillRect(x - 5 * u, y - 36 * u, 6 * u, 2 * u);
-  circle(c, x, y - 39.5 * u, 3 * u);
-  fillStroke(c, COLOR.stone, 2);
-  return [x, y - 24.5 * u];
-}
-
-/** A vermilion gate standing on baseY. */
-function torii(c: Ctx, cx: number, baseY: number, w: number, h: number, lw = 2.5) {
-  const pw = w * 0.085;
-  const px = w * 0.33;
-  c.fillStyle = 'rgba(40, 40, 60, 0.18)';
-  ellipse(c, cx - px + 4, baseY, pw * 1.3, pw * 0.4);
-  c.fill();
-  ellipse(c, cx + px + 4, baseY, pw * 1.3, pw * 0.4);
-  c.fill();
-  for (const sx of [-1, 1]) {
-    const x = cx + sx * px;
-    poly(c, [x - pw * 0.5, baseY - h * 0.88, x + pw * 0.5, baseY - h * 0.88, x + pw * 0.6, baseY, x - pw * 0.6, baseY]);
-    fillStroke(c, COLOR.vermilion, lw);
-    c.fillStyle = COLOR.vermilionDark;
-    c.fillRect(x + pw * 0.12, baseY - h * 0.86, pw * 0.38, h * 0.84);
-    rr(c, x - pw * 0.7, baseY - h * 0.1, pw * 1.4, h * 0.1, 2);
-    fillStroke(c, NIGHT_INK, lw);
-  }
-  // tie beam
-  rr(c, cx - w * 0.44, baseY - h * 0.7, w * 0.88, h * 0.08, 2);
-  fillStroke(c, COLOR.vermilion, lw);
-  // name plaque
-  rr(c, cx - w * 0.05, baseY - h * 0.86, w * 0.1, h * 0.16, 2);
-  fillStroke(c, NIGHT_INK, lw * 0.8);
-  // top beam: a soft upward smile, black cap on top
-  const top = baseY - h;
-  c.beginPath();
-  c.moveTo(cx - w * 0.52, top - h * 0.06);
-  c.quadraticCurveTo(cx, top + h * 0.06, cx + w * 0.52, top - h * 0.06);
-  c.lineTo(cx + w * 0.47, top + h * 0.1);
-  c.quadraticCurveTo(cx, top + h * 0.18, cx - w * 0.47, top + h * 0.1);
-  c.closePath();
-  fillStroke(c, COLOR.vermilion, lw);
-  c.beginPath();
-  c.moveTo(cx - w * 0.54, top - h * 0.12);
-  c.quadraticCurveTo(cx, top + h * 0.0, cx + w * 0.54, top - h * 0.12);
-  c.lineTo(cx + w * 0.52, top - h * 0.03);
-  c.quadraticCurveTo(cx, top + h * 0.08, cx - w * 0.52, top - h * 0.03);
-  c.closePath();
-  fillStroke(c, NIGHT_INK, lw);
-}
-
-/** Five round petals: the blossom crest. */
-function crest(c: Ctx, x: number, y: number, r: number) {
-  c.beginPath();
-  for (let i = 0; i < 5; i++) {
-    const a = -Math.PI / 2 + (i * Math.PI * 2) / 5;
-    const px = x + Math.cos(a) * r * 0.55;
-    const py = y + Math.sin(a) * r * 0.55;
-    c.moveTo(px + r * 0.42, py);
-    c.arc(px, py, r * 0.42, 0, Math.PI * 2);
-  }
-}
-
-// ------------------------------------------------------------------ spectators
-
-const KINDS = 7;
-const TONES: string[][] = [
-  ['#ffb36b', '#f7e7d2'], // cat
-  ['#ffffff', '#e8dfee'], // bunny
-  ['#b78a62', '#8a6648'], // tanuki
-  ['#ffe066', '#ffd03a'], // chick
-  ['#8fdc7a', '#6cc05c'], // frog
-  ['#c8c2d4', '#a49cb6'], // mouse
-  ['#f0a35a', '#d98a40'], // shiba
-];
-
-function fanSprite(c: Ctx, kind: number, tone: number, pose: Pose, cx: number, cy: number, r: number) {
-  const body = TONES[kind][tone];
-  const lw = 1.6;
-  const ear: number[][] = [];
-  const parts: (() => void)[] = [];
-  // ears as extra shapes sharing the outline
-  const tri = (sx: number, w: number, h: number) => () => {
-    c.moveTo(cx + sx * r * 0.85, cy - r * 0.35);
-    c.lineTo(cx + sx * r * (0.85 - w), cy - r * (0.35 + h));
-    c.lineTo(cx + sx * r * (0.85 - w * 2), cy - r * 0.6);
-  };
-  if (kind === 0 || kind === 6) parts.push(tri(-1, 0.18, 0.75), tri(1, 0.18, 0.75));
-  if (kind === 1) {
-    parts.push(() => {
-      c.moveTo(cx - r * 0.2, cy - r * 0.6);
-      c.ellipse(cx - r * 0.35, cy - r * 1.15, r * 0.2, r * 0.55, -0.15, 0, Math.PI * 2);
-      c.moveTo(cx + r * 0.5, cy - r * 1.15);
-      c.ellipse(cx + r * 0.35, cy - r * 1.15, r * 0.2, r * 0.55, 0.15, 0, Math.PI * 2);
-    });
-  }
-  if (kind === 2) ear.push([cx - r * 0.68, cy - r * 0.68, r * 0.28], [cx + r * 0.68, cy - r * 0.68, r * 0.28]);
-  if (kind === 4) ear.push([cx - r * 0.45, cy - r * 0.78, r * 0.32], [cx + r * 0.45, cy - r * 0.78, r * 0.32]);
-  if (kind === 5) ear.push([cx - r * 0.72, cy - r * 0.62, r * 0.42], [cx + r * 0.72, cy - r * 0.62, r * 0.42]);
-  // paws up when cheering
-  if (pose === 1) ear.push([cx - r * 0.95, cy - r * 0.15, r * 0.24], [cx + r * 0.95, cy - r * 0.15, r * 0.24]);
-  const all = () => {
-    c.beginPath();
-    for (const p of parts) p();
-    for (const [x, y, rr2] of ear) {
-      c.moveTo(x + rr2, y);
-      c.arc(x, y, rr2, 0, Math.PI * 2);
-    }
-    c.moveTo(cx + r, cy);
-    c.ellipse(cx, cy, r, r * 0.92, 0, 0, Math.PI * 2);
-  };
-  all();
-  c.lineWidth = lw * 2;
-  c.strokeStyle = COLOR.ink;
+  c.lineWidth = w;
+  c.strokeStyle = color;
   c.stroke();
-  c.fillStyle = body;
-  c.fill();
-  // one shade, one highlight
-  c.save();
-  ellipse(c, cx, cy, r, r * 0.92);
-  c.clip();
-  c.fillStyle = 'rgba(60, 30, 70, 0.16)';
-  ellipse(c, cx + r * 0.2, cy + r * 0.85, r * 1.1, r * 0.5);
-  c.fill();
-  c.fillStyle = 'rgba(255,255,255,0.45)';
-  ellipse(c, cx - r * 0.35, cy - r * 0.45, r * 0.32, r * 0.18, -0.4);
-  c.fill();
-  c.restore();
-  if (pose === 2) {
-    // seen from behind: just a little tail
-    circle(c, cx, cy + r * 0.75, r * 0.2);
-    fillStroke(c, kind === 3 ? COLOR.goldDark : TONES[kind][1 - tone], 1.2);
-    return;
+}
+
+/** The threads of a net stretched over a four-cornered patch. */
+function netQuad(c: Ctx, p0: P, p1: P, p2: P, p3: P, nu: number, nv: number) {
+  c.beginPath();
+  for (let i = 1; i < nu; i++) {
+    const k = i / nu;
+    c.moveTo(p0[0] + (p1[0] - p0[0]) * k, p0[1] + (p1[1] - p0[1]) * k);
+    c.lineTo(p3[0] + (p2[0] - p3[0]) * k, p3[1] + (p2[1] - p3[1]) * k);
   }
-  // face
-  if (kind === 2) {
-    c.fillStyle = '#5a3f2e';
-    ellipse(c, cx, cy - r * 0.02, r * 0.62, r * 0.24);
-    c.fill();
+  for (let i = 1; i < nv; i++) {
+    const k = i / nv;
+    c.moveTo(p0[0] + (p3[0] - p0[0]) * k, p0[1] + (p3[1] - p0[1]) * k);
+    c.lineTo(p1[0] + (p2[0] - p1[0]) * k, p1[1] + (p2[1] - p1[1]) * k);
   }
-  if (kind === 6 || kind === 0) {
-    c.fillStyle = '#fff3e0';
-    ellipse(c, cx, cy + r * 0.32, r * 0.5, r * 0.32);
-    c.fill();
-  }
-  const ey = cy - r * 0.05;
-  const ex = r * 0.36;
-  c.fillStyle = COLOR.ink;
-  c.strokeStyle = COLOR.ink;
-  c.lineWidth = 1.2;
-  if (pose === 1) {
-    for (const sx of [-1, 1]) {
-      c.beginPath();
-      c.arc(cx + sx * ex, ey + r * 0.06, r * 0.13, Math.PI * 1.1, Math.PI * 1.9);
-      c.stroke();
-    }
-    ellipse(c, cx, cy + r * 0.38, r * 0.17, r * 0.15);
-    c.fillStyle = '#c23a4a';
-    c.fill();
-  } else {
-    circle(c, cx - ex, ey, r * 0.11);
-    c.fill();
-    circle(c, cx + ex, ey, r * 0.11);
-    c.fill();
+  c.stroke();
+}
+
+/** Every marking of a football pitch, in solid white (the caller fades the whole drawing). */
+function pitchLines(c: Ctx, x: number, y: number, w: number, h: number, lw: number) {
+  const u = w / 68; // px per metre
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  const i = lw / 2;
+  const r = 9.15 * u;
+  c.strokeStyle = '#ffffff';
+  c.fillStyle = '#ffffff';
+  c.lineWidth = lw;
+  c.lineJoin = 'miter';
+  c.lineCap = 'butt';
+  c.strokeRect(x + i, y + i, w - lw, h - lw);
+  c.beginPath();
+  c.moveTo(x, cy);
+  c.lineTo(x + w, cy);
+  c.stroke();
+  circle(c, cx, cy, r);
+  c.stroke();
+  circle(c, cx, cy, lw * 1.4);
+  c.fill();
+  for (const s of [1, -1]) {
+    const ey = s === 1 ? y + i : y + h - i;
+    const pw = 40.3 * u;
+    const pd = 16.5 * u;
+    const gw = 18.3 * u;
+    const gd = 5.5 * u;
+    const spot = 11 * u;
     c.beginPath();
-    c.moveTo(cx - r * 0.12, cy + r * 0.3);
-    c.quadraticCurveTo(cx, cy + r * 0.42, cx + r * 0.12, cy + r * 0.3);
+    c.moveTo(cx - pw / 2, ey);
+    c.lineTo(cx - pw / 2, ey + s * pd);
+    c.lineTo(cx + pw / 2, ey + s * pd);
+    c.lineTo(cx + pw / 2, ey);
+    c.moveTo(cx - gw / 2, ey);
+    c.lineTo(cx - gw / 2, ey + s * gd);
+    c.lineTo(cx + gw / 2, ey + s * gd);
+    c.lineTo(cx + gw / 2, ey);
+    c.stroke();
+    circle(c, cx, ey + s * spot, lw * 1.2);
+    c.fill();
+    const a = Math.acos((pd - spot) / r);
+    c.beginPath();
+    c.arc(cx, ey + s * spot, r, s * (Math.PI / 2) - a, s * (Math.PI / 2) + a);
     c.stroke();
   }
-  if (kind === 3) {
-    poly(c, [cx - r * 0.14, cy + r * 0.14, cx + r * 0.14, cy + r * 0.14, cx, cy + r * 0.34]);
-    fillStroke(c, '#ff9a3c', 1);
+  const ca = 1.7 * u;
+  const q = Math.PI / 2;
+  const corners: [number, number, number][] = [
+    [x + i, y + i, 0],
+    [x + w - i, y + i, q],
+    [x + w - i, y + h - i, q * 2],
+    [x + i, y + h - i, q * 3],
+  ];
+  for (const [px, py, a0] of corners) {
+    c.beginPath();
+    c.arc(px, py, ca, a0, a0 + q);
+    c.stroke();
   }
-  c.fillStyle = 'rgba(255, 110, 150, 0.55)';
-  ellipse(c, cx - r * 0.6, cy + r * 0.22, r * 0.16, r * 0.1);
+  c.lineJoin = 'round';
+  c.lineCap = 'round';
+}
+
+// ------------------------------------------------------------------ advertising boards
+
+const BOARD = [
+  { bg: NAVY, fg: CREAM },
+  { bg: CREAM, fg: COLOR.vermilion },
+  { bg: GOLD, fg: INK },
+  { bg: COLOR.jade, fg: CREAM },
+];
+
+/** A row of boards: [word, style, width] one after another from x. */
+function boardRow(c: Ctx, x: number, y: number, h: number, cells: [string, number, number][], px: number) {
+  let cx = x;
+  for (const [s, st, w] of cells) {
+    c.fillStyle = BOARD[st].bg;
+    c.fillRect(cx, y, w, h);
+    c.fillStyle = 'rgba(255, 255, 255, 0.28)';
+    c.fillRect(cx, y, w, Math.max(1.5, h * 0.14));
+    c.fillStyle = 'rgba(27, 21, 34, 0.16)';
+    c.fillRect(cx, y + h - Math.max(1.5, h * 0.16), w, Math.max(1.5, h * 0.16));
+    if (s) word(c, s, cx + w / 2, y + h / 2, px, BOARD[st].fg);
+    cx += w;
+    c.fillStyle = INK;
+    c.fillRect(cx - 1, y, 2, h);
+  }
+}
+
+/** A column of plain boards down a touchline. */
+function boardColumn(c: Ctx, x: number, w: number, y0: number, y1: number, skip0: number, skip1: number) {
+  const n = 14;
+  const step = (y1 - y0) / n;
+  for (let i = 0; i < n; i++) {
+    const y = y0 + i * step;
+    c.fillStyle = BOARD[[0, 2, 1, 0, 3, 1][i % 6]].bg;
+    c.fillRect(x, y, w, step);
+    c.fillStyle = 'rgba(255, 255, 255, 0.3)';
+    c.fillRect(x, y, 1.5, step);
+    c.fillStyle = INK;
+    c.fillRect(x, y + step - 1, w, 2);
+  }
+  if (skip1 > skip0) {
+    c.fillStyle = INK;
+    c.fillRect(x - 2, skip0, w + 4, skip1 - skip0);
+  }
+}
+
+// ------------------------------------------------------------------ the spectators
+
+const KINDS = 6; // bear, cat, bunny, frog, panda, chick
+const TONES = 4; // blue shirt, red shirt, cream shirt + blue scarf, cream shirt + red scarf
+const POSES = 3; // watching, arms up, scarf held up
+const FUR = ['#c98d5e', '#b9b3c2', '#fff1dc', '#7ed36f', '#ffffff', '#ffd95a'];
+/** Sprite sizes: side stands, top stand, bottom stand and lobby. */
+const SIZES = [12.5, 15, 17.5];
+const FOOT = 2.5; // room under the feet in a sprite cell
+const cellW = (s: number) => Math.ceil(s * 1.5 + 6);
+const cellH = (s: number) => Math.ceil(s * 1.5 + 7);
+
+interface Fan {
+  x0: number; // where its sprite goes
+  y0: number;
+  w: number;
+  h: number;
+  b: number; // its first sprite (the watching pose)
+  ph: number;
+  r: number; // how soon it joins a cheer
+  idle: number;
+  cheer: number;
+  jump: number;
+  hx: number; // its head, for the camera flashes
+  hy: number;
+}
+
+interface Flag {
+  x: number;
+  y: number;
+  team: number;
+  ph: number;
+}
+
+/** One tiny animal fan: cx is its middle, by its feet, s its size. */
+function fanSprite(c: Ctx, kind: number, tone: number, pose: number, cx: number, by: number, s: number) {
+  const team = TEAM[tone & 1];
+  const shirt = tone < 2 ? team.main : CREAM;
+  const scarf = tone < 2 ? '#ffffff' : team.main;
+  const fur = FUR[kind];
+  const lw = Math.max(1.3, s * 0.1);
+  const hr = s * 0.36;
+  const bw = s * 0.8;
+  const bh = s * 0.44;
+  const hy = by - bh - hr * 0.6;
+  if (pose > 0) {
+    for (const d of [-1, 1]) {
+      c.beginPath();
+      c.moveTo(cx + d * bw * 0.36, by - bh * 0.7);
+      c.lineTo(cx + d * s * 0.5, hy - hr * 0.95);
+      c.lineWidth = s * 0.17 + lw * 2;
+      c.strokeStyle = INK;
+      c.stroke();
+      c.lineWidth = s * 0.17;
+      c.strokeStyle = fur;
+      c.stroke();
+    }
+  }
+  rr(c, cx - bw / 2, by - bh, bw, bh, s * 0.2);
+  fillStroke(c, shirt, lw);
+  // ears
+  if (kind === 0 || kind === 4) {
+    for (const d of [-1, 1]) {
+      circle(c, cx + d * hr * 0.74, hy - hr * 0.72, hr * 0.38);
+      fillStroke(c, kind === 4 ? INK : fur, lw);
+    }
+  } else if (kind === 1) {
+    for (const d of [-1, 1]) {
+      poly(c, [cx + d * hr * 0.98, hy - hr * 0.3, cx + d * hr * 0.86, hy - hr * 1.42, cx + d * hr * 0.16, hy - hr * 0.86]);
+      fillStroke(c, fur, lw);
+    }
+  } else if (kind === 2) {
+    for (const d of [-1, 1]) {
+      ellipse(c, cx + d * hr * 0.42, hy - hr * 1.42, hr * 0.27, hr * 0.74, d * 0.16);
+      fillStroke(c, fur, lw);
+    }
+  } else if (kind === 5) {
+    poly(c, [cx - hr * 0.3, hy - hr * 0.86, cx, hy - hr * 1.5, cx + hr * 0.3, hy - hr * 0.86]);
+    fillStroke(c, fur, lw);
+  }
+  circle(c, cx, hy, hr);
+  fillStroke(c, fur, lw);
+  // the scarf round the neck
+  c.fillStyle = scarf;
+  c.fillRect(cx - bw * 0.34, hy + hr * 0.78, bw * 0.68, s * 0.15);
+  // the face
+  const er = Math.max(0.75, s * 0.058);
+  let ex = hr * 0.42;
+  let ey = hy + hr * 0.06;
+  if (kind === 3) {
+    ex = hr * 0.56;
+    ey = hy - hr * 0.72;
+    for (const d of [-1, 1]) {
+      circle(c, cx + d * ex, ey, hr * 0.42);
+      fillStroke(c, fur, lw);
+    }
+  }
+  c.fillStyle = INK;
+  for (const d of [-1, 1]) {
+    circle(c, cx + d * ex, ey, kind === 4 ? er * 2 : er);
+    c.fill();
+  }
+  if (kind === 5) {
+    poly(c, [cx - hr * 0.26, hy + hr * 0.24, cx + hr * 0.26, hy + hr * 0.24, cx, hy + hr * 0.62]);
+    c.fillStyle = '#ff9a3c';
+    c.fill();
+  } else if (pose > 0) {
+    circle(c, cx, hy + hr * 0.48, er * 1.25);
+    c.fill();
+  }
+  if (pose === 2) {
+    const sy = hy - hr - s * 0.36;
+    const sh = s * 0.22;
+    rr(c, cx - s * 0.62, sy, s * 1.24, sh, 1.5);
+    fillStroke(c, team.main, lw);
+    c.fillStyle = '#ffffff';
+    for (const k of [-0.36, 0, 0.36]) c.fillRect(cx + k * s - s * 0.07, sy + lw / 2, s * 0.14, sh - lw);
+  }
+}
+
+/** A big supporters' flag on its pole (the pole's foot is at 8, 46 of a 52 x 50 cell). */
+function flagSprite(c: Ctx, team: number, frame: number) {
+  const tm = TEAM[team];
+  bar(c, [8, 46, 8, 6], 1.8, CREAM);
+  const a = frame ? 3 : -3;
+  const cloth = () => {
+    c.beginPath();
+    c.moveTo(9, 5);
+    c.quadraticCurveTo(20, 5 + a, 30, 5);
+    c.quadraticCurveTo(40, 5 - a, 48, 6);
+    c.lineTo(48, 24);
+    c.quadraticCurveTo(40, 23 - a, 30, 23);
+    c.quadraticCurveTo(20, 23 + a, 9, 23);
+    c.closePath();
+  };
+  cloth();
+  c.fillStyle = tm.main;
   c.fill();
-  ellipse(c, cx + r * 0.6, cy + r * 0.22, r * 0.16, r * 0.1);
+  c.save();
+  c.clip();
+  c.fillStyle = '#ffffff';
+  c.fillRect(9, 11.5, 40, 5.5);
+  c.fillStyle = tm.dark;
+  c.fillRect(9, 20, 40, 6);
+  c.restore();
+  cloth();
+  c.lineWidth = 2.2;
+  c.strokeStyle = INK;
+  c.stroke();
+}
+
+// ------------------------------------------------------------------ stadium pieces
+
+/** A floodlight tower seen from above: the foot at (x, by), the lamp head round (x, hy). */
+function tower(c: Ctx, x: number, by: number, hy: number) {
+  ellipse(c, x + 5, by + 2, 12, 5);
+  c.fillStyle = SHADE;
   c.fill();
+  c.fillStyle = INK;
+  c.fillRect(x - 5.5, hy, 11, by - hy);
+  c.fillStyle = STEEL;
+  c.fillRect(x - 3, hy, 6, by - hy - 2.5);
+  c.strokeStyle = INK;
+  c.lineWidth = 1.3;
+  c.beginPath();
+  for (let y = hy + 12; y < by - 6; y += 8) {
+    c.moveTo(x - 3, y);
+    c.lineTo(x + 3, y + 8);
+    c.moveTo(x + 3, y);
+    c.lineTo(x - 3, y + 8);
+  }
+  c.stroke();
+  rr(c, x - 9, by - 5, 18, 8, 3);
+  fillStroke(c, CONCRETE_DARK, 2.5);
+  rr(c, x - 17, hy - 13, 34, 26, 6);
+  fillStroke(c, ROOF_LIGHT, 3);
+  c.fillStyle = 'rgba(255, 255, 255, 0.16)';
+  c.fillRect(x - 13, hy - 10.5, 26, 3);
+  for (let i = 0; i < 3; i++)
+    for (let j = 0; j < 2; j++) {
+      circle(c, x - 10 + i * 10, hy - 3.5 + j * 9.5, 3.7);
+      fillStroke(c, LAMP, 1.5);
+      circle(c, x - 11 + i * 10, hy - 4.5 + j * 9.5, 1.2);
+      c.fillStyle = '#ffffff';
+      c.fill();
+    }
+}
+
+/** A corner flag: the pole stands at (x, y), the cloth flies to side d. */
+function cornerFlag(c: Ctx, x: number, y: number, d: number) {
+  ellipse(c, x + 3, y + 1, 6, 2.4);
+  c.fillStyle = SHADE;
+  c.fill();
+  poly(c, [x, y - 19, x + d * 11, y - 15, x, y - 11]);
+  fillStroke(c, COLOR.vermilion, 1.8);
+  bar(c, [x, y, x, y - 19], 1.6, GOLD);
+}
+
+/** A goal seen from above; top = the far goal (its mouth faces us), otherwise the near one (we see its back). */
+function goal(c: Ctx, top: boolean) {
+  const xl = MX - GOAL_W / 2;
+  const xr = MX + GOAL_W / 2;
+  const ly = top ? FY : FB;
+  const ty = ly - GOAL_H;
+  const by = top ? ly - GOAL_D : ly + GOAL_D - 2;
+  if (!top) {
+    bar(c, [xl, ly, xl, ty], 3);
+    bar(c, [xr, ly, xr, ty], 3);
+  }
+  poly(c, [xl, ty, xr, ty, xr - 5, by, xl + 5, by]);
+  c.fillStyle = top ? 'rgba(255, 255, 255, 0.24)' : 'rgba(255, 255, 255, 0.14)';
+  c.fill();
+  c.strokeStyle = top ? 'rgba(255, 255, 255, 0.75)' : 'rgba(255, 255, 255, 0.6)';
+  c.lineWidth = 1;
+  netQuad(c, [xl, ty], [xr, ty], [xr - 5, by], [xl + 5, by], 14, top ? 3 : 5);
+  bar(c, [xl, ty, xl + 5, by, xr - 5, by, xr, ty], 1.4, '#e9e4f0');
+  if (top) bar(c, [xl, ly, xl, ty, xr, ty, xr, ly], 3);
+  else bar(c, [xl, ty, xr, ty], 3);
+}
+
+/** A team shelter by the touchline, seen from above. */
+function dugout(c: Ctx, y: number, team: number) {
+  for (let i = 0; i < 4; i++) {
+    circle(c, FR + 6.5, y + 10 + i * 12, 3.3);
+    fillStroke(c, FUR[(i * 2 + team) % KINDS], 1.3);
+  }
+  rr(c, FR + 8, y, 17, 56, 6);
+  fillStroke(c, GLASS, 2.4);
+  c.fillStyle = TEAM[team].main;
+  c.fillRect(FR + 18.5, y + 4, 4.5, 48);
+  c.strokeStyle = 'rgba(43, 31, 51, 0.4)';
+  c.lineWidth = 1.2;
+  c.beginPath();
+  for (let i = 1; i < 4; i++) {
+    c.moveTo(FR + 9.5, y + i * 14);
+    c.lineTo(FR + 18, y + i * 14);
+  }
+  c.stroke();
+}
+
+/** A strip of stairs through a stand. */
+function stairs(c: Ctx, x: number, y: number, h: number) {
+  c.fillStyle = INK;
+  c.fillRect(x - 6.5, y, 13, h);
+  c.fillStyle = CONCRETE;
+  c.fillRect(x - 4.5, y, 9, h);
+  c.fillStyle = 'rgba(27, 21, 34, 0.22)';
+  for (let sy = y + 3; sy < y + h; sy += 4.7) c.fillRect(x - 4.5, sy, 9, 1.4);
+}
+
+/** Mowing stripes that run away from the viewer (the lobby strip). */
+function perspectiveStripes(c: Ctx, y0: number, y1: number) {
+  c.fillStyle = GRASS_A;
+  c.fillRect(0, y0, W, y1 - y0);
+  c.fillStyle = GRASS_B;
+  const k = 1 + (y1 - y0) / 420;
+  for (let i = -9; i < 9; i += 2) poly(c, [MX + i * 44, y0, MX + (i + 1) * 44, y0, MX + (i + 1) * 44 * k, y1, MX + i * 44 * k, y1]), c.fill();
 }
 
 // ------------------------------------------------------------------ the arena
 
-const SPR = 34; // a spectator sprite cell, logical px
-
 export class Arena {
   private ratio = 1;
   private back?: HTMLCanvasElement;
+  private topStrip?: HTMLCanvasElement;
+  private botStrip?: HTMLCanvasElement;
   private front?: HTMLCanvasElement;
-  private duskTop?: HTMLCanvasElement;
-  private stage?: HTMLCanvasElement;
-  private lobby?: HTMLCanvasElement;
-  private petal?: HTMLCanvasElement;
+  private night?: HTMLCanvasElement;
   private glow?: HTMLCanvasElement;
+  private spark?: HTMLCanvasElement;
+  private stageBack?: HTMLCanvasElement;
+  private stageFront?: HTMLCanvasElement;
+  private lobby?: HTMLCanvasElement;
   private sprites: HTMLCanvasElement[] = [];
+  private flagSprites: HTMLCanvasElement[] = [];
   private fans: Fan[] = [];
-  private lights: [number, number][] = [];
+  private stageFans: Fan[] = [];
+  private flags: Flag[] = [];
   private cheerAmt = 0;
-  private cheerT = 0;
+  private fontWait = false;
 
   /** Cache every static layer at the device pixel ratio. Call again when the ratio changes. */
   build(ratio: number) {
     this.ratio = ratio;
-    this.lights = [];
-    this.fans = this.placeFans();
     this.sprites = [];
-    for (let k = 0; k < KINDS; k++)
-      for (let tn = 0; tn < 2; tn++)
-        for (let p = 0; p < 3; p++)
-          this.sprites.push(layer(SPR, SPR, ratio, (c) => fanSprite(c, k, tn, p as Pose, SPR / 2, SPR / 2 + 4, 10)));
+    for (const s of SIZES)
+      for (let k = 0; k < KINDS; k++)
+        for (let tn = 0; tn < TONES; tn++)
+          for (let p = 0; p < POSES; p++)
+            this.sprites.push(layer(cellW(s), cellH(s), ratio, (c) => fanSprite(c, k, tn, p, cellW(s) / 2, cellH(s) - FOOT, s)));
+    this.flagSprites = [];
+    for (let tm = 0; tm < 2; tm++) for (let f = 0; f < 2; f++) this.flagSprites.push(layer(52, 50, ratio, (c) => flagSprite(c, tm, f)));
+    this.placeFans();
     this.back = layer(W, H, ratio, (c) => this.paintBack(c));
-    this.front = layer(W, H - FRONT_Y, ratio, (c) => {
+    this.topStrip = layer(W, TOP_H, ratio, (c) => this.paintTopStrip(c));
+    this.botStrip = layer(W, H - BOT_Y, ratio, (c) => {
+      c.translate(0, -BOT_Y);
+      this.paintBotStrip(c);
+    });
+    this.front = layer(W, FRONT_H, ratio, (c) => {
       c.translate(0, -FRONT_Y);
-      this.paintFront(c);
+      goal(c, false);
+      cornerFlag(c, FX + 2, FB - 2, -1);
+      cornerFlag(c, FR - 2, FB - 2, 1);
     });
-    this.duskTop = layer(W, H, ratio, (c) => this.paintDusk(c));
-    this.stage = layer(STAGE.w, STAGE.h, ratio, (c) => this.paintStage(c));
-    this.lobby = layer(W, H, ratio, (c) => this.paintLobby(c));
-    this.petal = layer(12, 12, ratio, (c) => {
-      ellipse(c, 6, 6, 4.2, 2.8, 0.5);
-      fillStroke(c, COLOR.sakuraLight, 1, COLOR.sakuraDark);
-    });
-    this.glow = layer(80, 80, ratio, (c) => {
-      const g = c.createRadialGradient(40, 40, 2, 40, 40, 40);
-      g.addColorStop(0, 'rgba(255, 214, 130, 0.75)');
-      g.addColorStop(0.35, 'rgba(255, 190, 100, 0.3)');
-      g.addColorStop(1, 'rgba(255, 170, 80, 0)');
+    this.night = layer(W, H, ratio, (c) => this.paintNight(c));
+    this.glow = layer(110, 110, ratio, (c) => {
+      const g = c.createRadialGradient(55, 55, 2, 55, 55, 55);
+      g.addColorStop(0, 'rgba(255, 244, 190, 0.85)');
+      g.addColorStop(0.3, 'rgba(255, 232, 150, 0.32)');
+      g.addColorStop(1, 'rgba(255, 220, 120, 0)');
       c.fillStyle = g;
-      c.fillRect(0, 0, 80, 80);
+      c.fillRect(0, 0, 110, 110);
     });
+    this.spark = layer(18, 18, ratio, (c) => {
+      c.fillStyle = '#ffffff';
+      poly(c, [9, 0, 10.6, 7.4, 18, 9, 10.6, 10.6, 9, 18, 7.4, 10.6, 0, 9, 7.4, 7.4]);
+      c.fill();
+      circle(c, 9, 9, 3.2);
+      c.fill();
+    });
+    this.stageBack = layer(W, S_BACK_H, ratio, (c) => this.paintStageBack(c));
+    this.stageFront = layer(W, STAGE.h - S_FRONT_Y, ratio, (c) => {
+      c.translate(0, -S_FRONT_Y);
+      this.paintStageFront(c);
+    });
+    this.lobby = layer(W, H, ratio, (c) => this.paintLobby(c));
+    // the words on the boards need the game's font: paint again once it has arrived
+    const fonts = typeof document !== 'undefined' ? document.fonts : undefined;
+    const face = `12px ${FONT.split(',')[0]}`;
+    if (fonts && !this.fontWait && !fonts.check(face)) {
+      this.fontWait = true;
+      fonts.load(face).then(
+        () => this.build(this.ratio),
+        () => undefined,
+      );
+    }
   }
 
   /** Let the crowd settle after a cheer. */
   update(dt: number) {
-    this.cheerT += dt;
     this.cheerAmt = Math.max(0, this.cheerAmt - dt * 0.9);
   }
 
@@ -420,45 +599,65 @@ export class Arena {
     this.cheerAmt = Math.min(1, Math.max(this.cheerAmt, amount));
   }
 
-  /** The whole battle backdrop behind the fighters, with the crowd. */
+  /** The whole stadium behind the fighters, with the crowd. */
   drawBattle(ctx: Ctx, t: number) {
     if (!this.back) this.build(this.ratio);
     ctx.drawImage(this.back!, 0, 0, W, H);
-    this.drawFans(ctx, t);
+    this.drawFans(ctx, this.fans, t);
+    ctx.drawImage(this.topStrip!, 0, 0, W, TOP_H);
+    ctx.drawImage(this.botStrip!, 0, BOT_Y, W, H - BOT_Y);
+    this.drawFlags(ctx, t);
+    this.drawFlashes(ctx, t);
   }
 
-  /** In front of the fighters: the near frame edge, corner branches, drifting petals. */
+  /** In front of the fighters: the near goal, the near corner flags, confetti while the crowd cheers. */
   drawBattleFront(ctx: Ctx, t: number) {
-    ctx.drawImage(this.front!, 0, FRONT_Y, W, H - FRONT_Y);
-    this.drawPetals(ctx, t, 0, 0, W, H, 12);
+    if (!this.front) this.build(this.ratio);
+    ctx.drawImage(this.front!, 0, FRONT_Y, W, FRONT_H);
+    const ch = this.cheerAmt;
+    if (ch > 0.03) {
+      ctx.globalAlpha = Math.min(1, ch * 1.4);
+      for (let i = 0; i < 28; i++) {
+        const side = i % 4;
+        const u = hash(i * 5.3);
+        const fall = (t * (60 + u * 50) + u * 400) % 150;
+        const sway = Math.sin(t * 5 + i) * 6;
+        // only along the edges of the pitch, never over the middle of the fight
+        const x = side === 0 ? 34 + u * 60 + sway : side === 1 ? W - 34 - u * 60 + sway : hash(i * 9.1) * W;
+        const y = side === 2 ? 150 + fall * 0.6 : side === 3 ? 960 + fall * 0.5 : hash(i * 2.7) * H * 0.9 + fall;
+        ctx.fillStyle = i % 3 === 0 ? GOLD : i % 3 === 1 ? TEAM[0].light : TEAM[1].light;
+        ctx.fillRect(x, y, 5, 3);
+      }
+      ctx.globalAlpha = 1;
+    }
   }
 
-  /** The battle backdrop at evening, lanterns lit (matchmaking and result screens). */
+  /** The same ground as a night match, floodlights on (matchmaking and result screens). */
   drawDusk(ctx: Ctx, t: number) {
     this.drawBattle(ctx, t);
-    ctx.drawImage(this.front!, 0, FRONT_Y, W, H - FRONT_Y);
-    ctx.drawImage(this.duskTop!, 0, 0, W, H);
+    ctx.drawImage(this.front!, 0, FRONT_Y, W, FRONT_H);
+    ctx.drawImage(this.night!, 0, 0, W, H);
     const op = ctx.globalCompositeOperation;
     ctx.globalCompositeOperation = 'lighter';
-    for (let i = 0; i < this.lights.length; i++) {
-      const [x, y] = this.lights[i];
-      ctx.globalAlpha = 0.75 + 0.25 * Math.sin(t * 5 + i * 1.7) * Math.sin(t * 3.1 + i);
-      ctx.drawImage(this.glow!, x - 40, y - 40, 80, 80);
+    for (let i = 0; i < TOWERS.length; i++) {
+      ctx.globalAlpha = 0.86 + 0.14 * Math.sin(t * 4.1 + i * 1.7) * Math.sin(t * 2.3 + i);
+      ctx.drawImage(this.glow!, TOWERS[i][0] - 55, TOWERS[i][2] - 55, 110, 110);
     }
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = op;
-    this.drawPetals(ctx, t, 0, 0, W, H, 8);
+    this.drawFlashes(ctx, t + 3);
   }
 
-  /** The lobby strip on STAGE: a side-on slice of the garden. Pets stand on STAGE_GROUND_Y. */
+  /** The lobby strip on STAGE: a pitch-level view across the grass. Pets stand on STAGE_GROUND_Y. */
   drawStage(ctx: Ctx, t: number) {
-    if (!this.stage) this.build(this.ratio);
-    ctx.drawImage(this.stage!, STAGE.x, STAGE.y, STAGE.w, STAGE.h);
+    if (!this.stageBack) this.build(this.ratio);
     ctx.save();
     ctx.beginPath();
     ctx.rect(STAGE.x, STAGE.y, STAGE.w, STAGE.h);
     ctx.clip();
-    this.drawPetals(ctx, t, STAGE.x, STAGE.y, STAGE.w, STAGE.h, 7);
+    ctx.drawImage(this.stageBack!, STAGE.x, STAGE.y, W, S_BACK_H);
+    this.drawFans(ctx, this.stageFans, t);
+    ctx.drawImage(this.stageFront!, STAGE.x, STAGE.y + S_FRONT_Y, W, STAGE.h - S_FRONT_Y);
     ctx.restore();
   }
 
@@ -470,485 +669,501 @@ export class Arena {
 
   // ---------------------------------------------------------------- per frame
 
-  private drawFans(ctx: Ctx, t: number) {
+  private drawFans(ctx: Ctx, fans: Fan[], t: number) {
+    const q = this.ratio;
     const ch = this.cheerAmt;
-    for (let i = 0; i < this.fans.length; i++) {
-      const f = this.fans[i];
-      const on = ch > 0.05 && hash(i * 3.1) < ch + 0.15;
-      const jump = on ? Math.abs(Math.sin(t * 9 + f.phase)) * 7 * Math.min(1, ch * 1.5) : 0;
-      const bob = Math.sin(t * 2.2 + f.phase) * 0.8;
-      const pose = on && f.pose === 0 ? 1 : f.pose;
-      const spr = this.sprites[(f.kind * 2 + f.tone) * 3 + pose];
-      const s = (SPR * f.size) / 20;
-      ctx.drawImage(spr, f.x - s / 2, f.y - s / 2 - 4 * (f.size / 20) + bob - jump, s, s);
+    const amp = Math.min(1, ch * 1.6);
+    const spr = this.sprites;
+    const live = ch > 0.03;
+    for (let i = 0; i < fans.length; i++) {
+      const f = fans[i];
+      let dy: number;
+      let pose: number;
+      if (live && f.r < ch * 1.3) {
+        dy = -Math.abs(Math.sin(t * 9 + f.ph)) * f.jump * amp;
+        pose = f.cheer;
+      } else {
+        dy = Math.sin(t * 2.3 + f.ph) * 0.9;
+        pose = f.idle;
+      }
+      ctx.drawImage(spr[f.b + pose], f.x0, Math.round((f.y0 + dy) * q) / q, f.w, f.h);
     }
   }
 
-  private drawPetals(ctx: Ctx, t: number, x0: number, y0: number, w: number, h: number, n: number) {
-    for (let i = 0; i < n; i++) {
-      const sp = 14 + hash(i + 7) * 16;
-      const x = x0 + ((((hash(i) * w + t * sp + Math.sin(t * 0.9 + i) * 18) % w) + w) % w);
-      const y = y0 + ((((hash(i + 31) * h + t * (sp * 1.4)) % h) + h) % h);
-      const sz = 7 + hash(i + 3) * 5;
-      ctx.globalAlpha = 0.85;
-      ctx.drawImage(this.petal!, x - sz / 2, y - sz / 2, sz, sz);
+  private drawFlags(ctx: Ctx, t: number) {
+    const ch = this.cheerAmt;
+    const speed = 2.4 + ch * 5;
+    for (let i = 0; i < this.flags.length; i++) {
+      const f = this.flags[i];
+      const a = Math.sin(t * speed + f.ph) * (0.24 + ch * 0.2) + 0.1;
+      const frame = Math.floor(t * 5 + f.ph) & 1;
+      ctx.save();
+      ctx.translate(f.x, f.y);
+      ctx.rotate(a);
+      ctx.drawImage(this.flagSprites[f.team * 2 + frame], -8, -46, 52, 50);
+      ctx.restore();
+    }
+  }
+
+  /** Camera flashes twinkling in the crowd; many more while it cheers. */
+  private drawFlashes(ctx: Ctx, t: number) {
+    const fans = this.fans;
+    if (!fans.length) return;
+    const n = 4 + Math.round(this.cheerAmt * 12);
+    for (let k = 0; k < n; k++) {
+      const clock = t * 2.6 + k * 0.618;
+      const slot = Math.floor(clock);
+      const age = clock - slot;
+      if (age > 0.45) continue;
+      const f = fans[Math.floor(hash(slot * 7.13 + k * 31.7) * fans.length)];
+      const s = 18 * (0.55 + 0.6 * Math.sin((age / 0.45) * Math.PI));
+      ctx.globalAlpha = 1 - age / 0.45;
+      ctx.drawImage(this.spark!, f.hx - s / 2, f.hy - s / 2, s, s);
     }
     ctx.globalAlpha = 1;
   }
 
-  // ---------------------------------------------------------------- layout
+  // ---------------------------------------------------------------- the crowd
 
-  private placeFans(): Fan[] {
+  private placeFans() {
+    const q = this.ratio;
     const rnd = seeded(77);
-    const out: Fan[] = [];
-    const add = (x: number, y: number, pose: Pose, size: number) =>
-      out.push({ x, y, kind: Math.floor(rnd() * KINDS), tone: rnd() < 0.5 ? 0 : 1, pose, size, phase: rnd() * 6.28 });
-    // sides, leaning on the fence
-    for (let y = FIELD.y + 6; y < FIELD.y + FIELD.h - 4; y += 25) {
-      add(13 + (rnd() - 0.5) * 2, y + rnd() * 4, 0, 16 + rnd() * 4);
-      add(W - 13 + (rnd() - 0.5) * 2, y + 12 + rnd() * 4, 0, 16 + rnd() * 4);
-    }
-    // far side: a short row each side of the gate path
-    for (let x = 64; x < 220; x += 26) add(x + rnd() * 4, FRAME.y - 4, 0, 16 + rnd() * 3);
-    for (let x = 330; x < 482; x += 26) add(x + rnd() * 4, FRAME.y - 4, 0, 16 + rnd() * 3);
-    // near side: two rows seen from behind
-    const by = FRAME.y + FRAME.h;
-    for (let x = 34; x < W - 20; x += 25) add(x + rnd() * 5, by + 14 + rnd() * 3, 2, 19 + rnd() * 3);
-    for (let x = 46; x < W - 30; x += 26) add(x + rnd() * 5, by + 38 + rnd() * 3, 2, 20 + rnd() * 2);
-    // far rows sit behind near rows
-    out.sort((a, b) => a.y - b.y);
-    return out;
+    const mk = (x: number, y: number, sc: number, team: number): Fan => {
+      const s = SIZES[sc];
+      const cw = cellW(s);
+      const chh = cellH(s);
+      const kind = Math.floor(rnd() * KINDS);
+      const tone = team + (rnd() < 0.24 ? 2 : 0);
+      const pr = rnd();
+      return {
+        x0: Math.round((x - cw / 2) * q) / q,
+        y0: y - chh + FOOT,
+        w: cw,
+        h: chh,
+        b: ((sc * KINDS + kind) * TONES + tone) * POSES,
+        ph: rnd() * 6.283,
+        r: rnd(),
+        idle: pr < 0.05 ? 2 : pr < 0.1 ? 1 : 0,
+        cheer: rnd() < 0.4 ? 2 : 1,
+        jump: 3 + rnd() * 4 + sc,
+        hx: x,
+        hy: y - s * 0.75,
+      };
+    };
+    const fans: Fan[] = [];
+    // the top stand: red
+    TOP_ROWS.forEach((y, k) => {
+      for (let x = 8 + (k % 2) * 7.2; x < W - 3; x += 14.4) {
+        if (AISLES.some((a) => Math.abs(x - a) < 12)) continue;
+        fans.push(mk(x + (rnd() - 0.5) * 2, y, 1, 1));
+      }
+    });
+    // the side stands: red toward the top end, blue toward the bottom end, mixed round the halfway line
+    for (const side of [0, 1])
+      for (const col of [0, 1]) {
+        const x = side ? W - (col ? 16.5 : 6) : col ? 16.5 : 6;
+        for (const [y0, y1] of SIDE_SEGS) {
+          const n = Math.floor((y1 - y0 - 14) / 12.4);
+          for (let i = n; i >= 0; i--) {
+            const y = y1 - i * 12.4;
+            if (side === 1 && col === 1 && y > DUGOUT.y0 - 2 && y < DUGOUT.y1 + 16) continue;
+            const blue = Math.min(1, Math.max(0, (y - 540) / 120));
+            fans.push(mk(x, y, 0, rnd() < blue ? 0 : 1));
+          }
+        }
+      }
+    // the bottom stand: blue
+    BOT_ROWS.forEach((y, k) => {
+      for (let x = 9 + (k % 2) * 8.3; x < W - 3; x += 16.6) {
+        if (AISLES.some((a) => Math.abs(x - a) < 13)) continue;
+        fans.push(mk(x + (rnd() - 0.5) * 2, y, 2, 0));
+      }
+    });
+    this.fans = fans;
+    this.flags = [
+      { x: 112, y: 142, team: 1, ph: 0.4 },
+      { x: 322, y: 130, team: 1, ph: 2.1 },
+      { x: 436, y: 146, team: 1, ph: 4.0 },
+      { x: 96, y: 1086, team: 0, ph: 1.2 },
+      { x: 228, y: 1158, team: 0, ph: 3.3 },
+      { x: 318, y: 1160, team: 0, ph: 5.1 },
+      { x: 448, y: 1084, team: 0, ph: 0.2 },
+    ];
+    // the lobby's stand: the home crowd
+    const sf: Fan[] = [];
+    S_ROWS.forEach((y, k) => {
+      for (let x = 10 + (k % 2) * 8.4; x < W - 3; x += 16.8) {
+        if (Math.abs(x - 135) < 13 || Math.abs(x - 405) < 13) continue;
+        sf.push(mk(x + (rnd() - 0.5) * 2, STAGE.y + y, 2, rnd() < 0.88 ? 0 : 1));
+      }
+    });
+    this.stageFans = sf;
   }
 
-  // ---------------------------------------------------------------- cached pictures
+  // ---------------------------------------------------------------- painting: the battle
 
   private paintBack(c: Ctx) {
-    const rnd = seeded(2024);
-    // lawn with soft mottling
-    c.fillStyle = LAWN;
+    c.fillStyle = ROOF_DARK;
     c.fillRect(0, 0, W, H);
-    for (let i = 0; i < 140; i++) {
-      c.fillStyle = rnd() < 0.5 ? LAWN_LIGHT : LAWN_DARK;
-      c.globalAlpha = 0.35;
-      ellipse(c, rnd() * W, rnd() * H, 10 + rnd() * 22, 5 + rnd() * 8);
-      c.fill();
-    }
-    c.globalAlpha = 1;
-    // grass tufts
-    c.strokeStyle = LAWN_DARK;
-    c.lineWidth = 1.6;
-    for (let i = 0; i < 90; i++) {
-      const x = rnd() * W;
-      const y = rnd() * H;
-      c.beginPath();
-      c.moveTo(x - 3, y - 3);
-      c.lineTo(x, y + 1);
-      c.lineTo(x + 3, y - 4);
-      c.stroke();
-    }
 
-    // gravel path from the gate down to the far wall, raked lines
-    c.save();
-    rr(c, W / 2 - 46, -20, 92, FRAME.y + 30, 18);
-    c.fillStyle = GRAVEL;
+    // the top stand's terraces
+    TOP_ROWS.forEach((y, k) => {
+      const y0 = k ? TOP_ROWS[k - 1] : 100;
+      c.fillStyle = SEAT[1][k % 2];
+      c.fillRect(0, y0, W, y - y0);
+      c.fillStyle = SHADE;
+      c.fillRect(0, y - 2, W, 2);
+    });
+    // the bottom stand's two tiers
+    BOT_ROWS.forEach((y, k) => {
+      const y0 = k === 0 ? RING.y + RING.h : k === 3 ? BALCONY.y + BALCONY.h : BOT_ROWS[k - 1];
+      c.fillStyle = SEAT[0][k % 2];
+      c.fillRect(0, y0, W, y - y0 + (k === 2 ? 4 : 0));
+      c.fillStyle = SHADE;
+      c.fillRect(0, y - 2, W, 2);
+    });
+    for (const a of AISLES) {
+      stairs(c, a, 100, RING.y - 100);
+      stairs(c, a, RING.y + RING.h, H - RING.y - RING.h);
+    }
+    // the side stands
+    for (const x of [0, W - SIDE_W]) {
+      c.fillStyle = SEAT[1][0];
+      c.fillRect(x, RING.y, SIDE_W, MY - RING.y);
+      c.fillStyle = SEAT[0][0];
+      c.fillRect(x, MY, SIDE_W, RING.y + RING.h - MY);
+    }
+    c.fillStyle = 'rgba(27, 21, 34, 0.16)';
+    c.fillRect(0, RING.y, SIDE_W / 2, RING.h);
+    c.fillRect(W - SIDE_W / 2, RING.y, SIDE_W / 2, RING.h);
+    for (const y of [380, 820])
+      for (const x of [0, W - SIDE_W]) {
+        c.fillStyle = INK;
+        c.fillRect(x, y - 6, SIDE_W, 12);
+        c.fillStyle = CONCRETE;
+        c.fillRect(x, y - 4, SIDE_W, 8);
+      }
+
+    // the ring of boards, then the apron inside it
+    rr(c, RING.x, RING.y, RING.w, RING.h, 7);
+    c.fillStyle = INK;
     c.fill();
-    c.clip();
-    c.strokeStyle = GRAVEL_LINE;
-    c.lineWidth = 1.5;
-    for (let x = W / 2 - 40; x < W / 2 + 46; x += 9) {
-      c.beginPath();
-      c.moveTo(x, -10);
-      c.lineTo(x, FRAME.y + 20);
-      c.stroke();
+    const bx = RING.x + 2;
+    const bw = RING.w - 4;
+    const cw = (bw - 100) / 4;
+    const bh = APR.y - RING.y - 3.25;
+    boardRow(c, bx, RING.y + 2, bh, [['ZOO CUP', 0, cw], ['GO PETS!', 1, cw], ['', 2, 100], ['ROAR!', 1, cw], ['PAWS UP', 0, cw]], 10.5);
+    boardRow(c, bx, APR.y + APR.h + 1.25, bh, [['HOP HOP', 2, cw], ['ZOO CUP', 0, cw], ['', 1, 100], ['GO PETS!', 0, cw], ['BIG BITE', 2, cw]], 10.5);
+    boardColumn(c, RING.x + 2, APR.x - RING.x - 3, APR.y, APR.y + APR.h, 0, 0);
+    boardColumn(c, APR.x + APR.w + 1, APR.x - RING.x - 3, APR.y, APR.y + APR.h, DUGOUT.y0, DUGOUT.y1);
+    rr(c, APR.x, APR.y, APR.w, APR.h, 5);
+    fillStroke(c, APRON, 2.5);
+    c.fillStyle = SHADE; // the boards' shadow on the apron
+    c.fillRect(APR.x + 1.25, APR.y + 1.25, APR.w - 2.5, 4);
+    c.fillRect(APR.x + 1.25, APR.y + 5.25, 3, APR.h - 6.5);
+
+    // the pitch
+    const bands = 14;
+    const band = FH / bands;
+    for (let i = 0; i < bands; i++) {
+      c.fillStyle = i % 2 ? GRASS_B : GRASS_A;
+      c.fillRect(FX, FY + i * band, FW, band + 0.5);
     }
-    c.restore();
-    rr(c, W / 2 - 46, -20, 92, FRAME.y + 30, 18);
-    c.lineWidth = 2.5;
-    c.strokeStyle = COLOR.ink;
-    c.stroke();
-    // stepping stones on the path
-    for (let i = 0; i < 5; i++) rock(c, W / 2 + (i % 2 ? 8 : -8), 20 + i * 30, 14, 8);
-
-    // far garden: kept low and quiet under the HUD
-    blossomTree(c, 28, 100, 62, rnd);
-    blossomTree(c, W - 22, 112, 66, rnd);
-    bush(c, 150, 110, 18, rnd);
-    bush(c, 392, 104, 20, rnd);
-    bush(c, 112, 148, 14, rnd, false);
-    bush(c, 430, 148, 15, rnd, false);
-    rock(c, 186, 56, 12, 7);
-    rock(c, 352, 40, 10, 6);
-    this.lights.push(lantern(c, W / 2 - 74, 160, 44));
-    this.lights.push(lantern(c, W / 2 + 74, 160, 44));
-    torii(c, W / 2, 132, 150, 82);
-
-    // near garden: a pond with koi, lanterns, trees
-    const by = FRAME.y + FRAME.h;
-    c.fillStyle = 'rgba(40, 60, 30, 0.12)';
-    c.fillRect(0, by, W, 74);
-    // a wooden deck the near crowd sits on
-    rr(c, 14, by + 4, W - 28, 64, 12);
-    fillStroke(c, COLOR.wood, 2.5);
-    c.strokeStyle = COLOR.woodDark;
-    c.lineWidth = 1.5;
-    for (let y = by + 18; y < by + 66; y += 14) {
-      c.beginPath();
-      c.moveTo(20, y);
-      c.lineTo(W - 20, y);
-      c.stroke();
+    const rnd = seeded(5);
+    for (let i = 0; i < 700; i++) {
+      c.fillStyle = i % 2 ? 'rgba(255, 255, 255, 0.07)' : 'rgba(30, 90, 40, 0.07)';
+      c.fillRect(FX + 4 + rnd() * (FW - 12), FY + 4 + rnd() * (FH - 8), 4, 1.5);
     }
-    rr(c, 14, by + 4, W - 28, 64, 12);
-    c.lineWidth = 2.5;
-    c.strokeStyle = COLOR.ink;
-    c.stroke();
-
-    ellipse(c, 120, H - 26, 100, 34);
-    fillStroke(c, POND, 3);
     c.save();
-    ellipse(c, 120, H - 26, 100, 34);
-    c.clip();
-    c.fillStyle = POND_DARK;
-    ellipse(c, 130, H + 4, 110, 28);
-    c.fill();
-    c.strokeStyle = POND_LIGHT;
-    c.lineWidth = 2;
-    for (const [x, y] of [[80, H - 40], [150, H - 24]]) {
-      c.beginPath();
-      c.ellipse(x, y, 16, 5, 0, Math.PI * 1.1, Math.PI * 1.9);
-      c.stroke();
-    }
-    c.restore();
-    // koi
-    for (const [x, y, a] of [[96, H - 22, 0.3], [150, H - 38, -2.6]]) {
-      c.save();
-      c.translate(x, y);
-      c.rotate(a);
-      ellipse(c, 0, 0, 9, 4.5);
-      fillStroke(c, KOI, 1.8);
-      poly(c, [-8, 0, -14, -4, -14, 4]);
-      fillStroke(c, KOI, 1.6);
-      c.fillStyle = COLOR.white;
-      circle(c, 2, -1, 2.2);
-      c.fill();
-      c.restore();
-    }
-    // lily pad
     c.beginPath();
-    c.moveTo(60, H - 24);
-    c.arc(60, H - 24, 10, 0.4, Math.PI * 2 - 0.1);
-    c.closePath();
-    fillStroke(c, LEAF, 2);
-    rock(c, 210, H - 44, 16, 10);
-    rock(c, 30, H - 54, 12, 8);
-    this.lights.push(lantern(c, 250, H - 10, 50));
-    bush(c, 330, H - 20, 22, rnd);
-    bush(c, 400, H - 6, 18, rnd, false);
-    blossomTree(c, W - 40, H + 14, 70, rnd);
-
-    // more lanterns along the near deck, for the evening
-    this.lights.push(lantern(c, 384, H - 60, 40));
-    // the frame: stone cap, wooden inner wall, then the field
-    rr(c, FRAME.x + 3, FRAME.y + 6, FRAME.w, FRAME.h, FRAME.r);
-    c.fillStyle = 'rgba(40, 40, 60, 0.25)';
-    c.fill();
-    this.paintFrameRing(c, 0);
-    // wall face: seen on the far side, a little on the sides
-    c.save();
-    rr(c, FIELD.x - 7, FIELD.y - 14, FIELD.w + 14, FIELD.h + 14, FIELD_R + 6);
-    c.fillStyle = COLOR.wood;
-    c.fill();
+    c.rect(FX, FY, FW, FH);
     c.clip();
-    c.strokeStyle = COLOR.woodDark;
-    c.lineWidth = 1.5;
-    for (let x = FIELD.x; x < FIELD.x + FIELD.w; x += 18) {
-      c.beginPath();
-      c.moveTo(x, FIELD.y - 14);
-      c.lineTo(x, FIELD.y);
-      c.stroke();
-    }
-    c.restore();
-    rr(c, FIELD.x - 7, FIELD.y - 14, FIELD.w + 14, FIELD.h + 14, FIELD_R + 6);
-    c.lineWidth = 2.5;
-    c.strokeStyle = COLOR.ink;
-    c.stroke();
-
-    // the floor
-    c.save();
-    rr(c, FIELD.x, FIELD.y, FIELD.w, FIELD.h, FIELD_R);
-    c.fillStyle = GROUND;
-    c.fill();
-    c.clip();
-    for (let i = 0; i < 60; i++) {
-      c.fillStyle = rnd() < 0.6 ? GROUND_SPOT : GROUND_LIGHT;
-      c.globalAlpha = 0.5;
-      ellipse(c, FIELD.x + rnd() * FIELD.w, FIELD.y + rnd() * FIELD.h, 14 + rnd() * 30, 6 + rnd() * 10);
-      c.fill();
-    }
-    c.globalAlpha = 1;
-    // tiny grass ticks, very faint
-    c.strokeStyle = 'rgba(120, 160, 90, 0.22)';
-    c.lineWidth = 1.2;
-    for (let i = 0; i < 70; i++) {
-      const x = FIELD.x + rnd() * FIELD.w;
-      const y = FIELD.y + rnd() * FIELD.h;
-      c.beginPath();
-      c.moveTo(x - 2, y - 2);
-      c.lineTo(x, y + 1);
-      c.lineTo(x + 2, y - 3);
-      c.stroke();
-    }
-    // centre line and crest
-    const cy = FIELD.y + FIELD.h / 2;
-    c.strokeStyle = 'rgba(255, 255, 255, 0.55)';
-    c.lineWidth = 3;
-    c.setLineDash([12, 10]);
-    c.beginPath();
-    c.moveTo(FIELD.x + 18, cy);
-    c.lineTo(FIELD.x + FIELD.w - 18, cy);
-    c.stroke();
-    c.setLineDash([]);
-    crest(c, W / 2, cy, 46);
-    c.fillStyle = 'rgba(255, 170, 200, 0.16)';
-    c.fill();
-    c.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-    c.lineWidth = 3;
-    c.stroke();
-    circle(c, W / 2, cy, 8);
-    c.fillStyle = 'rgba(255, 255, 255, 0.5)';
-    c.fill();
-    // soft shade under the far wall (cached, so a gradient is fine)
-    const g = c.createLinearGradient(0, FIELD.y, 0, FIELD.y + 26);
-    g.addColorStop(0, 'rgba(70, 60, 50, 0.22)');
-    g.addColorStop(1, 'rgba(70, 60, 50, 0)');
+    c.translate(MX, MY);
+    c.scale(1, FH / FW);
+    const g = c.createRadialGradient(0, 0, FW * 0.3, 0, 0, FW * 0.76);
+    g.addColorStop(0, 'rgba(255, 255, 220, 0.07)');
+    g.addColorStop(0.55, 'rgba(20, 70, 40, 0)');
+    g.addColorStop(1, 'rgba(20, 70, 40, 0.2)');
     c.fillStyle = g;
-    c.fillRect(FIELD.x, FIELD.y, FIELD.w, 26);
+    c.fillRect(-FW, -FW, FW * 2, FW * 2);
     c.restore();
-    rr(c, FIELD.x, FIELD.y, FIELD.w, FIELD.h, FIELD_R);
-    c.lineWidth = 2;
-    c.strokeStyle = COLOR.ink;
-    c.stroke();
+    const lines = layer(FW, FH, this.ratio, (lc) => pitchLines(lc, 0, 0, FW, FH, 3));
+    c.globalAlpha = 0.62;
+    c.drawImage(lines, FX, FY, FW, FH);
+    c.globalAlpha = 1;
+
+    // the goals: the far one whole, of the near one only its shadow (the rest is in front of the fighters)
+    const xl = MX - GOAL_W / 2;
+    const xr = MX + GOAL_W / 2;
+    c.fillStyle = 'rgba(27, 21, 34, 0.24)';
+    poly(c, [xl, FY, xl + 5, FY - GOAL_D, xr - 5, FY - GOAL_D, xr, FY]);
+    c.fill();
+    poly(c, [xl, FB, xl + 5, FB + GOAL_D - 2, xr - 5, FB + GOAL_D - 2, xr, FB]);
+    c.fill();
+    goal(c, true);
+    cornerFlag(c, FX + 2, FY + 2, -1);
+    cornerFlag(c, FR - 2, FY + 2, 1);
+
+    // the halfway buildings: dugouts and the tunnel on the right, a TV camera on the left
+    rr(c, FR + 7, MY - 12, 40, 24, 4);
+    fillStroke(c, CONCRETE, 2.4);
+    rr(c, FR + 20, MY - 8, 30, 16, 3);
+    c.fillStyle = ROOF_DARK;
+    c.fill();
+    c.fillStyle = GOLD;
+    c.fillRect(FR + 9.5, MY - 9.5, 4, 19);
+    dugout(c, MY - 70, 1);
+    dugout(c, MY + 14, 0);
+    rr(c, -6, MY - 13, 27, 26, 4);
+    fillStroke(c, CONCRETE, 2.4);
+    circle(c, 6, MY + 5, 4);
+    fillStroke(c, FUR[0], 1.4);
+    rr(c, 5, MY - 9, 11, 9, 2);
+    fillStroke(c, '#5a5574', 1.6);
+    c.fillStyle = INK;
+    c.fillRect(16, MY - 7, 4, 5);
   }
 
-  /** The stone cap round the field; lip > 0 pulls the near edge over the floor. */
-  private paintFrameRing(c: Ctx, lip: number) {
-    c.beginPath();
-    c.roundRect(FRAME.x, FRAME.y, FRAME.w, FRAME.h, FRAME.r);
-    c.roundRect(FIELD.x - 7, FIELD.y - 14, FIELD.w + 14, FIELD.h + 14 - lip, FIELD_R + 6);
-    c.fillStyle = COLOR.stone;
-    c.fill('evenodd');
-    c.save();
-    c.clip('evenodd');
-    // highlight along the top of the cap, shade along its outer foot
-    c.strokeStyle = '#d8d3e0';
-    c.lineWidth = 4;
-    rr(c, FRAME.x + 4, FRAME.y + 4, FRAME.w - 8, FRAME.h - 8, FRAME.r - 4);
-    c.stroke();
-    c.fillStyle = COLOR.stoneDark;
-    c.fillRect(FRAME.x, FRAME.y + FRAME.h - 6, FRAME.w, 6);
-    // stone joints
-    c.strokeStyle = 'rgba(80, 70, 100, 0.45)';
-    c.lineWidth = 1.5;
-    for (let x = FRAME.x + 56; x < FRAME.x + FRAME.w - 40; x += 62) {
-      c.beginPath();
-      c.moveTo(x, FRAME.y);
-      c.lineTo(x, FRAME.y + 12);
-      c.moveTo(x + 20, FRAME.y + FRAME.h - 16);
-      c.lineTo(x + 20, FRAME.y + FRAME.h);
-      c.stroke();
+  /** Over the crowd at the far end: the stand's roof and the two far towers. */
+  private paintTopStrip(c: Ctx) {
+    const edge = 96;
+    for (let x = 0, i = 0; x < W; x += 54, i++) {
+      c.fillStyle = i % 2 ? ROOF_ALT : ROOF;
+      c.fillRect(x, 0, 54, edge);
     }
-    for (let y = FRAME.y + 70; y < FRAME.y + FRAME.h - 40; y += 70) {
-      c.beginPath();
-      c.moveTo(FRAME.x, y);
-      c.lineTo(FRAME.x + 9, y);
-      c.moveTo(FRAME.x + FRAME.w - 9, y + 30);
-      c.lineTo(FRAME.x + FRAME.w, y + 30);
-      c.stroke();
+    c.fillStyle = 'rgba(27, 21, 34, 0.3)';
+    for (let x = 54; x < W; x += 54) c.fillRect(x - 1, 0, 2, edge);
+    c.fillStyle = ROOF_LIGHT;
+    c.fillRect(0, edge - 12, W, 4);
+    c.fillStyle = INK;
+    c.fillRect(0, edge - 3, W, 14);
+    c.fillStyle = CREAM;
+    c.fillRect(0, edge, W, 8);
+    c.fillStyle = COLOR.paperDark;
+    c.fillRect(0, edge + 5, W, 3);
+    c.fillStyle = 'rgba(27, 21, 34, 0.3)'; // the roof's shadow on the back row
+    c.fillRect(0, edge + 11, W, 7);
+    tower(c, TOWERS[0][0], TOWERS[0][1], TOWERS[0][2]);
+    tower(c, TOWERS[1][0], TOWERS[1][1], TOWERS[1][2]);
+  }
+
+  /** Over the crowd at the near end: the balcony wall with its banners and the two near towers. */
+  private paintBotStrip(c: Ctx) {
+    const y = BALCONY.y;
+    const h = BALCONY.h;
+    c.fillStyle = INK;
+    c.fillRect(0, y - 1.5, W, h + 3);
+    c.fillStyle = CONCRETE;
+    c.fillRect(0, y + 1, W, h - 2);
+    c.fillStyle = CONCRETE_DARK;
+    c.fillRect(0, y + h - 5, W, 4);
+    for (const a of AISLES) stairs(c, a, y - 1.5, h + 3);
+    // banners hung over the wall
+    for (const [x0, x1] of [
+      [70, 155],
+      [385, 470],
+    ]) {
+      rr(c, x0, y - 3, x1 - x0, h + 5, 3);
+      fillStroke(c, TEAM[0].main, 2.4);
+      c.fillStyle = '#ffffff';
+      for (let x = x0 + 12; x < x1 - 8; x += 21) c.fillRect(x, y - 1.8, 9, h + 2.6);
     }
-    c.restore();
-    c.lineWidth = 2.5;
-    c.strokeStyle = COLOR.ink;
-    c.beginPath();
-    c.roundRect(FRAME.x, FRAME.y, FRAME.w, FRAME.h, FRAME.r);
-    c.stroke();
-    c.beginPath();
-    c.roundRect(FIELD.x - 7, FIELD.y - 14, FIELD.w + 14, FIELD.h + 14 - lip, FIELD_R + 6);
-    c.stroke();
+    rr(c, 178, y - 4, 184, h + 8, 4);
+    fillStroke(c, CREAM, 2.6);
+    c.fillStyle = TEAM[0].main;
+    c.fillRect(180, y + h - 1, 180, 3.5);
+    word(c, 'GO PETS GO!', MX, y + h / 2 - 1, 16, TEAM[0].dark);
+    tower(c, TOWERS[2][0], TOWERS[2][1], TOWERS[2][2]);
+    tower(c, TOWERS[3][0], TOWERS[3][1], TOWERS[3][2]);
   }
 
-  private paintFront(c: Ctx) {
-    const rnd = seeded(31);
-    // the near edge of the frame, drawn again over the floor's bottom
-    c.save();
-    c.beginPath();
-    c.rect(0, FIELD.y + FIELD.h - 40, W, 200);
-    c.clip();
-    this.paintFrameRing(c, 5);
-    c.restore();
-    // blossom branches over the corners
-    const branch = (x: number, y: number, dx: number, dy: number, s: number) => {
-      c.beginPath();
-      c.moveTo(x, y);
-      c.quadraticCurveTo(x + dx * 0.5, y + dy * 0.2, x + dx, y + dy);
-      c.lineWidth = 7 * s;
-      c.strokeStyle = COLOR.ink;
-      c.stroke();
-      c.lineWidth = 3.5 * s;
-      c.strokeStyle = BARK;
-      c.stroke();
-      const pts: number[][] = [];
-      for (let i = 0; i < 5; i++) {
-        const k = 0.45 + i * 0.14;
-        pts.push([x + dx * k + (rnd() - 0.5) * 14 * s, y + dy * k + (rnd() - 0.5) * 12 * s, (7 + rnd() * 5) * s]);
-      }
-      blob(c, pts, COLOR.sakura, 2.2);
-      c.save();
-      blobPath(c, pts);
-      c.clip();
-      c.fillStyle = BLOSSOM_SHADE;
-      for (const [px, py, r] of pts) {
-        circle(c, px + r * 0.4, py + r * 0.6, r * 0.7);
-        c.fill();
-      }
-      c.restore();
-      for (const [px, py] of pts) {
-        crest(c, px - 1, py - 2, 6 * s);
-        c.fillStyle = COLOR.sakuraLight;
-        c.fill();
-        circle(c, px - 1, py - 2, 1.4 * s);
-        c.fillStyle = COLOR.gold;
-        c.fill();
-      }
-    };
-    branch(-6, FRAME.y + FRAME.h - 64, 84, 34, 1.15);
-    branch(W + 6, FRAME.y + FRAME.h - 50, -86, 24, 1.15);
-  }
-
-  private paintDusk(c: Ctx) {
-    c.fillStyle = DUSK;
+  /** The night veil: dark stands, a floodlit pitch, four soft cones of light. */
+  private paintNight(c: Ctx) {
+    c.fillStyle = 'rgba(14, 12, 46, 0.7)';
     c.fillRect(0, 0, W, H);
-    // a darker rim at the top and bottom (cached)
-    const g = c.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, 'rgba(20, 14, 50, 0.35)');
-    g.addColorStop(0.25, 'rgba(20, 14, 50, 0)');
-    g.addColorStop(0.8, 'rgba(20, 14, 50, 0)');
-    g.addColorStop(1, 'rgba(20, 14, 50, 0.35)');
+    c.globalCompositeOperation = 'destination-out';
+    c.save();
+    c.translate(MX, MY);
+    c.scale(1, FH / FW);
+    const g = c.createRadialGradient(0, 0, FW * 0.1, 0, 0, FW * 0.8);
+    g.addColorStop(0, 'rgba(0, 0, 0, 0.5)');
+    g.addColorStop(0.72, 'rgba(0, 0, 0, 0.36)');
+    g.addColorStop(1, 'rgba(0, 0, 0, 0)');
     c.fillStyle = g;
-    c.fillRect(0, 0, W, H);
-    // lit lantern windows
-    for (const [x, y] of this.lights) {
-      rr(c, x - 3.5, y - 3.5, 7, 7, 1.5);
-      c.fillStyle = LANTERN_GLOW;
+    c.fillRect(-W, -W * 1.2, W * 2, W * 2.4);
+    c.restore();
+    c.globalCompositeOperation = 'source-over';
+    for (const [x, , hy] of TOWERS) {
+      const tx = MX + (x < MX ? -60 : 60);
+      const ty = MY + (hy < MY ? -170 : 170);
+      const len = Math.hypot(tx - x, ty - hy);
+      const nx = -(ty - hy) / len;
+      const ny = (tx - x) / len;
+      const g2 = c.createLinearGradient(x, hy, tx, ty);
+      g2.addColorStop(0, 'rgba(255, 244, 190, 0.3)');
+      g2.addColorStop(1, 'rgba(255, 244, 190, 0)');
+      c.fillStyle = g2;
+      poly(c, [x + nx * 8, hy + ny * 8, tx + nx * 120, ty + ny * 120, tx - nx * 120, ty - ny * 120, x - nx * 8, hy - ny * 8]);
       c.fill();
     }
   }
 
-  private paintStage(c: Ctx) {
-    const rnd = seeded(505);
-    const w = STAGE.w;
-    const h = STAGE.h;
-    const gy = STAGE_GROUND_Y - STAGE.y;
-    const sky = c.createLinearGradient(0, 0, 0, gy);
-    sky.addColorStop(0, '#9fd6ff');
-    sky.addColorStop(1, '#fde3ee');
+  // ---------------------------------------------------------------- painting: the lobby
+
+  private paintStageBack(c: Ctx) {
+    const sky = c.createLinearGradient(0, 0, 0, 70);
+    sky.addColorStop(0, '#7fc6f7');
+    sky.addColorStop(1, '#cdeeff');
     c.fillStyle = sky;
-    c.fillRect(0, 0, w, h);
-    // clouds
-    c.fillStyle = 'rgba(255,255,255,0.75)';
-    for (const [x, y, s] of [[90, 40, 1], [380, 28, 0.8], [250, 62, 0.6]]) {
-      blobPath(c, [[x, y, 14 * s], [x + 16 * s, y - 6 * s, 16 * s], [x + 34 * s, y, 13 * s]]);
+    c.fillRect(0, 0, W, S_BACK_H);
+    c.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    for (const [x, y, s] of [
+      [150, 20, 1],
+      [372, 13, 0.8],
+      [262, 30, 0.6],
+    ]) {
+      c.beginPath();
+      for (const [dx, dy, r] of [
+        [-18, 3, 9],
+        [-5, -2, 13],
+        [11, 1, 10],
+        [22, 5, 7],
+      ]) {
+        c.moveTo(x + (dx + r) * s, y + dy * s);
+        c.arc(x + dx * s, y + dy * s, r * s, 0, Math.PI * 2);
+      }
       c.fill();
     }
-    // far mountain with a snow cap
-    poly(c, [150, gy - 70, 290, 52, 430, gy - 70]);
-    c.fillStyle = '#b9b6e0';
-    c.fill();
-    poly(c, [262, 72, 290, 52, 318, 72, 304, 78, 290, 70, 276, 78]);
-    c.fillStyle = '#f4f2ff';
-    c.fill();
-    // rolling hills, two layers
-    const hills = (base: number, amp: number, col: string, seed: number) => {
-      c.beginPath();
-      c.moveTo(0, h);
-      for (let x = 0; x <= w; x += 10) c.lineTo(x, base - amp * (0.5 + 0.5 * Math.sin(x * 0.012 + seed) * Math.cos(x * 0.007 + seed * 2)));
-      c.lineTo(w, h);
-      c.closePath();
-      fillStroke(c, col, 2.5);
-    };
-    hills(gy - 40, 40, '#a9dc94', 1.3);
-    // a little distant gate and a hedge
-    torii(c, 448, gy - 44, 70, 52, 2.2);
-    hills(gy - 24, 22, LAWN, 4.1);
-    // the ground the pets stand on
-    c.fillStyle = LAWN;
-    c.fillRect(0, gy - 22, w, h - gy + 22);
-    c.fillStyle = GRAVEL;
-    c.fillRect(0, gy - 12, w, 40);
-    c.strokeStyle = GRAVEL_LINE;
-    c.lineWidth = 1.5;
-    for (let y = gy - 4; y < gy + 28; y += 8) {
-      c.beginPath();
-      c.moveTo(0, y);
-      c.lineTo(w, y);
-      c.stroke();
+    // floodlight masts behind the roof
+    for (const x of [62, W - 62]) {
+      c.fillStyle = INK;
+      c.fillRect(x - 5.5, 22, 11, 30);
+      c.fillStyle = STEEL;
+      c.fillRect(x - 3, 22, 6, 30);
+      rr(c, x - 25, 3, 50, 25, 6);
+      fillStroke(c, ROOF_LIGHT, 3);
+      for (let i = 0; i < 4; i++)
+        for (let j = 0; j < 2; j++) {
+          circle(c, x - 15.6 + i * 10.4, 10.6 + j * 9.6, 3.7);
+          fillStroke(c, LAMP, 1.5);
+        }
     }
-    c.strokeStyle = COLOR.ink;
-    c.lineWidth = 2.5;
-    c.beginPath();
-    c.moveTo(0, gy - 22);
-    c.lineTo(w, gy - 22);
-    c.moveTo(0, gy - 12);
-    c.lineTo(w, gy - 12);
-    c.moveTo(0, gy + 28);
-    c.lineTo(w, gy + 28);
+    // the roof, the dark under it, the terraces
+    c.fillStyle = INK;
+    c.fillRect(0, 40, W, 19);
+    c.fillStyle = ROOF;
+    c.fillRect(0, 42.5, W, 8);
+    c.fillStyle = ROOF_LIGHT;
+    c.fillRect(0, 42.5, W, 2.5);
+    c.fillStyle = CREAM;
+    c.fillRect(0, 50.5, W, 6);
+    c.fillStyle = ROOF_DARK;
+    c.fillRect(0, 59, W, S_ROWS[0] - 59 - 14);
+    S_ROWS.forEach((y, k) => {
+      const y0 = k ? S_ROWS[k - 1] : S_ROWS[0] - 14;
+      c.fillStyle = SEAT[0][k % 2];
+      c.fillRect(0, y0, W, y - y0 + 4);
+      c.fillStyle = SHADE;
+      c.fillRect(0, y - 2, W, 2);
+    });
+    stairs(c, 135, 59, S_BACK_H - 59);
+    stairs(c, 405, 59, S_BACK_H - 59);
+    c.fillStyle = 'rgba(27, 21, 34, 0.28)'; // the roof's shadow
+    c.fillRect(0, 59, W, 8);
+    // pennants under the roof edge
+    for (let x = 6, i = 0; x < W; x += 16, i++) {
+      poly(c, [x, 58, x + 12, 58, x + 6, 68]);
+      fillStroke(c, [TEAM[0].main, CREAM, GOLD][i % 3], 1.6);
+    }
+  }
+
+  private paintStageFront(c: Ctx) {
+    // the wall of boards
+    c.fillStyle = INK;
+    c.fillRect(0, S_WALL - 2.5, W, S_GRASS - S_WALL + 4);
+    boardRow(c, -1, S_WALL, S_GRASS - S_WALL - 1, [['ZOO CUP', 0, 110], ['GO PETS!', 2, 106], ['ROAR!', 1, 108], ['PAWS UP', 3, 106], ['HOP HOP', 0, 112]], 15);
+    // the grass
+    perspectiveStripes(c, S_GRASS, STAGE.h);
+    c.fillStyle = SHADE;
+    c.fillRect(0, S_GRASS, W, 6);
+    c.fillStyle = 'rgba(255, 255, 255, 0.7)';
+    c.fillRect(0, S_GRASS + 12, W, 3);
+    c.strokeStyle = 'rgba(255, 255, 255, 0.42)';
+    c.lineWidth = 3.5;
+    ellipse(c, MX, SG + 4, 176, 31);
     c.stroke();
-    c.fillStyle = LAWN_DARK;
-    c.fillRect(0, gy + 29.5, w, h - gy);
-    for (let i = 0; i < 26; i++) {
-      c.strokeStyle = LAWN_LIGHT;
-      c.lineWidth = 1.5;
-      const x = rnd() * w;
-      const y = gy + 34 + rnd() * 10;
-      c.beginPath();
-      c.moveTo(x - 3, y - 3);
-      c.lineTo(x, y + 1);
-      c.lineTo(x + 3, y - 4);
-      c.stroke();
+    ellipse(c, MX, SG + 4, 7, 2.6);
+    c.fillStyle = 'rgba(255, 255, 255, 0.55)';
+    c.fill();
+    c.fillStyle = 'rgba(20, 70, 40, 0.16)';
+    c.fillRect(0, STAGE.h - 7, W, 7);
+
+    // a goal at the right end, seen from the side
+    const a0: P = [472, SG + 14];
+    const a1: P = [472, SG - 62];
+    const b0: P = [494, SG - 12];
+    const b1: P = [494, SG - 84];
+    const cg: P = [534, SG + 14];
+    const dg: P = [552, SG - 12];
+    ellipse(c, 506, SG + 12, 44, 7);
+    c.fillStyle = SHADE;
+    c.fill();
+    bar(c, [b0[0], b0[1], b1[0], b1[1]], 3.5);
+    c.fillStyle = 'rgba(255, 255, 255, 0.2)';
+    poly(c, [a1[0], a1[1], b1[0], b1[1], dg[0], dg[1], cg[0], cg[1]]);
+    c.fill();
+    poly(c, [a1[0], a1[1], cg[0], cg[1], a0[0], a0[1]]);
+    c.fill();
+    c.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+    c.lineWidth = 1.2;
+    netQuad(c, a1, b1, dg, cg, 4, 9);
+    netQuad(c, a1, a1, cg, a0, 8, 7);
+    bar(c, [a1[0], a1[1], cg[0], cg[1], a0[0], a0[1]], 1.6, '#e9e4f0');
+    bar(c, [a0[0], a0[1], a1[0], a1[1], b1[0], b1[1]], 4);
+
+    // a corner flag and a ball at the left end
+    ellipse(c, 36, SG + 14, 9, 3);
+    c.fillStyle = SHADE;
+    c.fill();
+    poly(c, [32, SG - 50, 56, SG - 42, 32, SG - 33]);
+    fillStroke(c, COLOR.vermilion, 2.4);
+    bar(c, [32, SG + 13, 32, SG - 51], 2.4, GOLD);
+    ellipse(c, 70, SG + 31, 11, 3.4);
+    c.fillStyle = SHADE;
+    c.fill();
+    circle(c, 68, SG + 22, 9.5);
+    fillStroke(c, '#ffffff', 2.4);
+    c.fillStyle = INK;
+    poly(c, [68, SG + 17.5, 72.3, SG + 20.6, 70.7, SG + 25.6, 65.3, SG + 25.6, 63.7, SG + 20.6]);
+    c.fill();
+    c.strokeStyle = INK;
+    c.lineWidth = 1.4;
+    c.beginPath();
+    for (const [x1, y1, x2, y2] of [
+      [68, 17.5, 68, 13],
+      [72.3, 20.6, 76.6, 19],
+      [70.7, 25.6, 73.4, 29.6],
+      [65.3, 25.6, 62.6, 29.6],
+      [63.7, 20.6, 59.4, 19],
+    ]) {
+      c.moveTo(x1, SG + y1);
+      c.lineTo(x2, SG + y2);
     }
-    blossomTree(c, 48, gy - 16, 60, rnd);
-    blossomTree(c, w - 30, gy - 14, 52, rnd);
-    bush(c, 128, gy - 24, 16, rnd);
-    bush(c, 390, gy - 22, 14, rnd);
-    lantern(c, 168, gy - 15, 46);
-    lantern(c, 372, gy - 15, 40);
-    // a front bush in each corner frames the strip
-    bush(c, 6, gy + 18, 20, rnd);
-    bush(c, w - 8, gy + 22, 18, rnd);
+    c.stroke();
   }
 
   private paintLobby(c: Ctx) {
-    c.fillStyle = LOBBY_BASE;
+    c.fillStyle = LOBBY_A;
     c.fillRect(0, 0, W, H);
-    // seigaiha waves, very faint
-    const r = 26;
-    c.lineWidth = 1.5;
-    for (let row = 0; row * (r / 2) < H + r; row++) {
-      const y = row * (r / 2);
-      const off = row % 2 ? r : 0;
-      for (let x = -r + off; x < W + r; x += r * 2) {
-        for (let k = 3; k >= 1; k--) {
-          c.beginPath();
-          c.arc(x, y, (r * k) / 3, Math.PI, Math.PI * 2);
-          c.fillStyle = LOBBY_BASE;
-          if (k === 3) c.fill();
-          c.strokeStyle = 'rgba(255, 220, 240, 0.05)';
-          c.stroke();
-        }
-      }
-    }
-    // darker edges (cached)
-    const g = c.createRadialGradient(W / 2, H / 2, H * 0.25, W / 2, H / 2, H * 0.75);
-    g.addColorStop(0, 'rgba(0,0,0,0)');
-    g.addColorStop(1, LOBBY_EDGE);
+    c.fillStyle = LOBBY_B;
+    for (let y = 0; y < H; y += 180) c.fillRect(0, y, W, 90);
+    const lines = layer(W, H, this.ratio, (lc) => pitchLines(lc, 14, 20, W - 28, H - 40, 5));
+    c.globalAlpha = 0.055;
+    c.drawImage(lines, 0, 0, W, H);
+    c.globalAlpha = 1;
+    const g = c.createRadialGradient(MX, H / 2, H * 0.2, MX, H / 2, H * 0.62);
+    g.addColorStop(0, 'rgba(10, 16, 24, 0)');
+    g.addColorStop(1, 'rgba(10, 16, 24, 0.42)');
     c.fillStyle = g;
     c.fillRect(0, 0, W, H);
   }

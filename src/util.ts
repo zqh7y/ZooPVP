@@ -1,4 +1,4 @@
-import { COLOR, FONT } from './theme';
+import { COLOR, FONT, UI } from './theme';
 
 export type Ctx = CanvasRenderingContext2D;
 export interface Rect {
@@ -85,24 +85,65 @@ export function fillStroke(ctx: Ctx, fill: string | CanvasGradient, lw = 2.2, st
   ctx.stroke();
 }
 
-export interface TextOpts {
-  color?: string;
-  outline?: string;
-  align?: CanvasTextAlign;
-  lw?: number;
+export type FontWeight = 600 | 700;
+
+/** A canvas font string in the game's family: 600 for labels, 700 for numbers and titles. */
+export function font(size: number, weight: FontWeight = 600) {
+  return `${weight} ${Math.round(size)}px ${FONT}`;
 }
 
-/** Chunky outlined game text. */
+/** Letter-spacing where the browser's canvas has it (the text is still drawn without). */
+function setTrack(ctx: Ctx, px: number) {
+  (ctx as unknown as { letterSpacing: string }).letterSpacing = `${px.toFixed(2)}px`;
+}
+
+/** The default letter-spacing of a label of this size. */
+export const trackOf = (size: number) => size * 0.03;
+
+/** Width of a line of text as label() would draw it. */
+export function textWidth(ctx: Ctx, s: string, size: number, weight: FontWeight = 600, track = trackOf(size)) {
+  ctx.font = font(size, weight);
+  setTrack(ctx, track);
+  const w = ctx.measureText(s).width - track;
+  setTrack(ctx, 0);
+  return w;
+}
+
+export interface TextOpts {
+  color?: string | CanvasGradient;
+  /** colour of the edge, when the text has one */
+  outline?: string;
+  align?: CanvasTextAlign;
+  /** asks for a dark edge around the glyphs (text on the pitch); it is kept thin whatever the value */
+  lw?: number;
+  /** 600 (labels, the default) or 700 (numbers, titles) */
+  weight?: FontWeight;
+  /** letter-spacing in px; a little by default */
+  track?: number;
+  /** the text sits directly on the pitch: give it the thin dark edge */
+  onPitch?: boolean;
+}
+
+/** Clean interface text. No outline, unless it sits on the pitch (onPitch, or a caller that asks for an edge). */
 export function label(ctx: Ctx, s: string, x: number, y: number, size: number, o: TextOpts = {}) {
-  ctx.font = `${Math.round(size)}px ${FONT}`;
-  ctx.textAlign = o.align ?? 'center';
+  const track = o.track ?? trackOf(size);
+  const align = o.align ?? 'center';
+  ctx.font = font(size, o.weight ?? 600);
+  setTrack(ctx, track);
+  ctx.textAlign = align;
   ctx.textBaseline = 'middle';
-  ctx.lineJoin = 'round';
-  ctx.lineWidth = o.lw ?? Math.max(2.5, size * 0.2);
-  ctx.strokeStyle = o.outline ?? COLOR.ink;
-  ctx.strokeText(s, x, y);
-  ctx.fillStyle = o.color ?? COLOR.white;
-  ctx.fillText(s, x, y);
+  // the spacing after the last letter counts in the advance: take it back so the text stays on its anchor
+  const tx = align === 'center' ? x + track / 2 : align === 'right' || align === 'end' ? x + track : x;
+  const edge = o.onPitch || (o.lw ?? 0) > 0 ? Math.max(2, Math.min(4, size * 0.09)) : 0;
+  if (edge > 0) {
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = edge;
+    ctx.strokeStyle = o.outline ?? UI.edge;
+    ctx.strokeText(s, tx, y);
+  }
+  ctx.fillStyle = o.color ?? UI.text;
+  ctx.fillText(s, tx, y);
+  setTrack(ctx, 0);
 }
 
 /** Small deterministic random generator, so the scenery looks the same every time. */

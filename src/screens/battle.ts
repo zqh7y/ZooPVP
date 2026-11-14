@@ -10,7 +10,7 @@ import { meter, namePlate, pill, ribbon, tugBar } from '../draw/ui';
 import type { App, Screen } from '../screen';
 import { createBattle } from '../sim/battle';
 import type { Battle, SimEvent, SimUnit } from '../sim/types';
-import { COLOR, FIELD, H, S, TEAM, TOPBAR, TYPE, W } from '../theme';
+import { COLOR, FIELD, H, S, TEAM, TOPBAR, TYPE, UI, W } from '../theme';
 import type { Team, WeaponType } from '../types';
 import { clamp, easeOutBack, easeOutCubic, label, rr, type Ctx } from '../util';
 
@@ -26,13 +26,15 @@ const PLATE_ME = { x: S.pad, y: TOPBAR.y, w: PLATE_W, h: TOPBAR.h };
 const PLATE_BOT = { x: W - S.pad - PLATE_W, y: TOPBAR.y, w: PLATE_W, h: TOPBAR.h };
 const TIMER = { x: (W - TIMER_W) / 2, y: TOPBAR.y, w: TIMER_W, h: TOPBAR.h };
 const COUNT_W = 44; // room for each side's fighters-left number beside the bar
-const TUG = { x: S.pad + COUNT_W, y: TOPBAR.y + TOPBAR.h + S.gap, w: W - 2 * (S.pad + COUNT_W), h: 28 };
-const METER = { x: W / 2 - 78, y: TUG.y + TUG.h + S.gap + 2, w: 172, h: 22 };
-const TOKEN = { x: METER.x - 22, y: METER.y + METER.h / 2, size: 36 };
+const TUG = { x: S.pad + COUNT_W, y: TOPBAR.y + TOPBAR.h + S.pad, w: W - 2 * (S.pad + COUNT_W), h: 10 };
+const METER = { x: W / 2 - 78, y: TUG.y + TUG.h + S.pad + 2, w: 172, h: 6 };
+const TOKEN = { x: METER.x - 18, y: METER.y + METER.h / 2, size: 18 };
+/** The scoreboard: one slate band across the top that carries the whole HUD. */
+const HUD_H = METER.y + METER.h + S.pad;
 const STREAK = { x: METER.x + METER.w + 62, y: METER.y + METER.h / 2 };
-const BANNER_W = { short: 360, long: 460 };
+const BANNER_W = { short: 300, long: 400 };
 const HP_BAR = { minW: 14, h: 3, lift: 7 }; // the tiny health bar over a hurt fighter
-const STAR = 24; // a knock-out star on its way to the meter
+const STAR = 18; // a knock-out star on its way to the meter
 const COUNT_SCALE = 2.2; // the 3, 2, 1 is the title size, this much larger
 const MID = { x: W / 2, y: FIELD.y + FIELD.h * 0.42 }; // where the countdown and the banners sit
 
@@ -297,7 +299,7 @@ export function createBattleScreen(app: App): BattleScreen {
         tokenBump = 1;
         sfx.play('meter', 0, { x: TOKEN.x });
       };
-      if (fx.flying < MAX_STARS) fx.flyTo(x, y - u.r, TOKEN.x, TOKEN.y, (c, sx, sy, s) => koStar(c, sx, sy, STAR * s), arrive, { delay: 0.12, life: 0.55 });
+      if (fx.flying < MAX_STARS) fx.flyTo(x, y - u.r, TOKEN.x, TOKEN.y, (c, sx, sy, s) => koStar(c, sx, sy, STAR * s, UI.accent), arrive, { delay: 0.12, life: 0.55 });
       else arrive();
       streak = streakT < STREAK_GAP ? streak + 1 : 1;
       streakT = 0;
@@ -418,9 +420,9 @@ export function createBattleScreen(app: App): BattleScreen {
       rollsPopped++;
       fullT = 0.7;
       sfx.play('rollEarned', 0, { x: METER.x + METER.w / 2 });
-      fx.floatText(METER.x + METER.w / 2, METER.y + METER.h + 26, '+1 ROLL', COLOR.jadeLight, TYPE.h2);
-      fx.ring(TOKEN.x, TOKEN.y, COLOR.jadeLight, 10, 46, 0.4, 2);
-      fx.burst(METER.x + METER.w / 2, METER.y + METER.h / 2, { colors: [COLOR.jadeLight, COLOR.goldLight, COLOR.white], n: 12, speed: 220, size: 7, life: 0.6, gravity: 260, shape: 'star', screen: true });
+      fx.floatText(METER.x + METER.w / 2, METER.y + METER.h + 30, '+1 ROLL', UI.accent, TYPE.h2);
+      fx.ring(TOKEN.x, TOKEN.y, UI.accent, 8, 30, 0.4, 2);
+      fx.burst(METER.x + METER.w / 2, METER.y + METER.h / 2, { colors: [UI.accent, UI.text], n: 6, speed: 180, size: 4, life: 0.45, gravity: 260, screen: true });
     }
     fullT = Math.max(0, fullT - dt);
     tokenBump = Math.max(0, tokenBump - dt * 5);
@@ -469,26 +471,31 @@ export function createBattleScreen(app: App): BattleScreen {
   function drawHud(ctx: Ctx): void {
     const b = battle!;
     const opp = app.match!.opponent;
+    ctx.fillStyle = UI.glass;
+    ctx.fillRect(0, 0, W, HUD_H);
+    ctx.fillStyle = UI.border;
+    ctx.fillRect(0, HUD_H, W, 1);
     namePlate(ctx, PLATE_ME, { name: app.state.name, trophies: app.state.trophies, team: 0, align: 'left' });
     namePlate(ctx, PLATE_BOT, { name: opp.name, trophies: opp.trophies, team: 1, bot: true, align: 'right' });
     const secs = Math.max(0, Math.ceil(FIGHT.timeLimit - Math.max(0, b.time)));
     const blink = overtime && winner === null ? 0.5 + 0.5 * Math.sin(t * 9) : 0;
     pill(ctx, TIMER, { icon: clock, text: `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`, flash: blink });
 
+    // health as a tug of war, with each side's fighters left at its end
     tugBar(ctx, TUG, b.hpShare[0], b.hpShare[1], t);
     const cy = TUG.y + TUG.h / 2;
-    label(ctx, String(b.alive[0]), S.pad + COUNT_W / 2 - 2, cy + 1, TYPE.h2, { color: TEAM[0].light });
-    label(ctx, String(b.alive[1]), W - S.pad - COUNT_W / 2 + 2, cy + 1, TYPE.h2, { color: TEAM[1].light });
+    label(ctx, String(b.alive[0]), S.pad + 2, cy + 1, TYPE.body + 2, { align: 'left', weight: 700 });
+    label(ctx, String(b.alive[1]), W - S.pad - 2, cy + 1, TYPE.body + 2, { align: 'right', weight: 700 });
 
     // the roll meter: knock-outs fill it
     const shown = fullT > 0 ? 1 : meterShown - Math.floor(meterShown + 1e-6);
     meter(ctx, METER, shown, { ticks: 4, full: fullT > 0 });
-    rollToken(ctx, TOKEN.x, TOKEN.y, TOKEN.size * (1 + 0.25 * tokenBump));
+    rollToken(ctx, TOKEN.x, TOKEN.y, TOKEN.size * (1 + 0.2 * tokenBump), fullT > 0 ? UI.accent : undefined);
     if (streak >= 2 && streakT < STREAK_SHOW) {
-      const k = 1 + 0.5 * streakPop;
+      const k = 1 + 0.25 * streakPop;
       ctx.globalAlpha = clamp((STREAK_SHOW - streakT) / 0.3, 0, 1);
-      koStar(ctx, STREAK.x - 34, STREAK.y, STAR * k);
-      label(ctx, `x${streak}`, STREAK.x + 6, STREAK.y + 1, TYPE.h2 * k, { color: COLOR.toast });
+      koStar(ctx, STREAK.x - 30, STREAK.y, STAR * k, UI.accent);
+      label(ctx, `×${streak}`, STREAK.x - 16, STREAK.y + 1, TYPE.body * k, { align: 'left', color: UI.accent, weight: 700 });
       ctx.globalAlpha = 1;
     }
   }
@@ -496,24 +503,24 @@ export function createBattleScreen(app: App): BattleScreen {
   function drawCalls(ctx: Ctx): void {
     const b = battle!;
     if (phase === 'fight' && b.time < 0 && countN > 0) {
-      // 3, 2, 1: each number slams in and fades as the next one comes
+      // 3, 2, 1: each number drops in and fades as the next one comes
       const third = FIGHT.countdown / 3;
       const k = clamp(countT / third, 0, 1);
-      const s = COUNT_SCALE * (1 + 0.7 * (1 - easeOutCubic(Math.min(1, k * 5))));
+      const s = COUNT_SCALE * (1 + 0.25 * (1 - easeOutCubic(Math.min(1, k * 5))));
       ctx.save();
       ctx.translate(MID.x, MID.y);
       ctx.scale(s, s);
       ctx.globalAlpha = clamp(k * 8, 0, 1) * clamp((1 - k) * 4, 0, 1);
-      label(ctx, String(countN), 0, 0, TYPE.title, { color: countN === 1 ? COLOR.toast : COLOR.white });
+      label(ctx, String(countN), 0, 0, TYPE.title, { color: countN === 1 ? UI.accent : UI.text, weight: 700, onPitch: true });
       ctx.restore();
     }
     if (banner) {
+      // a title slab: slides up a little as it fades in, holds still, fades out
       const k = banner.t / banner.dur;
-      const s = banner.t < 0.2 ? easeOutBack(banner.t / 0.2) : k > 0.85 ? 1 - (k - 0.85) / 0.15 : 1 + 0.03 * Math.sin(t * 20);
+      const inK = easeOutCubic(clamp(banner.t / 0.18, 0, 1));
       ctx.save();
-      ctx.translate(MID.x, MID.y);
-      ctx.scale(Math.max(0.01, s), Math.max(0.01, s));
-      ctx.globalAlpha = clamp((1 - k) * 8, 0, 1);
+      ctx.translate(MID.x, MID.y + (1 - inK) * 14);
+      ctx.globalAlpha = inK * clamp((1 - k) * 7, 0, 1);
       ribbon(ctx, 0, 0, banner.text.length > 6 ? BANNER_W.long : BANNER_W.short, banner.text, { color: banner.color, size: TYPE.title });
       ctx.restore();
     }
@@ -541,10 +548,10 @@ export function createBattleScreen(app: App): BattleScreen {
     ctx.restore();
     if (overtime && winner === null) {
       // overtime: the edges of the screen glow red
-      ctx.globalAlpha = 0.1 + 0.06 * Math.sin(t * 6);
-      ctx.strokeStyle = COLOR.vermilion;
-      ctx.lineWidth = 16;
-      rr(ctx, 0, 0, W, H, S.radius.l);
+      ctx.globalAlpha = 0.35 + 0.2 * Math.sin(t * 6);
+      ctx.strokeStyle = UI.danger;
+      ctx.lineWidth = 6;
+      rr(ctx, 0, 0, W, H, 0);
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
