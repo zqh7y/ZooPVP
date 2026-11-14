@@ -13,13 +13,24 @@ export const CLASSES = ['E', 'D', 'C', 'B', 'A', 'S', 'SSS'] as const;
 export const classOf = (level: number) => CLASSES[Math.max(1, Math.min(MAX_LEVEL, level)) - 1];
 export const cls = (level: number) => `${classOf(level)}-class`;
 
-/** A pet piece sends 1, 2, 4 or 8 fighters: fusing two identical pet pieces doubles it. */
-export const MAX_COUNT = 8;
+/** A pet piece sends 1, 2 or 4 fighters: fusing two identical pet pieces doubles it (and its footprint). */
+export const MAX_COUNT = 4;
 
 // ------------------------------------------------------------------ the grid
 
-export const GRID = { cols: 8, rows: 8 } as const;
-export const BENCH_SLOTS = 16;
+export const GRID = { cols: 5, rows: 5 } as const;
+/** The bench under the grid: one row of slots, each holding one piece of any size. */
+export const BENCH_SLOTS = 5;
+
+/**
+ * How many grid cells a piece covers, as w x h: weapons and gear 1 x 1; a pet by its count: x1 = 1 x 1,
+ * x2 = 2 x 1 lying across (1 x 2 when turned), x4 = 2 x 2.
+ */
+export function footprint(p: { type: PieceType; count: number; turned?: boolean }): { w: number; h: number } {
+  if (!isPet(p.type) || p.count <= 1) return { w: 1, h: 1 };
+  if (p.count === 2) return p.turned ? { w: 1, h: 2 } : { w: 2, h: 1 };
+  return { w: 2, h: 2 };
+}
 
 // ------------------------------------------------------------------ pieces
 

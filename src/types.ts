@@ -14,7 +14,8 @@ export type PieceType = PetType | WeaponType | GearType;
 export type PieceKind = 'pet' | 'weapon' | 'gear';
 
 /**
- * One piece the player owns. Every piece is one cell (1x1).
+ * One piece the player owns. Weapons and gear cover one cell; a pet covers 1, 2 or 4 cells by its count (see
+ * footprint() in data.ts), with col / row its top-left cell.
  * - level is its class: 1..7 = E, D, C, B, A, S, SSS.
  * - count is how many fighters a pet piece sends (1, 2, 4 or 8); always 1 for weapons and gear.
  * - on the grid: col/row are its cell and slot is -1. On the bench: slot is its bench slot and col/row are -1.
@@ -27,6 +28,11 @@ export interface Piece {
   col: number;
   row: number;
   slot: number;
+  /**
+   * Only for a pet of count 2 (it covers two cells): false = lying across (2 wide, 1 tall), true = standing up
+   * (1 wide, 2 tall). Ignored for every other piece. See footprint() in data.ts.
+   */
+  turned?: boolean;
 }
 
 /** One group of identical fighters: what a pet piece on the grid becomes, with everything it touches. */
@@ -98,7 +104,8 @@ export interface MatchResult {
 
 /** Everything that is saved between sessions. */
 export interface SaveState {
-  version: 1;
+  /** 2 since the 5x5 grid; an older save is replaced by a fresh start */
+  version: 2;
   name: string;
   trophies: number;
   bestTrophies: number;
