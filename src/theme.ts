@@ -104,7 +104,7 @@ export const UI = {
   accent: '#ffd21f',
   accentDim: '#d9b010', // the accent, pressed
   accentText: '#11151b', // text on the accent
-  ok: '#46c46b',
+  ok: '#e9edf1', // a good state is plain light (one hue only: the gold)
   danger: '#e5484d',
   /** the thin dark edge of text that sits directly on the pitch */
   edge: 'rgba(8, 11, 16, 0.8)',

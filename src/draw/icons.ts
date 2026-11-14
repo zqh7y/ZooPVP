@@ -82,7 +82,7 @@ export function swords(ctx: Ctx, x: number, y: number, size: number, color?: str
 }
 
 export function heart(ctx: Ctx, x: number, y: number, size: number, color?: string) {
-  glyph(ctx, x, y, size, ink(color ?? UI.danger), () => {
+  glyph(ctx, x, y, size, ink(color ?? UI.text), () => {
     ctx.beginPath();
     ctx.moveTo(0, -14);
     ctx.bezierCurveTo(-8, -38, -42, -34, -42, -8);
@@ -172,7 +172,7 @@ export function lock(ctx: Ctx, x: number, y: number, size: number, color?: strin
 }
 
 export function check(ctx: Ctx, x: number, y: number, size: number, color?: string) {
-  glyph(ctx, x, y, size, ink(color ?? UI.ok), () => {
+  glyph(ctx, x, y, size, ink(color ?? UI.text), () => {
     path(ctx, [-30, 2, -9, 23, 31, -21]);
   });
 }

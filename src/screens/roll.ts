@@ -116,7 +116,6 @@ export function createRoll(app: App): Screen {
       fx.fuseBurst(MED.x, MED.y, l.level);
       fx.flash(COLOR.white, 0.25, 0.3);
     } else sfx.play('reveal', l.level);
-    if (l.level >= 6) fx.revealRays(MED.x, MED.y, l.level); // only S and SSS keep a glow
     fx.ring(MED.x, MED.y, UI.tier[l.level - 1], MED.r * 0.8, MED.r * 1.5, 0.45);
     fx.shake(SHAKE[l.level - 1] * (breaking ? 0.6 : 0.45));
     flipAge = 0;
@@ -131,9 +130,10 @@ export function createRoll(app: App): Screen {
     const p = app.inv.add(prize.type, prize.level);
     app.save();
     if (!p) return;
+    // the bench is not on this screen: the piece drops away below it, toward the bench in the lobby
     const to = benchSlotRect(p.slot);
     const card = { type: prize.type, level: prize.level };
-    fx.flyTo(MED.x, MED.y, to.x + CELL / 2, Math.min(to.y + CELL / 2, 1150), (c, x, y, s) => {
+    fx.flyTo(MED.x, MED.y, to.x + CELL / 2, H + 120, (c, x, y, s) => {
       const z = 70 * s;
       drawPiece(c, card, { x: x - z / 2, y: y - z / 2, w: z, h: z }, { t, bare: true });
     });
@@ -181,6 +181,16 @@ export function createRoll(app: App): Screen {
     const charge = isLanded && next ? clamp((tt - (next.at - BREAK + CRACK)) / (BREAK - CRACK), 0, 1) : 0;
     const shakeX = charge > 0 ? Math.sin(t * 70) * 3 * charge : 0;
     const R = MED.r * (0.9 + 0.1 * open) * punch;
+    // a landed top class glows behind its tile: A faintly, S in gold, SSS in white-gold
+    if (isLanded && lv >= 5) {
+      const a = (lv === 5 ? 0.14 : lv === 6 ? 0.3 : 0.36) * clamp(flipAge / 0.3, 0, 1) * (0.85 + 0.15 * Math.sin(t * 2));
+      const g = ctx.createRadialGradient(MED.x, MED.y, MED.r * 0.6, MED.x, MED.y, MED.r * 2.1);
+      const c = lv === 7 ? '255, 243, 196' : '255, 210, 31';
+      g.addColorStop(0, `rgba(${c}, ${a.toFixed(3)})`);
+      g.addColorStop(1, `rgba(${c}, 0)`);
+      ctx.fillStyle = g;
+      ctx.fillRect(MED.x - MED.r * 2.2, MED.y - MED.r * 2.2, MED.r * 4.4, MED.r * 4.4);
+    }
     ctx.save();
     ctx.globalAlpha = open;
     ctx.translate(MED.x + shakeX, MED.y);

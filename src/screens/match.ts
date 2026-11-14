@@ -13,7 +13,7 @@ import { armyPower } from '../data';
 import { circle, clamp, easeOutCubic, label, rr, textWidth, type Ctx, type Rect } from '../util';
 
 // layout
-const PLATE_W = 320;
+const PLATE_W = W - S.pad * 4; // as wide as the army panels, so the screen is one column
 const PLATE_H = 64;
 const OPP_PLATE: Rect = { x: (W - PLATE_W) / 2, y: 150, w: PLATE_W, h: PLATE_H };
 const OPP_ARMY_Y = 236;
@@ -174,10 +174,17 @@ export function createMatch(app: App): Screen {
     ctx.fillRect(VS.x - reach, VS.y - 0.5, reach * 2, 1);
     ctx.translate(VS.x, VS.y);
     ctx.scale(s, s);
-    rr(ctx, -VS.w / 2, -VS.h / 2, VS.w, VS.h, S.radius.m);
+    // a small block lit from the upper left: side face, top face, a highlight along the top edge
+    const D = 5;
+    rr(ctx, -VS.w / 2, -VS.h / 2 + D, VS.w, VS.h - D, S.radius.m);
+    ctx.fillStyle = '#8b949e';
+    ctx.fill();
+    rr(ctx, -VS.w / 2, -VS.h / 2, VS.w, VS.h - D, S.radius.m);
     ctx.fillStyle = UI.text;
     ctx.fill();
-    label(ctx, 'VS', 0, 2, TYPE.h1 + 4, { color: UI.accentText, weight: 700, track: 3 });
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.fillRect(-VS.w / 2 + S.radius.m, -VS.h / 2 + 1, VS.w - S.radius.m * 2, 1);
+    label(ctx, 'VS', 0, -D / 2 + 2, TYPE.h1 + 2, { color: UI.accentText, weight: 700, track: 3 });
     ctx.restore();
   }
 
@@ -223,7 +230,7 @@ export function createMatch(app: App): Screen {
     },
     render(ctx) {
       app.arena.drawDusk(ctx, app.t);
-      veil(ctx, 0.7); // the stadium stays in the dark behind the match-up
+      veil(ctx, 1); // the stadium stays in the dark behind the match-up
       ctx.save();
       ctx.translate(fx.camera.x, fx.camera.y);
       fx.drawUnder(ctx);
@@ -247,7 +254,7 @@ export function createMatch(app: App): Screen {
         if (age > TAP_AFTER) {
           ctx.save();
           ctx.globalAlpha = 0.7 + 0.3 * Math.sin(app.t * 3);
-          label(ctx, 'TAP TO FIGHT', W / 2, TAP_Y, TYPE.small + 1, { color: UI.textDim, track: 2.5 });
+          label(ctx, 'TAP TO FIGHT', W / 2, TAP_Y, TYPE.small + 1, { color: UI.text, track: 2.5, onPitch: true });
           ctx.restore();
         }
       }

@@ -167,7 +167,7 @@ export function createResult(app: App): Screen {
     },
     render(ctx) {
       app.arena.drawDusk(ctx, app.t);
-      veil(ctx, 0.7); // the stadium stays in the dark behind the score sheet
+      veil(ctx, 1); // the stadium stays in the dark behind the score sheet
       ctx.save();
       ctx.translate(fx.camera.x, fx.camera.y);
       fx.drawUnder(ctx);
@@ -212,7 +212,7 @@ export function createResult(app: App): Screen {
           ctx.save();
           ctx.globalAlpha = bk;
           ctx.translate(0, (1 - bk) * 12);
-          button(ctx, CONTINUE, { variant: 'primary', text: 'CONTINUE', pressed, pulse: (t * 0.7) % 1 });
+          button(ctx, CONTINUE, { variant: 'primary', text: 'CONTINUE', pressed, breathe: t });
           ctx.restore();
         }
       }

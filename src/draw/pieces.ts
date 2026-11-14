@@ -1,7 +1,7 @@
 import type { Ctx, Rect } from '../util';
 import type { Piece, PieceType, PetType, WeaponType, GearType } from '../types';
 import { isPet, isWeapon } from '../data';
-import { classBadge, classFx, countBadge, tileFrame } from './ui';
+import { TILE_LIFT, classBadge, classFx, countBadge, tileDepth, tileFrame } from './ui';
 import { petArt } from './pets';
 import { restPose } from './petTypes';
 import type { PetLook } from './petTypes';
@@ -92,14 +92,15 @@ export function pieceIcon(ctx: Ctx, type: PieceType, level: number, cx: number, 
 /** A piece on its class tile: picture, class badge, count badge, and the shine of A-class and better. */
 export function drawPiece(ctx: Ctx, p: Piece | PieceLike, r: Rect, o: PieceOpts) {
   const count = p.count ?? 1;
-  const lift = o.lifted ? 4 : 0;
+  const lift = o.lifted ? TILE_LIFT : 0;
+  const face = r.h - tileDepth(r.h); // the top face; the side face is below it
   tileFrame(ctx, r, p.level, { idle: o.idle, lifted: o.lifted, t: o.t });
   if (p.level >= 5 && !o.idle) classFx(ctx, { x: r.x, y: r.y - lift, w: r.w, h: r.h }, p.level, o.t);
   ctx.save();
   if (o.idle) ctx.globalAlpha *= 0.6;
   const size = r.w * 0.74;
   const cx = r.x + r.w / 2;
-  const cy = r.y + r.h * 0.5 - lift;
+  const cy = r.y + face * 0.52 - lift;
   const pop = o.pop ?? 1;
   if (pop !== 1) {
     ctx.translate(cx, cy);
@@ -114,6 +115,6 @@ export function drawPiece(ctx: Ctx, p: Piece | PieceLike, r: Rect, o: PieceOpts)
   if (o.idle) ctx.globalAlpha *= 0.75;
   // the class letter in the top-left corner, the head count in the bottom-right one, both just inside the border
   classBadge(ctx, p.level, r.x + 4 * k, r.y + 11 * k - lift, 0.8 * k, o.t);
-  if (isPet(p.type) && count > 1) countBadge(ctx, count, r.x + r.w - 14 * k, r.y + r.h - 11 * k - lift, 0.8 * k);
+  if (isPet(p.type) && count > 1) countBadge(ctx, count, r.x + r.w - 14 * k, r.y + face - 10 * k - lift, 0.8 * k);
   ctx.restore();
 }

@@ -1,24 +1,46 @@
-import { H, RAINBOW, S, TEAM, TYPE, UI, W } from '../theme';
+import { CLASS_FX, H, RAINBOW, S, TEAM, TYPE, UI, W } from '../theme';
 import { CLASSES } from '../data';
-import { clamp, font, label, poly, rr, textWidth, type Ctx, type FontWeight, type Rect } from '../util';
+import { clamp, label, poly, rr, textWidth, type Ctx, type FontWeight, type Rect } from '../util';
 import { iconTint, trophy } from './icons';
 
 /*
- * The interface kit: a match-day scoreboard. Flat slate surfaces, thin borders, small radii, one accent.
- * Every screen draws its interface with these, so the look lives here and in theme UI.
+ * The interface kit: a floodlit night match. Slate surfaces, off-white text, one gold. Things that can be
+ * touched are small blocks lit from the upper left (a top face, a darker side face, a contact shadow); the
+ * rest is flat slate with a 1 px top highlight. Every screen draws its interface with these.
  */
 
 /** An icon drawer: centre x, y and a box size. */
 export type IconFn = (ctx: Ctx, x: number, y: number, size: number) => void;
 
-/** Fill the current path, then give it a thin border. */
-function surface(ctx: Ctx, fill: string | CanvasGradient, border?: string | CanvasGradient, lw: number = S.line.thin) {
-  ctx.fillStyle = fill;
-  ctx.fill();
-  if (!border) return;
-  ctx.lineWidth = lw;
-  ctx.strokeStyle = border;
-  ctx.stroke();
+const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+
+/** A rounded-rect path on the half pixel, so a 1 px line along it is crisp. */
+function hair(ctx: Ctx, x: number, y: number, w: number, h: number, rad: number) {
+  rr(ctx, Math.round(x) + 0.5, Math.round(y) + 0.5, Math.round(w) - 1, Math.round(h) - 1, rad);
+}
+
+/** A 1 px horizontal line on the pixel grid. */
+function hline(ctx: Ctx, x: number, y: number, w: number, color: string) {
+  ctx.fillStyle = color;
+  ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), 1);
+}
+
+/** A soft shadow made of a few see-through layers (cheap, no blur filter). spread: how far it softens out. */
+function softShadow(ctx: Ctx, x: number, y: number, w: number, h: number, rad: number, spread: number, alpha: number) {
+  const n = 3;
+  ctx.fillStyle = `rgba(0, 0, 0, ${(alpha / n).toFixed(3)})`;
+  for (let i = 0; i < n; i++) {
+    const g = (spread * (i + 1)) / n;
+    rr(ctx, x - g, y - g * 0.4, w + g * 2, h + g, rad + g);
+    ctx.fill();
+  }
+}
+
+/** Mix two #rrggbb colours. */
+function mix(a: string, b: string, k: number) {
+  const p = (s: string, i: number) => parseInt(s.slice(1 + i * 2, 3 + i * 2), 16);
+  const c = [0, 1, 2].map((i) => Math.round(p(a, i) + (p(b, i) - p(a, i)) * clamp(k, 0, 1)));
+  return `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
 }
 
 // ------------------------------------------------------------------ text
@@ -53,17 +75,64 @@ export function shortNumber(n: number) {
   return f(n / 1e9, 'B');
 }
 
+const ticks = new Map<string, { v: number; at: number }>();
+
+/**
+ * A number that ticks to its new value instead of jumping: give it a stable key (where it is drawn) and the
+ * real value every frame; it returns the value to show. The first time a key is seen it shows the value as is.
+ */
+export function tickTo(key: string, value: number, speed = 9): number {
+  const t = now();
+  const s = ticks.get(key);
+  if (!s || !Number.isFinite(value)) {
+    ticks.set(key, { v: value, at: t });
+    return value;
+  }
+  const dt = clamp(t - s.at, 0, 1 / 30);
+  s.at = t;
+  const d = value - s.v;
+  s.v += d * Math.min(1, dt * speed) + Math.sign(d) * Math.min(Math.abs(d), dt * 6);
+  if (Math.abs(value - s.v) < 0.5) s.v = value;
+  return Math.round(s.v);
+}
+
 // ------------------------------------------------------------------ buttons and pills
 
-/** primary: the screen's one main action, in the accent. Every other variant is neutral; danger is a warning state. */
+/** primary: the screen's one main action, in gold. Every other variant is neutral slate; danger is the light "drop here" state. */
 export type ButtonVariant = 'primary' | 'roll' | 'secondary' | 'quiet' | 'danger';
 const VARIANT = {
-  primary: { fill: UI.accent, press: UI.accentDim, border: '', text: UI.accentText },
-  roll: { fill: UI.surfaceAlt, press: UI.surface, border: UI.borderStrong, text: UI.text },
-  secondary: { fill: UI.surfaceAlt, press: UI.surface, border: UI.border, text: UI.text },
-  quiet: { fill: UI.surface, press: UI.bg, border: UI.border, text: UI.textDim },
-  danger: { fill: UI.danger, press: UI.danger, border: '', text: UI.text },
+  primary: { top: UI.accent, side: '#a8860a', hi: 'rgba(255, 255, 255, 0.5)', border: '', text: UI.accentText },
+  roll: { top: '#242c37', side: '#151a21', hi: 'rgba(255, 255, 255, 0.08)', border: UI.border, text: UI.text },
+  secondary: { top: '#242c37', side: '#151a21', hi: 'rgba(255, 255, 255, 0.08)', border: UI.border, text: UI.text },
+  quiet: { top: '#1a2029', side: '#11151b', hi: 'rgba(255, 255, 255, 0.05)', border: UI.border, text: UI.textDim },
+  danger: { top: '#e9ecef', side: '#8b949e', hi: 'rgba(255, 255, 255, 0.6)', border: '', text: UI.accentText },
 };
+const DISABLED = { top: '#141920', side: '#0b0e12', hi: 'rgba(255, 255, 255, 0.03)', border: UI.border, text: UI.textMute };
+
+/** How deep a button's side face is: the top face travels this far when pressed. */
+export const BUTTON_DEPTH = 4;
+
+const presses = new Map<string, { k: number; v: number; at: number }>();
+
+/** 0 up .. 1 fully down, on a quick spring (about 80 ms down, a small bounce on the way back up). */
+function pressAmount(key: string, down: boolean) {
+  const target = down ? 1 : 0;
+  const t = now();
+  let s = presses.get(key);
+  if (!s) {
+    s = { k: target, v: 0, at: t };
+    presses.set(key, s);
+  }
+  let dt = clamp(t - s.at, 0, 0.05);
+  s.at = t;
+  while (dt > 1e-6) {
+    const h = Math.min(dt, 1 / 240);
+    s.v += (1400 * (target - s.k) - 46 * s.v) * h;
+    s.k += s.v * h;
+    dt -= h;
+  }
+  return clamp(s.k, -0.25, 1);
+}
 
 export interface ButtonOpts {
   variant?: ButtonVariant;
@@ -77,33 +146,68 @@ export interface ButtonOpts {
   badge?: number | string;
   /** 0..1, a ring that tells the player to press this */
   pulse?: number;
+  /** a time in seconds: the button breathes a soft gold glow (the screen's main action, while it waits) */
+  breathe?: number;
 }
 
-/** A flat button: solid fill, thin border, uppercase label. Pressed darkens. Returns the face's centre y. */
+/**
+ * A button as a small block lit from the upper left: a top face, a side face BUTTON_DEPTH px deep and a contact
+ * shadow. Pressed, the top face travels down into the side and springs back on release. Returns the face's
+ * centre y.
+ */
 export function button(ctx: Ctx, r: Rect, o: ButtonOpts = {}) {
-  const v = o.disabled ? { fill: UI.surface, press: UI.surface, border: UI.border, text: UI.textMute } : VARIANT[o.variant ?? 'primary'];
+  const v = o.disabled ? DISABLED : VARIANT[o.variant ?? 'primary'];
   const rad = S.radius.m;
-  const down = !!o.pressed && !o.disabled;
+  const D = BUTTON_DEPTH;
+  const k = pressAmount(`${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.w)},${Math.round(r.h)}`, !!o.pressed && !o.disabled);
+  const travel = D * k;
+  const fh = r.h - D;
+  const fy = r.y + travel;
   if (o.pulse && !o.disabled) {
-    const k = clamp(o.pulse, 0, 1);
-    rr(ctx, r.x - 2 - 5 * k, r.y - 2 - 5 * k, r.w + 4 + 10 * k, r.h + 4 + 10 * k, rad + 2 + 5 * k);
+    const p = clamp(o.pulse, 0, 1);
+    rr(ctx, r.x - 2 - 6 * p, r.y - 2 - 6 * p, r.w + 4 + 12 * p, r.h + 4 + 12 * p, rad + 2 + 6 * p);
+    ctx.save();
     ctx.lineWidth = S.line.ui;
-    ctx.globalAlpha *= 1 - k;
+    ctx.globalAlpha *= 1 - p;
     ctx.strokeStyle = UI.accent;
     ctx.stroke();
-    ctx.globalAlpha /= 1 - k || 1;
+    ctx.restore();
   }
-  rr(ctx, r.x, r.y, r.w, r.h, rad);
-  surface(ctx, down ? v.press : v.fill, v.border || undefined, S.line.ui);
-  const cy = r.y + r.h / 2 + (down ? 1 : 0);
+  // the contact shadow tightens as the block is pressed into the ground
+  softShadow(ctx, r.x, r.y + 3, r.w, r.h, rad, 6 - 3 * clamp(k, 0, 1), 0.45);
+  if (o.breathe !== undefined && !o.disabled) {
+    ctx.save();
+    ctx.shadowColor = `rgba(255, 210, 31, ${(0.22 + 0.16 * Math.sin(o.breathe * 2.2)).toFixed(3)})`;
+    ctx.shadowBlur = 22;
+    rr(ctx, r.x, r.y + 2, r.w, r.h - 2, rad);
+    ctx.fillStyle = v.side;
+    ctx.fill();
+    ctx.restore();
+  }
+  // side face, then the top face on it
+  rr(ctx, r.x, r.y + D, r.w, r.h - D, rad);
+  ctx.fillStyle = v.side;
+  ctx.fill();
+  rr(ctx, r.x, fy, r.w, fh, rad);
+  ctx.fillStyle = v.top;
+  ctx.fill();
+  if (v.border) {
+    hair(ctx, r.x, fy, r.w, fh, rad);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = v.border;
+    ctx.stroke();
+  }
+  // the key light catches the top edge
+  hline(ctx, r.x + rad, fy + 1, r.w - rad * 2, v.hi);
+  const cy = fy + fh / 2;
   const big = r.h >= S.btnH - 8;
-  const size = big ? TYPE.h1 - 4 : r.h >= 44 ? TYPE.body + 3 : TYPE.body - 2;
+  const size = big ? TYPE.h1 - 4 : r.h >= 44 ? TYPE.body + 2 : TYPE.body - 2;
   const weight: FontWeight = big ? 700 : 600;
   const track = size * 0.07;
   const ty = o.sub ? cy - size * 0.24 : cy;
-  const iconSize = Math.min(r.h - 22, size * 0.95);
+  const iconSize = Math.min(fh - 20, size * 0.9);
   const gap = Math.round(size * 0.36);
-  const pad = 14;
+  const pad = 16;
   const text = o.text?.toUpperCase();
   iconTint(v.text);
   if (o.icon && text) {
@@ -123,11 +227,16 @@ export function button(ctx: Ctx, r: Rect, o: ButtonOpts = {}) {
   if (o.badge !== undefined && o.badge !== 0) {
     const s = String(o.badge);
     const bw = Math.max(24, 14 + textWidth(ctx, s, TYPE.small + 1, 700));
-    const bx = r.x + r.w - bw + 6;
-    rr(ctx, bx, r.y - 8, bw, 22, S.radius.s);
-    const onAccent = !o.disabled && (o.variant ?? 'primary') === 'primary';
-    surface(ctx, o.disabled ? UI.borderStrong : onAccent ? UI.text : UI.accent, UI.bg, 2);
-    label(ctx, s, bx + bw / 2, r.y + 4, TYPE.small + 1, { color: UI.accentText, weight: 700 });
+    const bx = Math.round(r.x + r.w - bw + 6);
+    const by = Math.round(fy - 8);
+    const onGold = !o.disabled && (o.variant ?? 'primary') === 'primary';
+    rr(ctx, bx - 2, by - 2, bw + 4, 26, S.radius.s + 2);
+    ctx.fillStyle = UI.bg;
+    ctx.fill();
+    rr(ctx, bx, by, bw, 22, S.radius.s);
+    ctx.fillStyle = o.disabled ? UI.borderStrong : onGold ? UI.text : UI.accent;
+    ctx.fill();
+    label(ctx, s, bx + bw / 2, by + 12, TYPE.small + 1, { color: UI.accentText, weight: 700 });
   }
   return cy;
 }
@@ -135,86 +244,146 @@ export function button(ctx: Ctx, r: Rect, o: ButtonOpts = {}) {
 export interface PillOpts {
   icon?: IconFn;
   text: string;
-  /** 0..1, a flash on the value when it changes */
+  /** 0..1, a gold edge and value when it changes */
   flash?: number;
+  /** numbers tick to a new value (on by default) */
+  tick?: boolean;
+}
+
+/** A flat slate plate with a 1 px top highlight. */
+function plate(ctx: Ctx, r: Rect, fill: string, rad: number = S.radius.m) {
+  rr(ctx, r.x, r.y, r.w, r.h, rad);
+  ctx.fillStyle = fill;
+  ctx.fill();
+  hair(ctx, r.x, r.y, r.w, r.h, rad);
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = UI.border;
+  ctx.stroke();
+  hline(ctx, r.x + rad, r.y + 1, r.w - rad * 2, 'rgba(255, 255, 255, 0.06)');
 }
 
 /**
- * A stat chip: slate plate, a glyph at the left, the value beside it. "POWER 3314" is drawn as a dim caption
- * and a bright number.
+ * A stat chip: a glyph at the left, the value beside it. "POWER 3314" is drawn as a dim caption and a bright
+ * number. A number ticks to its new value and shows in gold while it moves.
  */
 export function pill(ctx: Ctx, r: Rect, o: PillOpts) {
-  rr(ctx, r.x, r.y, r.w, r.h, S.radius.m);
-  surface(ctx, UI.surface, UI.border);
-  const bump = clamp(o.flash ?? 0, 0, 1);
+  plate(ctx, r, UI.surface);
+  const cap = /^(?:([A-Za-z ]+) )?(-?\d+)$/.exec(o.text);
+  let text = o.text;
+  let moving = false;
+  if (cap && o.tick !== false) {
+    const goal = Number(cap[2]);
+    const shown = tickTo(`pill:${Math.round(r.x)},${Math.round(r.y)}:${cap[1] ?? ''}`, goal);
+    moving = shown !== goal;
+    text = cap[1] ? `${cap[1]} ${shown}` : String(shown);
+  }
+  const bump = Math.max(clamp(o.flash ?? 0, 0, 1), moving ? 1 : 0);
   if (bump > 0) {
-    rr(ctx, r.x, r.y, r.w, r.h, S.radius.m);
-    ctx.lineWidth = S.line.ui;
+    hair(ctx, r.x, r.y, r.w, r.h, S.radius.m);
+    ctx.save();
+    ctx.lineWidth = 1;
     ctx.globalAlpha *= bump;
     ctx.strokeStyle = UI.accent;
     ctx.stroke();
-    ctx.globalAlpha /= bump;
+    ctx.restore();
   }
   const cy = r.y + r.h / 2;
-  const pad = Math.min(14, r.h * 0.3);
+  const pad = Math.min(16, r.h * 0.32);
   const size = Math.min(TYPE.body + 3, r.h * 0.5);
   const color = bump > 0.4 ? UI.accent : UI.text;
-  const cap = /^([A-Za-z ]+) ([\d.,]+[KMB]?)$/.exec(o.text);
-  const iconSize = o.icon ? Math.min(r.h - 22, 26) : 0;
+  const parts = /^([A-Za-z ]+) ([\d.,]+[KMB]?)$/.exec(text);
+  const iconSize = o.icon ? Math.min(r.h - 22, 24) : 0;
   let x0 = r.x + pad;
   if (o.icon) {
     o.icon(ctx, x0 + iconSize / 2, cy, iconSize);
-    x0 += iconSize + 9;
+    x0 += iconSize + 10;
   }
   const room = r.x + r.w - pad - x0;
-  if (cap) {
+  if (parts) {
     const cs = TYPE.small;
-    const cw = textWidth(ctx, cap[1].toUpperCase(), cs, 600, 1.5);
-    const vw = textWidth(ctx, cap[2], size, 700);
+    const cw = textWidth(ctx, parts[1].toUpperCase(), cs, 600, 1.5);
+    const vw = textWidth(ctx, parts[2], size, 700);
     const total = cw + 8 + vw;
     const k = Math.min(1, room / total);
     const sx = o.icon ? x0 : r.x + (r.w - total * k) / 2;
-    label(ctx, cap[1].toUpperCase(), sx, cy + 1, cs * k, { align: 'left', color: UI.textDim, track: 1.5 * k });
-    label(ctx, cap[2], sx + (cw + 8) * k, cy + 1, size * k, { align: 'left', color, weight: 700 });
-  } else if (o.icon) fitLabel(ctx, o.text, x0, cy + 1, size, room, { align: 'left', color, weight: 700 });
-  else fitLabel(ctx, o.text, r.x + r.w / 2, cy + 1, size, r.w - pad * 2, { color, weight: 700 });
+    label(ctx, parts[1].toUpperCase(), sx, cy + 1, cs * k, { align: 'left', color: UI.textDim, track: 1.5 * k });
+    label(ctx, parts[2], sx + (cw + 8) * k, cy + 1, size * k, { align: 'left', color, weight: 700 });
+  } else if (o.icon) fitLabel(ctx, text, x0, cy + 1, size, room, { align: 'left', color, weight: 700 });
+  else fitLabel(ctx, text, r.x + r.w / 2, cy + 1, size, r.w - pad * 2, { color, weight: 700 });
 }
 
 // ------------------------------------------------------------------ panels and cells
 
-/** A flat panel with a thin border; 'dark' is see-through slate for panels over the pitch. A title sits on the top edge. */
+/** A flat slate panel with a 1 px top highlight; 'dark' is see-through slate for panels over the pitch. A title sits on the top edge. */
 export function panel(ctx: Ctx, r: Rect, o: { title?: string; tone?: 'paper' | 'dark' } = {}) {
-  rr(ctx, r.x, r.y, r.w, r.h, S.radius.l);
-  surface(ctx, o.tone === 'dark' ? UI.glass : UI.surface, UI.border);
+  plate(ctx, r, o.tone === 'dark' ? UI.glass : UI.surface, S.radius.l);
   if (o.title) {
     const s = o.title.toUpperCase();
     const w = Math.min(r.w - 40, textWidth(ctx, s, TYPE.small, 600, 2) + 28);
-    rr(ctx, r.x + r.w / 2 - w / 2, r.y - 13, w, 26, S.radius.s);
-    surface(ctx, UI.surfaceAlt, UI.border);
+    plate(ctx, { x: Math.round(r.x + r.w / 2 - w / 2), y: Math.round(r.y - 12), w: Math.round(w), h: 24 }, '#1d242e', S.radius.s);
     fitLabel(ctx, s, r.x + r.w / 2, r.y + 1, TYPE.small, w - 16, { color: UI.textDim, track: 2 });
   }
 }
 
-/** The slate inset the grid and the bench sit in. */
+/** The well the grid and the bench sit in: recessed, so its top and left edges fall into shadow and its lower lips catch the light. */
 export function gridFrame(ctx: Ctx, r: Rect) {
-  rr(ctx, r.x - 6, r.y - 6, r.w + 12, r.h + 12, S.radius.l);
-  surface(ctx, UI.surface, UI.border);
+  const m = 6;
+  const x = r.x - m;
+  const y = r.y - m;
+  const w = r.w + m * 2;
+  const h = r.h + m * 2;
+  const rad = S.radius.l;
+  rr(ctx, x, y, w, h, rad);
+  ctx.fillStyle = '#080b0f';
+  ctx.fill();
+  ctx.save();
+  rr(ctx, x, y, w, h, rad);
+  ctx.clip();
+  const top = ctx.createLinearGradient(0, y, 0, y + 14);
+  top.addColorStop(0, 'rgba(0, 0, 0, 0.7)');
+  top.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = top;
+  ctx.fillRect(x, y, w, 14);
+  const left = ctx.createLinearGradient(x, 0, x + 10, 0);
+  left.addColorStop(0, 'rgba(0, 0, 0, 0.55)');
+  left.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = left;
+  ctx.fillRect(x, y, 10, h);
+  ctx.restore();
+  // the lips: dark where the light cannot reach, a faint highlight on the lower and right ones
+  hair(ctx, x, y, w, h, rad);
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+  ctx.stroke();
+  hline(ctx, x + rad, y + h - 1, w - rad * 2, 'rgba(255, 255, 255, 0.09)');
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
+  ctx.fillRect(Math.round(x + w - 1), Math.round(y + rad), 1, Math.round(h - rad * 2));
 }
 
-/** One grid slot. */
+/** One slot in the well: a faint square with a shadowed top edge and a lit lower edge. */
 export function cell(ctx: Ctx, r: Rect, state: 'empty' | 'ok' | 'bad' | 'fuse' = 'empty') {
-  rr(ctx, r.x + 1.5, r.y + 1.5, r.w - 3, r.h - 3, S.radius.s);
-  ctx.fillStyle = UI.bg;
+  const x = Math.round(r.x + 2);
+  const y = Math.round(r.y + 2);
+  const w = Math.round(r.w - 4);
+  const h = Math.round(r.h - 4);
+  rr(ctx, x, y, w, h, S.radius.s);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.028)';
   ctx.fill();
+  hline(ctx, x + 3, y, w - 6, 'rgba(0, 0, 0, 0.45)');
+  hline(ctx, x + 3, y + h - 1, w - 6, 'rgba(255, 255, 255, 0.04)');
   if (state === 'empty') return;
-  const c = state === 'ok' ? UI.ok : state === 'bad' ? UI.danger : UI.accent;
-  ctx.globalAlpha *= 0.2;
+  const c = state === 'ok' ? UI.text : state === 'bad' ? UI.danger : UI.accent;
+  ctx.save();
+  rr(ctx, x, y, w, h, S.radius.s);
+  ctx.globalAlpha *= 0.14;
   ctx.fillStyle = c;
   ctx.fill();
-  ctx.globalAlpha /= 0.2;
-  ctx.lineWidth = S.line.ui;
+  ctx.globalAlpha /= 0.14;
+  hair(ctx, x, y, w, h, S.radius.s);
+  ctx.lineWidth = 1;
   ctx.strokeStyle = c;
   ctx.stroke();
+  ctx.restore();
 }
 
 /** A dim layer over the whole screen behind a panel. */
@@ -228,11 +397,11 @@ export function veil(ctx: Ctx, alpha = 1) {
 
 // ------------------------------------------------------------------ classes
 
-/** Moving rainbow gradient (SSS). */
+/** The slow white-gold shimmer of SSS, as a gradient that drifts along the line x0,y0 -> x1,y1 (the name is historical). */
 export function rainbow(ctx: Ctx, x0: number, y0: number, x1: number, y1: number, t: number) {
   const g = ctx.createLinearGradient(x0, y0, x1, y1);
   const n = RAINBOW.length;
-  const sh = (((t * 0.6) % 1) + 1) % 1;
+  const sh = (((t * 0.25) % 1) + 1) % 1;
   for (let i = 0; i <= 6; i++) {
     const u = i / 6;
     const c = Math.floor(((u + sh) % 1) * n);
@@ -241,77 +410,127 @@ export function rainbow(ctx: Ctx, x0: number, y0: number, x1: number, y1: number
   return g;
 }
 
-/** Text colour for a class (level 1..7), readable on slate; SSS cycles hue slowly. */
+/** Text colour for a class (level 1..7), readable on slate: greys, silver, gold; SSS breathes between white and gold. */
 export function classColor(level: number, t: number) {
   const i = clamp(Math.round(level) - 1, 0, 6);
-  return i === 6 ? `hsl(${(t * 60) % 360}, 85%, 76%)` : UI.tierText[i];
+  return i === 6 ? mix(UI.tierText[6], UI.accent, 0.5 + 0.5 * Math.sin(t * 1.4)) : UI.tierText[i];
 }
 
+/** How deep a tile's side face is, for a tile h px tall. */
+export const tileDepth = (h: number) => clamp(Math.round(h * 0.07), 3, 8);
+/** How far a lifted tile rises. */
+export const TILE_LIFT = 6;
+
+// the side face of a tile: dark slate, warming to dark gold for A and above
+const TILE_SIDE = ['#191f27', '#1a2029', '#1b222b', '#1d242e', '#40351f', '#56420f', '#62542c'];
+
 /**
- * The tile a piece sits on (level 1..7 = E..SSS): the same dark tile for every class, with the class as a
- * thin border. SSS has a rainbow border.
+ * The tile a piece sits on (level 1..7 = E..SSS): a small block lit from the upper left. A top face on
+ * UI.tile, a side face below it, a contact shadow on the ground; the class is the thin line around the top
+ * face. A lifted tile rises: its side grows and its shadow spreads, softens and falls away.
  */
 export function tileFrame(ctx: Ctx, r: Rect, level: number, o: { idle?: boolean; lifted?: boolean; t?: number } = {}) {
   const i = clamp(Math.round(level) - 1, 0, 6);
-  const y = r.y - (o.lifted ? 4 : 0);
+  const rad = S.radius.m;
+  const D = tileDepth(r.h);
+  const L = o.lifted ? TILE_LIFT : 0;
+  const side = D + L * 0.5;
+  const fy = r.y - L;
+  const fh = r.h - D;
   ctx.save();
   if (o.idle) ctx.globalAlpha *= 0.5;
-  rr(ctx, r.x + 1.5, y + 1.5, r.w - 3, r.h - 3, S.radius.m);
-  surface(ctx, o.lifted ? UI.tileHi : UI.tile, i === 6 ? rainbow(ctx, r.x, y, r.x + r.w, y + r.h, (o.t ?? 0) * 0.5) : UI.tier[i], i >= 5 ? 2 : S.line.ui);
+  // the shadow stays on the ground
+  if (o.lifted) softShadow(ctx, r.x + 3, r.y + 6, r.w - 6, r.h - 2, rad, 10, 0.4);
+  else softShadow(ctx, r.x, r.y + 2, r.w, r.h - 1, rad, 2.5, 0.55);
+  // side face
+  rr(ctx, r.x, fy + side, r.w, fh, rad);
+  ctx.fillStyle = TILE_SIDE[i];
+  ctx.fill();
+  // top face
+  rr(ctx, r.x, fy, r.w, fh, rad);
+  ctx.fillStyle = o.lifted ? UI.tileHi : UI.tile;
+  ctx.fill();
+  // the key light: a faint highlight along the top and left edges (gold on A and above)
+  ctx.beginPath();
+  ctx.moveTo(r.x + 0.5, fy + fh - rad);
+  ctx.lineTo(r.x + 0.5, fy + rad);
+  ctx.arcTo(r.x + 0.5, fy + 0.5, r.x + rad, fy + 0.5, rad - 0.5);
+  ctx.lineTo(r.x + r.w - rad, fy + 0.5);
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = i >= 4 ? 'rgba(255, 214, 90, 0.55)' : 'rgba(255, 255, 255, 0.13)';
+  ctx.stroke();
+  // the class line around the top face
+  rr(ctx, r.x + 1, fy + 1, r.w - 2, fh - 2, rad - 1);
+  ctx.lineWidth = i >= 5 ? 2 : i >= 3 ? 1.5 : 1;
+  ctx.strokeStyle = i === 6 ? rainbow(ctx, r.x, fy, r.x + r.w, fy + fh, o.t ?? 0) : UI.tier[i];
+  ctx.globalAlpha *= i <= 1 ? 0.75 : 1;
+  ctx.stroke();
   ctx.restore();
 }
 
-/** What the high classes add over a tile: a slow sheen for A and better, and a restrained glow for S and SSS. */
+/**
+ * What the top classes add over their tile: A a slow faint sheen, S a soft gold glow, SSS a slow white-gold
+ * sheen and a white-gold glow. r is the tile's rect (raised already if the tile is lifted).
+ */
 export function classFx(ctx: Ctx, r: Rect, level: number, t: number) {
   const lv = Math.round(level);
   if (lv < 5) return;
   const rad = S.radius.m;
-  ctx.save();
+  const fh = r.h - tileDepth(r.h);
   if (lv >= 6) {
-    const pulse = 0.5 + 0.5 * Math.sin(t * 2.4);
-    rr(ctx, r.x - 1, r.y - 1, r.w + 2, r.h + 2, rad + 2);
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = lv >= 7 ? rainbow(ctx, r.x, r.y, r.x + r.w, r.y + r.h, t * 0.5) : UI.tier[5];
-    ctx.globalAlpha *= 0.14 + 0.14 * pulse;
+    const pulse = 0.5 + 0.5 * Math.sin(t * 2);
+    ctx.save();
+    rr(ctx, r.x - 1, r.y - 1, r.w + 2, fh + 2, rad + 1);
+    ctx.shadowColor = lv >= 7 ? CLASS_FX.sss : CLASS_FX.s;
+    ctx.shadowBlur = 10 + 4 * pulse;
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = lv >= 7 ? CLASS_FX.sss : CLASS_FX.s;
+    ctx.globalAlpha *= 0.3 + 0.25 * pulse;
     ctx.stroke();
+    ctx.restore();
   }
-  ctx.restore();
-  // the sheen: one soft band crossing the tile now and then
-  const period = lv === 5 ? 4.5 : lv === 6 ? 3.6 : 2.8;
+  // the sheen: one soft band crossing the top face now and then
+  const period = lv === 5 ? 5 : lv === 6 ? 4 : 3.2;
   const u = (t / period) % 1;
-  if (u > 0.4) return;
+  if (u > 0.45) return;
   ctx.save();
-  rr(ctx, r.x + 1.5, r.y + 1.5, r.w - 3, r.h - 3, rad);
+  rr(ctx, r.x + 1, r.y + 1, r.w - 2, fh - 2, rad - 1);
   ctx.clip();
-  const sw = (u / 0.4) * (r.w + r.h + 30) - 15;
-  ctx.globalAlpha *= lv === 5 ? 0.1 : 0.14;
-  ctx.fillStyle = '#ffffff';
-  poly(ctx, [r.x + sw, r.y, r.x + sw + 14, r.y, r.x + sw + 14 - r.h, r.y + r.h, r.x + sw - r.h, r.y + r.h]);
+  const span = r.w + fh + 40;
+  const sx = r.x - 20 + (u / 0.45) * span;
+  const band = ctx.createLinearGradient(sx - 18, 0, sx + 18, 0);
+  const c = lv >= 7 ? '255, 246, 214' : '255, 255, 255';
+  const a = lv === 5 ? 0.1 : lv === 6 ? 0.14 : 0.3;
+  band.addColorStop(0, `rgba(${c}, 0)`);
+  band.addColorStop(0.5, `rgba(${c}, ${a})`);
+  band.addColorStop(1, `rgba(${c}, 0)`);
+  ctx.fillStyle = band;
+  poly(ctx, [sx - 18, r.y, sx + 18, r.y, sx + 18 - fh * 0.6, r.y + fh, sx - 18 - fh * 0.6, r.y + fh]);
   ctx.fill();
   ctx.restore();
 }
 
-/** Class letter on a small dark chip, in the class colour. Left edge at x, centred on y; k scales it. */
+/** Class letter on a small dark chip, in the class tone. Left edge at x, centred on y; k scales it. */
 export function classBadge(ctx: Ctx, level: number, x: number, y: number, k: number, t = 0) {
   const i = clamp(Math.round(level) - 1, 0, 6);
   const letter = CLASSES[i];
-  const h = 17 * k;
-  const w = letter.length > 1 ? 30 * k : 17 * k;
+  const h = 16 * k;
+  const w = letter.length > 1 ? 30 * k : 16 * k;
   rr(ctx, x, y - h / 2, w, h, 3 * k);
-  ctx.fillStyle = UI.bg;
+  ctx.fillStyle = 'rgba(8, 11, 15, 0.82)';
   ctx.fill();
-  const color = i === 6 ? rainbow(ctx, x, y, x + w, y, t * 0.5) : UI.tierText[i];
-  label(ctx, letter, x + w / 2, y + 0.8 * k, 13 * k, { color, weight: 700, track: letter.length > 1 ? 0.6 * k : 0 });
+  const color = i === 6 ? rainbow(ctx, x, y, x + w, y, t) : UI.tierText[i];
+  label(ctx, letter, x + w / 2, y + 0.8 * k, 12.5 * k, { color, weight: 700, track: letter.length > 1 ? 0.6 * k : 0 });
 }
 
-/** "x4" on a small dark chip, centred on x, y. */
+/** "×4" on a small dark chip, centred on x, y. */
 export function countBadge(ctx: Ctx, count: number, x: number, y: number, k = 1) {
   const s = `×${count}`;
-  const size = TYPE.small * k;
+  const size = TYPE.small * 0.93 * k;
   const w = textWidth(ctx, s, size, 700, 0) + 9 * k;
-  const h = 17 * k;
+  const h = 16 * k;
   rr(ctx, x - w / 2, y - h / 2, w, h, 3 * k);
-  ctx.fillStyle = UI.bg;
+  ctx.fillStyle = 'rgba(8, 11, 15, 0.82)';
   ctx.fill();
   label(ctx, s, x, y + 0.8 * k, size, { color: UI.text, weight: 700, track: 0 });
 }
@@ -321,13 +540,12 @@ export function countBadge(ctx: Ctx, count: number, x: number, y: number, k = 1)
 /** The opponent's or your own name plate: a team bar on the outer edge, the name, the trophies. The opponent's always shows a BOT tag. */
 export function namePlate(ctx: Ctx, r: Rect, o: { name: string; trophies: number; team: 0 | 1; bot?: boolean; align?: 'left' | 'right' }) {
   const right = o.align === 'right';
-  rr(ctx, r.x, r.y, r.w, r.h, S.radius.m);
-  surface(ctx, UI.glass, UI.border);
+  plate(ctx, r, UI.glass);
   ctx.save();
   rr(ctx, r.x, r.y, r.w, r.h, S.radius.m);
   ctx.clip();
   ctx.fillStyle = TEAM[o.team].main;
-  ctx.fillRect(right ? r.x + r.w - 4 : r.x, r.y, 4, r.h);
+  ctx.fillRect(Math.round(right ? r.x + r.w - 4 : r.x), r.y, 4, r.h);
   ctx.restore();
   const pad = 16;
   const dir = right ? -1 : 1;
@@ -337,23 +555,69 @@ export function namePlate(ctx: Ctx, r: Rect, o: { name: string; trophies: number
   const mid = r.y + r.h / 2;
   const two = r.h > 44;
   const nameY = two ? mid - 10 : mid;
-  const size = TYPE.body + 2;
-  fitLabel(ctx, o.name, ax, nameY + 1, size, r.w - pad * 2 - (tag ? tag + 8 : 0), { align: al, weight: 700 });
+  fitLabel(ctx, o.name, ax, nameY + 1, TYPE.body + 2, r.w - pad * 2 - (tag ? tag + 8 : 0), { align: al, weight: 700 });
   if (two) {
-    trophy(ctx, ax + dir * 7, mid + 13, 15);
+    trophy(ctx, ax + dir * 7, mid + 13, 14);
     label(ctx, shortNumber(o.trophies), ax + dir * 20, mid + 14, TYPE.small + 1, { align: al, color: UI.textDim });
   }
-  if (o.bot) {
-    // the tag sits on the name's line, at the end away from the name, so it never covers it
-    const bx = right ? r.x + pad - 4 : r.x + r.w - pad - tag + 4;
-    rr(ctx, bx, nameY - 9, tag, 19, S.radius.s);
-    ctx.fillStyle = UI.borderStrong;
-    ctx.fill();
-    label(ctx, 'BOT', bx + tag / 2, nameY + 1.5, TYPE.small - 1, { weight: 700, track: 1.5 });
-  }
+  if (o.bot) botTag(ctx, right ? r.x + pad - 4 : r.x + r.w - pad - tag + 4, nameY, tag);
 }
 
-/** A plain fill bar, 0..1. */
+/** The BOT tag: a small grey chip, left edge at x, centred on y. */
+function botTag(ctx: Ctx, x: number, y: number, w = 36) {
+  rr(ctx, Math.round(x), Math.round(y - 9), w, 19, S.radius.s);
+  ctx.fillStyle = UI.borderStrong;
+  ctx.fill();
+  label(ctx, 'BOT', x + w / 2, y + 1.5, TYPE.small - 1, { weight: 700, track: 1.5 });
+}
+
+export interface ScoreSide {
+  name: string;
+  /** the big number beside the clock (fighters left, a score) */
+  score: number | string;
+  bot?: boolean;
+}
+
+/**
+ * A broadcast score bug: [team bar | NAME | score | clock | score | NAME BOT | team bar], in one slate strip.
+ * home is your side (blue), away the opponent (red). flash 0..1 lights the clock in gold (overtime).
+ */
+export function scoreBug(ctx: Ctx, r: Rect, o: { home: ScoreSide; away: ScoreSide; clock: string; flash?: number }) {
+  const rad = S.radius.m;
+  softShadow(ctx, r.x, r.y + 2, r.w, r.h, rad, 4, 0.35);
+  plate(ctx, r, UI.surface);
+  const clockW = 76;
+  const scoreW = 52;
+  const cx = r.x + r.w / 2;
+  const cy = r.y + r.h / 2;
+  ctx.save();
+  rr(ctx, r.x, r.y, r.w, r.h, rad);
+  ctx.clip();
+  ctx.fillStyle = TEAM[0].main;
+  ctx.fillRect(Math.round(r.x), r.y, 4, r.h);
+  ctx.fillStyle = TEAM[1].main;
+  ctx.fillRect(Math.round(r.x + r.w - 4), r.y, 4, r.h);
+  // the score cells, a shade lighter, and the clock in the middle
+  ctx.fillStyle = '#1f2630';
+  ctx.fillRect(Math.round(cx - clockW / 2 - scoreW), r.y, scoreW, r.h);
+  ctx.fillRect(Math.round(cx + clockW / 2), r.y, scoreW, r.h);
+  ctx.fillStyle = UI.bg;
+  ctx.fillRect(Math.round(cx - clockW / 2), r.y, clockW, r.h);
+  ctx.restore();
+  const f = clamp(o.flash ?? 0, 0, 1);
+  label(ctx, o.clock, cx, cy + 1, TYPE.body + 2, { color: f > 0.4 ? UI.accent : UI.text, weight: 700, track: 1 });
+  const size = TYPE.h2;
+  label(ctx, String(o.home.score), cx - clockW / 2 - scoreW / 2, cy + 1, size, { weight: 700 });
+  label(ctx, String(o.away.score), cx + clockW / 2 + scoreW / 2, cy + 1, size, { weight: 700 });
+  const room = r.w / 2 - clockW / 2 - scoreW - 20;
+  fitLabel(ctx, o.home.name.toUpperCase(), r.x + 14, cy + 1, TYPE.body, room - (o.home.bot ? 42 : 0), { align: 'left', track: 1 });
+  const tag = o.away.bot ? 42 : 0;
+  fitLabel(ctx, o.away.name.toUpperCase(), r.x + r.w - 14, cy + 1, TYPE.body, room - tag, { align: 'right', track: 1 });
+  if (o.away.bot) botTag(ctx, cx + clockW / 2 + scoreW + 8, cy);
+  if (o.home.bot) botTag(ctx, cx - clockW / 2 - scoreW - 44, cy);
+}
+
+/** A plain fill bar, 0..1, with a hairline of light along its top and a slow sheen passing over the fill. */
 export function progressBar(ctx: Ctx, r: Rect, value: number, o: { color?: string; light?: string; back?: string } = {}) {
   const v = clamp(value, 0, 1);
   const rad = Math.min(3, r.h / 2);
@@ -361,10 +625,26 @@ export function progressBar(ctx: Ctx, r: Rect, value: number, o: { color?: strin
   ctx.fillStyle = o.back ?? UI.track;
   ctx.fill();
   if (v <= 0.001) return;
+  const fw = r.w * v;
   ctx.save();
+  rr(ctx, r.x, r.y, r.w, r.h, rad);
   ctx.clip();
-  ctx.fillStyle = o.color ?? UI.ok;
-  ctx.fillRect(r.x, r.y, r.w * v, r.h);
+  ctx.fillStyle = o.color ?? UI.accent;
+  ctx.fillRect(r.x, r.y, fw, r.h);
+  if (r.h >= 4) {
+    ctx.fillStyle = o.light ?? 'rgba(255, 255, 255, 0.4)';
+    ctx.fillRect(r.x, r.y, fw, 1);
+  }
+  const u = (now() / 3.2) % 1;
+  if (u < 0.5) {
+    const sx = r.x - 30 + (u / 0.5) * (fw + 60);
+    const g = ctx.createLinearGradient(sx - 30, 0, sx + 30, 0);
+    g.addColorStop(0, 'rgba(255, 255, 255, 0)');
+    g.addColorStop(0.5, 'rgba(255, 255, 255, 0.45)');
+    g.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(r.x, r.y, fw, r.h);
+  }
   ctx.restore();
 }
 
@@ -380,6 +660,10 @@ export function tugBar(ctx: Ctx, r: Rect, share0: number, share1: number, _t: nu
   ctx.fillRect(r.x, r.y, sx - r.x, r.h);
   ctx.fillStyle = TEAM[1].main;
   ctx.fillRect(sx, r.y, r.x + r.w - sx, r.h);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+  ctx.fillRect(r.x, Math.round(r.y), r.w, 1);
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+  ctx.fillRect(r.x, Math.round(r.y + r.h - 2), r.w, 2);
   ctx.restore();
   ctx.fillStyle = UI.bg;
   ctx.fillRect(sx - 3, r.y - 3, 6, r.h + 6);
@@ -387,7 +671,7 @@ export function tugBar(ctx: Ctx, r: Rect, share0: number, share1: number, _t: nu
   ctx.fillRect(sx - 1, r.y - 3, 2, r.h + 6);
 }
 
-/** A segmented meter (the roll meter). value 0..1; `ticks` equal segments; the accent when full. */
+/** A segmented meter (the roll meter). value 0..1; `ticks` equal segments; gold when full. */
 export function meter(ctx: Ctx, r: Rect, value: number, o: { ticks?: number; color?: string; full?: boolean } = {}) {
   const n = Math.max(1, o.ticks ?? 5);
   const gap = 3;
@@ -412,7 +696,7 @@ export function meter(ctx: Ctx, r: Rect, value: number, o: { ticks?: number; col
 
 /**
  * A title slab (VICTORY, DEFEAT, FIGHT!, +1 ROLL): a flat dark plate with a thin rule under big letters.
- * gold and jade are the accent (a win, a reward); red and indigo stay neutral.
+ * gold and jade are the gold (a win, a reward); red and indigo stay neutral.
  */
 export function ribbon(ctx: Ctx, cx: number, cy: number, w: number, text: string, o: { color?: 'red' | 'gold' | 'indigo' | 'jade'; size?: number } = {}) {
   const tone = o.color ?? 'red';
@@ -426,6 +710,8 @@ export function ribbon(ctx: Ctx, cx: number, cy: number, w: number, text: string
   ctx.fillStyle = UI.glass;
   ctx.fill();
   ctx.clip();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
+  ctx.fillRect(x0, y0, w, 1);
   ctx.fillStyle = hot ? UI.accent : tone === 'red' ? UI.text : UI.textDim;
   ctx.fillRect(x0, y0 + h - 3, w, 3);
   ctx.restore();
@@ -442,12 +728,13 @@ export function toast(ctx: Ctx, text: string, x: number, y: number, age: number)
   ctx.restore();
 }
 
-/** A callout inside rect r with a small arrow toward (pointAt.x, pointAt.y), and a marker bobbing at the target. */
+/** A callout inside rect r with a small arrow toward (pointAt.x, pointAt.y), and a gold marker bobbing at the target. */
 export function hint(ctx: Ctx, r: Rect, text: string, pointAt: { x: number; y: number }, t = 0) {
   const below = pointAt.y > r.y + r.h / 2;
   const dir = below ? 1 : -1;
   const tipX = clamp(pointAt.x, r.x + 24, r.x + r.w - 24);
   const ty = below ? r.y + r.h : r.y;
+  softShadow(ctx, r.x, r.y + 3, r.w, r.h, S.radius.m, 6, 0.45);
   ctx.fillStyle = UI.text;
   rr(ctx, r.x, r.y, r.w, r.h, S.radius.m);
   ctx.fill();
@@ -463,9 +750,9 @@ export function hint(ctx: Ctx, r: Rect, text: string, pointAt: { x: number; y: n
     } else cur = cur ? `${cur} ${w}` : w;
   }
   lines.push(cur);
-  const lh = size + 5;
-  lines.forEach((l, i) => label(ctx, l, r.x + r.w / 2, r.y + r.h / 2 + 1 + (i - (lines.length - 1) / 2) * lh, size, { color: UI.accentText }));
-  // the marker at the target: a small accent arrow, pointing at it from the callout's side
+  const lh = size + 4;
+  lines.forEach((l, i) => fitLabel(ctx, l, r.x + r.w / 2, r.y + r.h / 2 + 1 + (i - (lines.length - 1) / 2) * lh, size, r.w - 24, { color: UI.accentText }));
+  // the marker at the target: a small gold arrow, pointing at it from the callout's side
   const bob = Math.sin(t * 5) * 3;
   const my = pointAt.y - dir * (30 - bob);
   ctx.fillStyle = UI.bg;

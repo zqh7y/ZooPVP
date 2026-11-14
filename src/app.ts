@@ -12,10 +12,8 @@ import { COLOR, H, W } from './theme';
 import { easeInOutCubic, type Ctx } from './util';
 
 const MAX_DT = 0.05;
-const WIPE_OUT = 0.18; // the curtain closes over the old screen
-const WIPE_IN = 0.22; // and opens on the new one
-const WIPE_SLANT = 120; // the curtain's leading edge leans this much
-const WIPE_EDGE = 12;
+const WIPE_OUT = 0.16; // the old screen fades to the page colour
+const WIPE_IN = 0.2; // and the new one fades in
 
 /** The one game: canvas, save, screens, the frame loop and the shared screen transition. */
 export function createApp(canvas: HTMLCanvasElement): App {
@@ -137,36 +135,15 @@ export function createApp(canvas: HTMLCanvasElement): App {
     last = performance.now();
   });
 
+  /** The screen change: a short fade to the page colour and back. */
   function drawWipe(c: Ctx) {
     if (!wipe) return;
     const k = wipe.phase === 'out' ? easeInOutCubic(Math.min(1, wipe.age / WIPE_OUT)) : 1 - easeInOutCubic(Math.min(1, wipe.age / WIPE_IN));
     if (k <= 0) return;
-    // a slanted curtain sweeping in from the right, leaving to the left
-    const span = W + WIPE_SLANT;
-    const edge = wipe.phase === 'out' ? W - span * k : span * (1 - k) - WIPE_SLANT;
     c.save();
-    c.beginPath();
-    if (wipe.phase === 'out') {
-      c.moveTo(edge + WIPE_SLANT, 0);
-      c.lineTo(W + WIPE_SLANT, 0);
-      c.lineTo(W + WIPE_SLANT, H);
-      c.lineTo(edge, H);
-    } else {
-      c.moveTo(-WIPE_SLANT, 0);
-      c.lineTo(edge + WIPE_SLANT, 0);
-      c.lineTo(edge, H);
-      c.lineTo(-WIPE_SLANT, H);
-    }
-    c.closePath();
+    c.globalAlpha = k;
     c.fillStyle = COLOR.page;
-    c.fill();
-    // only the leading edge gets the sakura stripe
-    c.beginPath();
-    c.moveTo(edge + WIPE_SLANT, 0);
-    c.lineTo(edge, H);
-    c.lineWidth = WIPE_EDGE;
-    c.strokeStyle = COLOR.sakura;
-    c.stroke();
+    c.fillRect(0, 0, W, H);
     c.restore();
   }
 

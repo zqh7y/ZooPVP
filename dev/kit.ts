@@ -4,7 +4,7 @@ import { label, type Ctx, type Rect } from '../src/util';
 import * as I from '../src/draw/icons';
 import * as U from '../src/draw/ui';
 
-const H = 1960;
+const H = 2040;
 const r = (x: number, y: number, w: number, h: number): Rect => ({ x, y, w, h });
 const head = (c: Ctx, s: string, y: number) => label(c, s.toUpperCase(), 16, y, TYPE.small, { align: 'left', color: UI.textDim, track: 1.5 });
 const tokenIcon = (c: Ctx, x: number, y: number, z: number) => I.rollToken(c, x, y, z);
@@ -34,6 +34,10 @@ stage({
     U.button(c, r(190, y, 160, S.btnSmallH + 8), { variant: 'roll', text: 'Disabled', disabled: true });
     U.button(c, r(364, y, 160, S.btnSmallH + 8), { variant: 'secondary', text: 'Retry', sub: 'costs 1 roll' });
     y += 76;
+    // pressed (springs on its own clock), and the idle breath of the main action
+    U.button(c, r(16, y, 250, S.btnSmallH), { variant: 'secondary', text: 'Press me', pressed: Math.floor(t * 1.5) % 2 === 0 });
+    U.button(c, r(274, y, 250, S.btnSmallH), { variant: 'primary', text: 'Breathing', breathe: t });
+    y += 72;
 
     head(c, 'panel, grid frame, cells, veil', y);
     y += 30;
@@ -54,7 +58,8 @@ stage({
     y += 84;
     const t1 = r(16, y, 66, 66);
     U.tileFrame(c, t1, 4, { idle: true });
-    U.tileFrame(c, r(96, y, 66, 66), 5, { lifted: true, t });
+    U.tileFrame(c, r(96, y, 66, 66), 6, { lifted: true, t });
+    U.classFx(c, r(96, y - U.TILE_LIFT, 66, 66), 6, t);
     U.countBadge(c, 4, 190, y + 33, 1.2);
     U.classBadge(c, 7, 220, y + 33, 1.4, t);
     for (let lv = 1; lv <= 7; lv++) label(c, 'Aa', 330 + (lv - 1) * 28, y + 33, 20, { color: U.classColor(lv, t) });
@@ -68,6 +73,9 @@ stage({
     y += 90;
     U.namePlate(c, r(16, y, 250, 40), { name: 'Kenji', trophies: 1284, team: 0 });
     U.namePlate(c, r(274, y, 250, 40), { name: 'Hana_bot42', trophies: 1301, team: 1, bot: true, align: 'right' });
+    y += 56;
+    // the broadcast score bug, for the battle HUD
+    U.scoreBug(c, r(12, y, 516, 44), { home: { name: 'Kenji', score: 17 }, away: { name: 'Hana_bot42', score: 18, bot: true }, clock: '0:54', flash: 0 });
     y += 62;
 
     head(c, 'bars: progress, tug, meter', y);

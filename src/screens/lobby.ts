@@ -46,7 +46,18 @@ const PILL = {
 const ROAD_BAR: Rect = { x: S.pad, y: TOPBAR.y + TOPBAR.h + S.gap + 6, w: W - S.pad * 2 - 84, h: 4 };
 const POWER_PILL: Rect = { x: W - S.pad - 150, y: STAGE.y + STAGE.h - 44, w: 150, h: 36 };
 const CARD: Rect = { x: S.pad, y: STAGE.y + 10, w: W - S.pad * 2, h: 104 };
-const HINT_RECT: Rect = { x: 40, y: STAGE.y + 12, w: W - 80, h: 64 };
+const HINT_W = W - 80;
+const HINT_H = 56;
+/** The guide's callout sits close to what it points at: just above the bench, just above the buttons, or at the top. */
+const hintRect = (at: Rect, to?: Rect): Rect => {
+  const x = (W - HINT_W) / 2;
+  const avoid = (r: Rect) => !to || to.y > r.y + r.h + 8 || to.y + to.h < r.y - 8;
+  const overBench = { x, y: GRID_RECT.y + GRID_RECT.h - HINT_H - 24, w: HINT_W, h: HINT_H };
+  const overButtons = { x, y: BENCH_RECT.y + CELL + 4, w: HINT_W, h: HINT_H };
+  if (at.y >= BTN_Y && avoid(overButtons)) return overButtons;
+  if (at.y >= BENCH_RECT.y && avoid(overBench)) return overBench;
+  return { x, y: STAGE.y + 12, w: HINT_W, h: HINT_H };
+};
 const ARMY_CAP = 16;
 const DRAG_LIFT = 1.25; // the lifted piece is drawn this much larger
 const DRAG_UP = 26; // and this far above the finger
@@ -460,7 +471,7 @@ export function createLobby(app: App): Screen {
   function drawButtons(ctx: Ctx) {
     const pulseOn = (step: number) => (tut() === step ? 0.5 + 0.5 * Math.sin(t * 6) : 0);
     btn(ctx, 'roll', { variant: 'roll', text: 'ROLL', icon: rollToken, badge: app.state.rolls > 0 ? app.state.rolls : undefined, disabled: !canRoll(), pulse: pulseOn(4) });
-    btn(ctx, 'battle', { variant: 'primary', text: 'BATTLE', disabled: !canBattle(), pulse: pulseOn(3) });
+    btn(ctx, 'battle', { variant: 'primary', text: 'BATTLE', disabled: !canBattle(), pulse: pulseOn(3), breathe: t });
     btn(ctx, 'auto', { variant: 'secondary', text: 'AUTO', icon: btnIcon(wand) });
     const overTrash = !!drag?.moved && inRect(drag.x, drag.y, BTN.trash);
     btn(ctx, 'trash', { variant: overTrash ? 'danger' : 'quiet', text: 'TRASH', icon: btnIcon(trash), pressed: overTrash });
@@ -504,10 +515,11 @@ export function createLobby(app: App): Screen {
     ctx.strokeStyle = UI.accent;
     ctx.stroke();
     const sc = 0.92 + 0.08 * easeOutCubic(clamp(stepAge / 0.25, 0, 1));
-    ctx.translate(W / 2, HINT_RECT.y + HINT_RECT.h / 2);
+    const hr = hintRect(g.at, g.to);
+    ctx.translate(W / 2, hr.y + hr.h / 2);
     ctx.scale(sc, sc);
-    ctx.translate(-W / 2, -(HINT_RECT.y + HINT_RECT.h / 2));
-    hint(ctx, HINT_RECT, g.text, { x: cx, y: cy }, t);
+    ctx.translate(-W / 2, -(hr.y + hr.h / 2));
+    hint(ctx, hr, g.text, { x: cx, y: cy }, t);
     ctx.restore();
   }
 
@@ -569,13 +581,7 @@ export function createLobby(app: App): Screen {
         drawCard(ctx, drag.piece);
         const d = dropPoint(drag);
         const s = (CELL - 4) * DRAG_LIFT;
-        ctx.save();
-        ctx.globalAlpha = 0.35;
-        ctx.fillStyle = '#000000';
-        ctx.beginPath();
-        ctx.ellipse(d.x, d.y + s / 2 + 10, s * 0.4, 7, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
+        // the lifted tile draws its own shadow on the ground below it
         const wob = 0; // the lifted piece is held still
         ctx.save();
         ctx.translate(d.x, d.y);
