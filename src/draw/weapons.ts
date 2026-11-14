@@ -256,6 +256,7 @@ function shield(ctx: Ctx, k: number, t: number, lw: number) {
   shieldPath(ctx, g);
   fillStroke(ctx, face, lw * 0.9);
   // one shade on the right half
+  ctx.clip();
   ctx.globalAlpha *= 0.14;
   ctx.fillStyle = COLOR.ink;
   ctx.fillRect(0, -0.7, 0.7, 1.4);
@@ -303,10 +304,10 @@ function shield(ctx: Ctx, k: number, t: number, lw: number) {
 // ------------------------------------------------------------------ spear: bamboo pole -> great yari
 
 function spear(ctx: Ctx, k: number, t: number, lw: number) {
-  const w = 0.03 + k * 0.0025; // half the shaft
-  const bl = 0.2 + k * 0.022; // blade length
+  const w = 0.04 + k * 0.003; // half the shaft
+  const bl = 0.25 + k * 0.022; // blade length
   const by = -1 + bl;
-  const bw = 0.07 + k * 0.009;
+  const bw = 0.105 + k * 0.012;
   const tr = trimOf(k, t);
   const shaft = k < 2 ? '#cfd66e' : k === 5 ? '#8c1f33' : k === 6 ? '#f1e9ff' : k === 4 ? '#5a3a2a' : COLOR.wood;
   if (k >= 5) glow(ctx, 0, -0.84, 0.26, 0.3, TIER.metalLight[k], t);
@@ -400,6 +401,6 @@ export function drawWeapon(ctx: Ctx, type: WeaponType, level: number, len: numbe
   if (type === 'knife') knife(ctx, k, t, lw);
   else if (type === 'bat') bat(ctx, k, t, lw);
   else if (type === 'shield') shield(ctx, k, t, lw);
-  else spear(ctx, k, t, lw * 0.8);
+  else spear(ctx, k, t, lw * 0.9);
   ctx.restore();
 }
