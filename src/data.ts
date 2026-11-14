@@ -81,8 +81,8 @@ export interface PetDef {
 }
 
 export const PETS: Record<PetType, PetDef> = {
-  ant: { hp: 36, dmg: 5, cd: 0.6, reach: 3, speed: 96, radius: 8, mass: 1, move: 'scurry' },
-  frog: { hp: 120, dmg: 13, cd: 1.0, reach: 8, speed: 58, radius: 14, mass: 2.6, move: 'hop' },
+  ant: { hp: 54, dmg: 5, cd: 0.6, reach: 3, speed: 96, radius: 8, mass: 1, move: 'scurry' },
+  frog: { hp: 180, dmg: 13, cd: 1.0, reach: 8, speed: 58, radius: 14, mass: 2.6, move: 'hop' },
 };
 
 /** What a pet's class changes: a higher class is bigger, tougher, stronger and a little slower. */
@@ -121,9 +121,9 @@ export interface WeaponDef {
 export const NO_WEAPON: WeaponDef = { dmg: 1, cd: 1, reach: 0, knock: 14, hp: 1, block: 0, stun: 0, splash: 1, pierce: 1 };
 
 export const WEAPONS: Record<WeaponType, WeaponDef> = {
-  knife: { dmg: 0.9, cd: 0.5, reach: 4, knock: 8, hp: 1, block: 0, stun: 0, splash: 1, pierce: 1 },
+  knife: { dmg: 0.95, cd: 0.45, reach: 4, knock: 8, hp: 1, block: 0, stun: 0, splash: 1, pierce: 1 },
   bat: { dmg: 2.6, cd: 1.6, reach: 9, knock: 120, hp: 1, block: 0, stun: 0, splash: 3, pierce: 1 },
-  shield: { dmg: 0.8, cd: 1.2, reach: 4, knock: 50, hp: 1.6, block: 0.4, stun: 0.35, splash: 1, pierce: 1 },
+  shield: { dmg: 0.7, cd: 1.2, reach: 4, knock: 50, hp: 1.35, block: 0.35, stun: 0.18, splash: 1, pierce: 1 },
   spear: { dmg: 1.7, cd: 1.1, reach: 30, knock: 20, hp: 1, block: 0, stun: 0, splash: 1, pierce: 2 },
 };
 
@@ -215,7 +215,7 @@ export const FIGHT = {
   /** seconds of "3, 2, 1" before anyone moves */
   countdown: 1.6,
   /** from this second on every hit grows stronger, so a fight always ends */
-  enrageAt: 30,
+  enrageAt: 36,
   /** + damage per second after enrageAt */
   enrageRamp: 0.12,
   /** the fight is called at this second: the side with more health left (as a share) wins */
