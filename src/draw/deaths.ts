@@ -11,7 +11,7 @@ import { restPose, type PetLook, type PetPose } from './petTypes';
 import { PET_COLORS, petArt } from './pets';
 
 /*
- * The eight ways a fighter goes. No blood and no comic words: each one is a little joke told with shape,
+ * The eight ways a fighter goes. No blood (the comic words are the battle view's): each one is a little joke told with shape,
  * timing, light and sound, with a wind-up, a pay-off frame and a clean end. The dying pet keeps being drawn by
  * petArt.drawPet with a pose driven here; what flies off goes through the shared Fx in the game's one palette
  * (white, gold, the pet's own tones), with a shadow on the grass while it flies.
@@ -23,6 +23,10 @@ import { PET_COLORS, petArt } from './pets';
  * Every knock-out leaves its mark on the pitch for the rest of the fight, painted once into the ground layer
  * (fx.ground): a flat splat in the pet's colours, the pancake a squish leaves, a ring of settled petals, a little
  * pile of stone bits, a skid, a cut in the grass. Small cartoon marks, never gore.
+ *
+ * v5 (docs/v5.md section 4): a knock-out is mostly a LAUNCH, the loser spinning away with a trail of stars (the
+ * 'ko' sound); some sail over the wall into the crowd at the side (onCrowd tells the battle view, which makes those
+ * fans jump). The other seven stay for the blows that earn them (poison, thorns, a stomp, a knife...).
  */
 
 export const DEATH_KINDS: readonly DeathKind[] = ['pop', 'squish', 'launch', 'slice', 'spin', 'deflate', 'shatter', 'petals'];
@@ -80,6 +84,9 @@ const ZIP_LEGS = 7;
 const MANY = 26; // more bodies than this at once: the rest go the quick ways
 const SPECK = 1.2; // a body drawn smaller than this radius (px) is just a speck
 const SMALL = 5; // below this radius a body is drawn at this size and scaled down
+/** the stars a launched body trails, and the share of launches that sail into the crowd at the side */
+const STARS = ['#ffe066', '#ffffff', '#ffd23f'];
+const CROWD_SHARE = 0.35;
 
 /** Picks the death a blow has earned: poison and thorns their own, a special blow its own, else mostly the weapon's. */
 export function chooseDeath(pet: PetType, hit: DeathHit): DeathKind {
@@ -87,8 +94,10 @@ export function chooseDeath(pet: PetType, hit: DeathHit): DeathKind {
   if (hit.cause === 'poison') return fchance(0.65) ? 'deflate' : 'pop';
   if (hit.cause === 'spike') return fchance(0.5) ? 'pop' : 'petals';
   if (hit.blow === 'charge' || hit.blow === 'slam') return 'launch';
-  if (hit.blow === 'stomp' || hit.blow === 'landing') return fchance(0.8) ? 'squish' : 'spin';
-  if (fchance(0.16)) return fpick(own);
+  if (hit.blow === 'stomp' || hit.blow === 'landing') return fchance(0.7) ? 'squish' : 'launch';
+  // v5: a knock-out is mostly a launch, spinning away with stars; the rest are the weapon's or the pet's own
+  if (fchance(0.6)) return 'launch';
+  if (fchance(0.2)) return fpick(own);
   switch (hit.weapon) {
     case 'bat':
       return hit.power >= 0.55 ? 'launch' : 'squish';
@@ -141,6 +150,8 @@ interface Body {
   puffT: number;
   path: number[];
   snap: ReturnType<typeof petArt.snapshot> | null;
+  /** a launch that sails over the wall into the crowd at the side */
+  crowd: boolean;
 }
 
 export class Deaths {
@@ -149,6 +160,8 @@ export class Deaths {
   private queue: Body[] = [];
   private qi = 0;
   private depthOn = false;
+  /** a launched body landed in the crowd at arena (x, y) (beyond a side line): the view makes those fans jump */
+  onCrowd: ((x: number, y: number) => void) | null = null;
 
   constructor(private fx: Fx, private ratio = 1) {}
 
@@ -173,7 +186,7 @@ export class Deaths {
   start(look: PetLook, radius: number, ax: number, ay: number, face: 1 | -1, hit: DeathHit, kind?: DeathKind): DeathKind {
     let k = kind ?? chooseDeath(look.pet, hit);
     if (!kind) {
-      if (this.list.length > MANY) k = fchance(0.5) ? 'petals' : 'pop';
+      if (this.list.length > MANY) k = fchance(0.6) ? 'launch' : 'pop';
       else if (k === 'slice' && this.list.reduce((n, b) => n + (b.kind === 'slice' ? 1 : 0), 0) >= 6) k = fpick(OWN[look.pet] ?? OWN.sprout);
     }
     const x = ax;
@@ -187,19 +200,26 @@ export class Deaths {
     const b: Body = {
       kind: k, look, pose, r, x, y, s, dir: hit.dir, power: clamp(hit.power, 0, 1.5), t: 0, fired: 0,
       ox: 0, oy: 0, scale: 1, flat: false, air: false, shx: x, shy: y, lift: 0, tx: x, ty: y, ts: s, th: 0,
-      a: 0, b: fchance(0.5) ? 1 : -1, c: 0, puffT: 0, path: [], snap: null,
+      a: 0, b: fchance(0.5) ? 1 : -1, c: 0, puffT: 0, path: [], snap: null, crowd: false,
     };
     const fx = this.fx;
     if (k === 'launch') {
       // up and away along the blow, its shadow racing over the grass (and off it, toward the stands)
-      const gx = clamp(ax + Math.cos(hit.dir) * (90 + 70 * b.power), -26, ARENA.w + 26);
-      const gy = clamp(ay + Math.sin(hit.dir) * (60 + 40 * b.power), -24, ARENA.h + 16);
-      b.tx = gx;
-      b.ty = gy;
+      const c = Math.cos(hit.dir);
+      b.crowd = Math.abs(c) > 0.35 && fchance(CROWD_SHARE + 0.2 * (Math.abs(c) - 0.35));
+      if (b.crowd) {
+        // over the wall into the stands at the side it was punched toward: a lower lob that comes down there
+        b.tx = c >= 0 ? ARENA.w + frand(22, 32) : -frand(22, 32);
+        b.ty = clamp(ay + Math.sin(hit.dir) * frand(30, 90), 30, ARENA.h - 30);
+        b.th = 70 + 40 * b.power + r;
+      } else {
+        b.tx = clamp(ax + c * (90 + 70 * b.power), -26, ARENA.w + 26);
+        b.ty = clamp(ay + Math.sin(hit.dir) * (60 + 40 * b.power), -24, ARENA.h + 16);
+        // high enough to read as gone, never far past the stands at the top
+        b.th = Math.min(170 + 60 * b.power + r, b.ty + 120);
+      }
       b.ts = 1;
-      // high enough to read as gone, never far past the stands at the top
-      b.th = Math.min(170 + 60 * b.power + r, gy + 120);
-      b.b = Math.cos(hit.dir) >= 0 ? 1 : -1;
+      b.b = c >= 0 ? 1 : -1;
       fx.streak(x, y - r, Math.atan2(b.ty - b.th - y, b.tx - x), (70 + 40 * b.power) * s, COLOR.white, r * 0.4, 0.22);
       // where it took off: a skid along the blow and a few drops of its colour
       const g = fx.ground.paint();
@@ -236,7 +256,8 @@ export class Deaths {
         side = -side;
       }
     }
-    sfx.play(k, 0, { x: screenX(x), enemy: look.team === 0, delay: SOUND_AT[k] });
+    // a launch is the v5 knock-out: the punchy launch, a slide whistle, a twinkle far away
+    sfx.play(k === 'launch' ? 'ko' : k, 0, { x: screenX(x), enemy: look.team === 0, delay: SOUND_AT[k] });
     this.list.push(b);
     return k;
   }
@@ -377,12 +398,13 @@ export class Deaths {
           const k = Math.min(1, (t - 0.05) / 0.48);
           const e = 1 - (1 - k) ** 2;
           // the shadow runs along the ground; the body rises above it and shrinks into the distance
-          const gx = lerp(x, b.tx, e);
-          const gy = lerp(y, b.ty, e);
-          const h = b.th * e;
+          const gx = lerp(x, b.tx, b.crowd ? k : e);
+          const gy = lerp(y, b.ty, b.crowd ? k : e);
+          // into the crowd: a lob that comes down in the stands; else up and away into the sky
+          const h = b.crowd ? b.th * 4 * k * (1 - k) + r * 0.6 * k : b.th * e;
           b.ox = gx - x;
           b.oy = gy - h - y;
-          b.scale = lerp(1, b.ts / s, e) * lerp(1, 0.1, k ** 1.4);
+          b.scale = b.crowd ? lerp(1, 0.62, k) : lerp(1, b.ts / s, e) * lerp(1, 0.1, k ** 1.4);
           b.air = true;
           b.shx = gx;
           b.shy = gy;
@@ -393,18 +415,29 @@ export class Deaths {
           p.mood = 'scared';
           p.alpha = k >= 1 ? 0 : 1;
           b.puffT -= dt;
-          if (b.puffT <= 0 && k < 0.75) {
-            b.puffT = 0.035;
-            fx.burst(x + b.ox, y + b.oy - r * b.scale, { colors: [COLOR.white], n: 1, speed: 12, size: r * 0.5 * b.scale + 1.5, life: 0.3, gravity: 0, shape: 'puff' });
+          if (b.puffT <= 0 && k < 0.8) {
+            b.puffT = 0.04;
+            const bx = x + b.ox;
+            const by = y + b.oy - r * b.scale;
+            fx.burst(bx, by, { colors: [COLOR.white], n: 1, speed: 12, size: r * 0.45 * b.scale + 1.5, life: 0.28, gravity: 0, shape: 'puff' });
+            // a trail of spinning stars
+            fx.burst(bx, by, { colors: STARS, n: 1, speed: 40, size: r * 0.3 * b.scale + 3, life: 0.42, gravity: 90, shape: 'star', ink: true, scatter: r * 0.5 * b.scale });
           }
         }
         if (t >= 0.6 && !b.fired) {
           b.fired = 1;
           const tx = b.tx;
-          const ty = b.ty - b.th;
-          fx.burst(tx, ty, { colors: [COLOR.white], n: 1, speed: 0, size: 14, life: 0.4, gravity: 0, shape: 'star' });
-          fx.burst(tx, ty, { colors: ['#f1e3bf'], n: 3, speed: 50, size: 3.5, life: 0.35, gravity: 0, shape: 'star' });
-          fx.ring(tx, ty, COLOR.white, 2, 14, 0.3);
+          const ty = b.crowd ? b.ty - r * 0.6 : b.ty - b.th;
+          if (b.crowd) {
+            // a bump in the stands: stars fly up off the fans it landed on
+            fx.burst(tx, ty, { colors: STARS, n: 5, speed: 120, size: 5, life: 0.5, gravity: 260, shape: 'star', ink: true, dir: -Math.PI / 2, spread: 1.1 });
+            fx.ring(tx, ty, COLOR.white, 3, 22, 0.3);
+            this.onCrowd?.(tx, b.ty);
+          } else {
+            fx.burst(tx, ty, { colors: [COLOR.white], n: 1, speed: 0, size: 14, life: 0.4, gravity: 0, shape: 'star' });
+            fx.burst(tx, ty, { colors: ['#ffe066'], n: 3, speed: 50, size: 3.5, life: 0.35, gravity: 0, shape: 'star' });
+            fx.ring(tx, ty, COLOR.white, 2, 14, 0.3);
+          }
         }
         break;
       }

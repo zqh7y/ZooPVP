@@ -1,4 +1,4 @@
-import { B, C, E, PATH, R, RR, accent, aimHand, armsAndWeapon, blush, ch, chiliAt, chunk, clipIn, crownAt, eyes, glovePart, helmetAt, inkC, inner, mouth, paint, part, put, shoeAt, twoH } from './kit';
+import { B, E, PATH, R, RR, accent, aimHand, armsAndWeapon, blush, ch, chiliAt, chunk, clipIn, crownAt, eyes, glovePart, helmetAt, inkC, inner, mouth, paint, part, put, shoeAt, twoH } from './kit';
 // ---------------------------------------------------------------- 6 cacto: a potted cactus with two little boxing arms
 
 const CA = { green: '#80ad6b', rib: '#6a9758', pot: '#c98364', rim: '#d6967a' };
@@ -21,16 +21,6 @@ const CA_POT = part('caP', [-0.85, -0.98, 1.7, 1.15], (g) => {
 const CA_BODY = part('caB', [-0.75, -1.72, 1.5, 1.92], (g) => {
   const col = RR(-0.48, -1.46, 0.96, 1.52, 0.48);
   chunk(g, [[col, CA.green, 0.14]]);
-  clipIn(g, col, () => {
-    g.lineWidth = B.lw * 1.1;
-    g.strokeStyle = C(CA.rib);
-    g.beginPath();
-    g.moveTo(-0.22, -1.3);
-    g.quadraticCurveTo(-0.3, -0.6, -0.24, 0.1);
-    g.moveTo(-0.02, -1.42);
-    g.lineTo(-0.02, -1.2);
-    g.stroke();
-  });
   // a few spines
   g.lineWidth = B.lw * 0.8;
   g.strokeStyle = inkC();

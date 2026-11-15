@@ -5,18 +5,23 @@ import { FOCUS_HOME, fitHeight, screenX, screenY, setFocus, setView, viewScale, 
 import { DEATH_KINDS, DEATH_PAYOFF, Deaths } from '../src/draw/deaths';
 import { Fx } from '../src/draw/fx';
 import type { PetLook } from '../src/draw/petTypes';
-import { enemyArmy } from '../src/logic/waves';
+import { findOpponent } from '../src/logic/match';
+import { newSave } from '../src/logic/save';
 import type { App } from '../src/screen';
 import { BattleView, type WaveSetup } from '../src/screens/battle';
 import { COLOR, H, TYPE, UI, W } from '../src/theme';
 import type { ArmySpec, DeathKind, PetType, SquadSpec, WeaponType } from '../src/types';
-import { easeInOutCubic, label, lerp } from '../src/util';
+import { easeInOutCubic, label, lerp, rr } from '../src/util';
 import { param, paramNum, params, stage } from './harness';
 
 /*
  * The battle view on its own, in the rectangles the main screen gives it.
- *   ?preset=zoo|small|wave  &seed=7       which fight: zoo = all 12 units vs a wave with a boss (an Angler);
- *                                         wave = the real enemy army of ?stage=3&wave=10 against the zoo army
+ *   ?preset=zoo|small|match|big &seed=7   which fight: zoo = all 12 units vs a CHAMPION team led by a crowned boss
+ *                                         (a Snapper), with combos; small = a few low rungs; match = the bot
+ *                                         findOpponent builds for the zoo army (&matches=4: the 5th is a champion);
+ *                                         big = about 60 fighters (with &bench=1, the cost per frame)
+ *   ?until=combo|ko|end  &after=0.3       fast-forward to the first combo call / knock-out / the end clock (&endt=0.4)
+ *   ?until=glob&k=0.5                     ... to a Scorp glob that far through its flight
  *   ?view=wave|prep  &ph=360             the tall WAVE view (default) or the short PREP band (showPrep only), ph tall
  *   ?at=12.5                              fast-forward the fight to that second, then freeze
  *   ?at=999&after=0.3                     ... or to the end, then that much longer
@@ -49,10 +54,11 @@ const ZOO: ArmySpec = {
     sq('pogo', 1), sq('briar', 1), sq('angler', 1, null, 0, 2), sq('sumo', 1), sq('rhino', 1, null, 0, 0, 2), sq('boulder', 1, 'bat', 3, 3),
   ],
 };
-const ZOO_WAVE: ArmySpec = {
+/** a champion team: a crowned Snapper leading a swarm of low rungs and a few hitters */
+const ZOO_CHAMP: ArmySpec = {
   squads: [
-    sq('angler', 1, null, 0, 0, 0, 0, true), sq('sprout', 4), sq('buzzy', 2), sq('ninja', 2), sq('snailor', 2), sq('roo', 2, 'bat', 2), sq('cacto', 1),
-    sq('briar', 1), sq('angler', 1), sq('rhino', 1), sq('sumo', 1),
+    sq('angler', 1, null, 0, 0, 0, 0, true), sq('sprout', 4), sq('sprout', 4), sq('buzzy', 2), sq('ninja', 2), sq('snailor', 1), sq('roo', 2),
+    sq('cacto', 1), sq('briar', 1), sq('sumo', 1),
   ],
 };
 const SMALL: [ArmySpec, ArmySpec] = [
@@ -60,18 +66,45 @@ const SMALL: [ArmySpec, ArmySpec] = [
   { squads: [sq('sprout', 4), sq('ninja', 2), sq('snailor', 1, 'shield', 1)] },
 ];
 
-function armies(): [ArmySpec, ArmySpec] {
+/** about 60 fighters: the stress test (?preset=big&bench=1) */
+const BIG: [ArmySpec, ArmySpec] = [
+  { squads: [sq('sprout', 4), sq('sprout', 4), sq('sprout', 4), sq('buzzy', 4), sq('buzzy', 2), sq('ninja', 4), sq('roo', 2), sq('cacto', 2), sq('briar', 2), sq('sumo', 1), sq('boulder', 1)] },
+  { squads: [sq('sprout', 4), sq('sprout', 4), sq('sprout', 4), sq('buzzy', 4), sq('ninja', 4), sq('snailor', 2), sq('roo', 2), sq('pogo', 2), sq('angler', 2), sq('rhino', 1), sq('boulder', 1)] },
+];
+
+function armies(): [ArmySpec, ArmySpec, string] {
   const p = param('preset', 'zoo');
-  if (p === 'small') return SMALL;
-  if (p === 'wave') return [ZOO, enemyArmy(paramNum('stage', 3), paramNum('wave', 10), paramNum('seed', 7))];
-  return [ZOO, ZOO_WAVE];
+  if (p === 'big') return [...BIG, 'Big Bot'];
+  if (p === 'small') return [...SMALL, 'Peck Squad'];
+  if (p === 'match' || p === 'wave') {
+    const o = findOpponent({ ...newSave(paramNum('seed', 7)), matches: paramNum('matches', 4) }, paramNum('seed', 7), ZOO);
+    return [ZOO, o.army, o.name];
+  }
+  return [ZOO, ZOO_CHAMP, 'King Knockout'];
 }
 
+/** a stand-in for the main screen's cash pill: the KO coins fly to it and bump it */
+const PILL = { x: 14, y: 22, w: 118, h: 40 };
+
 function battlePage() {
-  const [mine, theirs] = armies();
+  const [mine, theirs, name] = armies();
   const app = { arena, ratio: dpr, t: 0 } as unknown as App;
   const view = new BattleView(app);
-  const setup: WaveSetup = { player: mine, enemy: theirs, seed: paramNum('seed', 7), stage: paramNum('stage', 3), wave: paramNum('wave', 10), boss: theirs.squads.some((s) => s.boss) };
+  const setup: WaveSetup = { player: mine, enemy: theirs, seed: paramNum('seed', 7), champion: theirs.squads.some((s) => s.boss), names: ['You', name] };
+  let cash = 0;
+  let bump = 0;
+  view.coinTarget = { x: PILL.x + 22, y: PILL.y + PILL.h / 2 };
+  view.onCoin = () => {
+    cash += 5;
+    bump = 1;
+  };
+  const until = param('until', '');
+  const reached = () =>
+    until === 'combo' ? view.debug.call !== ''
+    : until === 'ko' ? view.debug.kos > 0
+    : until === 'glob' ? view.debug.glob >= paramNum('k', 0.5)
+    : until === 'end' ? view.debug.mode === 'over' || (view.debug.mode === 'end' && view.debug.endT >= paramNum('endt', 0))
+    : false;
   const prepOnly = param('view', 'wave') === 'prep';
   const grow = params.has('grow');
   const at = params.has('at') ? Number(params.get('at')) : null;
@@ -94,6 +127,7 @@ function battlePage() {
     if (grow) size = view.phase() === 'over' ? Math.max(0, size - dt * 2) : Math.min(1, size + dt * 2);
     place();
     view.update(dt);
+    bump = Math.max(0, bump - dt * 5);
   };
   place();
   stage({
@@ -128,18 +162,36 @@ function battlePage() {
       } else if (params.has('intro') && !frozen) {
         for (let i = 0; i < Math.round(paramNum('intro', 0) * 60); i++) tick(1 / 60);
         frozen = true;
+      } else if (until && !frozen) {
+        for (let i = 0; i < 20000 && !reached() && view.phase() !== 'over'; i++) tick(1 / 60);
+        for (let i = 0; i < Math.round(paramNum('after', 0) * 60); i++) tick(1 / 60);
+        frozen = true;
       } else if (at !== null && !frozen) {
         for (let i = 0; i < 20000 && view.time < at && view.phase() !== 'over'; i++) tick(1 / 60);
         for (let i = 0; i < Math.round(paramNum('after', 0) * 60); i++) tick(1 / 60);
         frozen = true;
       } else if (!frozen) tick(dt);
       view.render(ctx);
+      // the stand-in cash pill the coins fly to
+      const s = 1 + 0.12 * bump;
+      ctx.save();
+      ctx.translate(PILL.x + PILL.w / 2, PILL.y + PILL.h / 2);
+      ctx.scale(s, s);
+      rr(ctx, -PILL.w / 2, -PILL.h / 2, PILL.w, PILL.h, PILL.h / 2);
+      ctx.fillStyle = '#2b2440';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(-PILL.w / 2 + 22, 0, 12, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffd84a';
+      ctx.fill();
+      label(ctx, String(cash), 14, 1, TYPE.h3, { color: '#ffffff', weight: 700 });
+      ctx.restore();
       // what the main screen's HUD would read
       const l = view.live;
       const out = view.outcome();
       const y = TOP + WAVE.h + 30;
       label(ctx, `${view.phase().toUpperCase()}   t ${l.time.toFixed(1)} s   kills ${l.kills}   losses ${l.losses}   ${l.mine} v ${l.theirs}`, W / 2, y, TYPE.body, { color: UI.text, weight: 700 });
-      if (out) label(ctx, `${out.won ? 'WON' : 'LOST'} in ${out.time.toFixed(1)} s, survived ${(out.survived * 100).toFixed(0)}%, boss ${out.boss ? 'down' : 'standing'}`, W / 2, y + 28, TYPE.small, { color: UI.textDim });
+      if (out) label(ctx, `${out.won ? 'WON' : out.draw ? 'DRAW' : 'LOST'} in ${out.time.toFixed(1)} s, survived ${(out.survived * 100).toFixed(0)}%, boss ${out.boss ? 'down' : 'standing'}, MVP ${out.mvp ? `${out.mvp.pet} ${out.mvp.kos} KO` : '-'}, crits ${out.crits}`, W / 2, y + 28, TYPE.small, { color: UI.textDim });
       if (report) label(ctx, report, W / 2, y + 54, TYPE.small, { color: COLOR.textDim });
     },
   });

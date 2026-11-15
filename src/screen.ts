@@ -4,10 +4,10 @@ import type { SaveState } from './types';
 import type { Ctx } from './util';
 
 /*
- * How the screens plug into the game. Since v4 there is one main screen (src/screens/lobby.ts, like Bunny Brigade's):
- * the top bar, the arena (it owns the battle view: prep, then the wave fought in a view that grows), the grid, the
- * tray and the cases, with the roll and every panel as overlays on it. The app (src/app.ts) owns the canvas, the
- * saved state and the frame loop.
+ * How the screens plug into the game. There is one main screen (src/screens/lobby.ts): the top bar (cash, LEVEL,
+ * gems), the arena (it owns the battle view: prep with the BATTLE button, then the matched fight in a view that
+ * grows), the grid, the tray and the cases, with the matchmaking moment, the result panel, the roll and every other
+ * panel as overlays on it. The app (src/app.ts) owns the canvas, the saved state and the frame loop.
  */
 
 export type ScreenName = 'main';

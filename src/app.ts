@@ -1,30 +1,35 @@
 import { sfx } from './audio/engine';
 import { Arena } from './draw/arena';
 import { Inventory } from './logic/inventory';
-import { load, replacedOldSave, save, SAVE_KEY } from './logic/save';
+import { load, migratedOldSave, replacedOldSave, save, SAVE_KEY } from './logic/save';
 import type { App, Screen } from './screen';
 import { createLobby } from './screens/lobby';
 import { COLOR, H, W } from './theme';
 
 const MAX_DT = 0.05;
 
-/** true when the stored save was of an older version (the main screen shows FRESH_START_TOAST once). */
-function hadOldSave(): boolean {
+/**
+ * What the stored save was, before load() reads it: 'fresh' when it was too old and is replaced (the main screen shows
+ * FRESH_START_TOAST once), 'migrated' when it was a v4 save carried over (MIGRATED_TOAST once), else null.
+ */
+function oldSave(): 'fresh' | 'migrated' | null {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
-    return !!raw && replacedOldSave(JSON.parse(raw));
+    if (!raw) return null;
+    const data: unknown = JSON.parse(raw);
+    return replacedOldSave(data) ? 'fresh' : migratedOldSave(data) ? 'migrated' : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
 /** The one game: canvas, save, the main screen and the frame loop. */
 export function createApp(canvas: HTMLCanvasElement): App {
   const ctx = canvas.getContext('2d')!;
-  // the page around the canvas takes the game's soft greige, so a wide window never frames it in a dark band
+  // the page around the canvas takes the game's deep base, so a wide window frames it in the same colour
   document.body.style.background = COLOR.page;
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', COLOR.page);
-  const fresh = hadOldSave();
+  const old = oldSave();
   const state = load();
   const inv = new Inventory(state);
   const arena = new Arena();
@@ -47,7 +52,7 @@ export function createApp(canvas: HTMLCanvasElement): App {
     },
   };
 
-  const screen: Screen = createLobby(app, { freshStart: fresh });
+  const screen: Screen = createLobby(app, { freshStart: old === 'fresh', migrated: old === 'migrated' });
 
   function resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -109,6 +114,15 @@ export function createApp(canvas: HTMLCanvasElement): App {
     time += dt;
     arena.update(dt);
     screen.update(dt);
+    // the play-check script can run the game faster (window.__speed = 4): whole extra steps, nothing skipped
+    if (import.meta.env.DEV) {
+      const extra = Math.max(0, Math.min(15, Math.floor(Number((window as { __speed?: number }).__speed ?? 1)) - 1));
+      for (let i = 0; i < extra && dt > 0; i++) {
+        time += dt;
+        arena.update(dt);
+        screen.update(dt);
+      }
+    }
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     ctx.fillStyle = COLOR.page;
     ctx.fillRect(0, 0, W, H);

@@ -228,7 +228,7 @@ export function bars(ctx: Ctx, x: number, y: number, size: number, color?: strin
   });
 }
 
-/** A filled star: a stage-clear star. */
+/** A filled star: the LEVEL badge, a reward. */
 export function star(ctx: Ctx, x: number, y: number, size: number, color?: string) {
   glyph(ctx, x, y, size, ink(color ?? UI.reward), () => {
     starPath(ctx, 0, 4, 44, 20, 5);
@@ -236,7 +236,7 @@ export function star(ctx: Ctx, x: number, y: number, size: number, color?: strin
   });
 }
 
-/** Two arrows chasing each other round: AUTO (the waves start by themselves). */
+/** Two arrows chasing each other round: AUTO (the next match starts by itself). */
 export function cycle(ctx: Ctx, x: number, y: number, size: number, color?: string) {
   glyph(ctx, x, y, size, ink(color), () => {
     for (const s of [0, Math.PI]) {
@@ -255,7 +255,7 @@ export function cycle(ctx: Ctx, x: number, y: number, size: number, color?: stri
   });
 }
 
-/** Crossed swords inside nothing: START WAVE's glyph. */
+/** Crossed swords inside nothing: BATTLE's glyph. */
 export function fight(ctx: Ctx, x: number, y: number, size: number, color?: string) {
   glyph(ctx, x, y, size, ink(color), () => {
     for (const s of [-1, 1]) {

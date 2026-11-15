@@ -1,3 +1,4 @@
+import '@fontsource/barlow-condensed/latin-800.css';
 import { fchance, frand } from '../rng';
 import { CLASS_FX, COLOR, FONT, H, RAINBOW, TEAM, TIER, TYPE, UI, W } from '../theme';
 import type { Team } from '../types';
@@ -148,8 +149,10 @@ export interface StickerStyle {
   shadow?: number;
 }
 
-/** the chunky letters of the stickers: the game's family at its heaviest */
-export const STICKER_FONT = `"Arial Black", ${FONT}`;
+/** the chunky letters of the stickers: the game's family at its heaviest (ExtraBold, loaded here) */
+export const STICKER_FONT = FONT;
+export const STICKER_WEIGHT = 800;
+let stickerFontAsked = false;
 const STICKER_INK = '#1d1a2b';
 /** how many words and numbers can pop at once (the oldest number gives way) */
 const POPS = 48;
@@ -482,8 +485,8 @@ export class Fx {
     p.style = o.crit ? NUMBER_STYLE.crit : (o.style ?? NUMBER_STYLE.mine);
     p.size = numberSize(value, !!o.crit, o.size);
     p.rot = o.crit ? frand(-0.12, 0.12) : 0;
-    p.rise = o.crit ? 34 : 26;
-    p.drift = frand(-10, 10);
+    p.rise = o.crit ? 36 : 30;
+    p.drift = frand(-14, 14);
     p.age = 0;
     p.life = o.crit ? 0.95 : 0.72;
     p.layer = OVER;
@@ -778,8 +781,8 @@ export class Fx {
       const y = p.y - p.rise * easeOutCubic(Math.min(1, k * 1.5));
       const x = p.x + p.drift * k;
       ctx.globalAlpha = alpha;
-      sticker(ctx, p.text, x, y, p.size, p.style, p.rot, sx, sy);
-      if (p.sub) sticker(ctx, p.sub, x, y - p.size * 0.82, p.size * 0.52, CRIT_TAG, -0.1, sx, sy);
+      stickerCached(ctx, p.text, x, y, p.size, p.style, p.rot, sx, sy);
+      if (p.sub) stickerCached(ctx, p.sub, x, y - p.size * 0.82, p.size * 0.52, CRIT_TAG, -0.1, sx, sy);
     }
     ctx.globalAlpha = 1;
   }
@@ -1066,11 +1069,20 @@ const BURST_PTS = 14;
  */
 export function sticker(ctx: Ctx, text: string, x: number, y: number, size: number, st: StickerStyle, rot = 0, sx = 1, sy = 1): void {
   if (size < 2 || sx <= 0.01 || sy <= 0.01) return;
+  if (!stickerFontAsked) {
+    // ask for the ExtraBold face once, so it is ready a moment after the first sticker
+    stickerFontAsked = true;
+    try {
+      void document.fonts?.load(`${STICKER_WEIGHT} 20px "Barlow Condensed"`);
+    } catch {
+      /* no font loading API: the fallback is used */
+    }
+  }
   ctx.save();
   ctx.translate(x, y);
   if (rot) ctx.rotate(rot);
   if (sx !== 1 || sy !== 1) ctx.scale(sx, sy);
-  ctx.font = `900 ${Math.round(size)}px ${STICKER_FONT}`;
+  ctx.font = `${STICKER_WEIGHT} ${Math.round(size)}px ${STICKER_FONT}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.lineJoin = 'round';
@@ -1136,6 +1148,67 @@ export function sticker(ctx: Ctx, text: string, x: number, y: number, size: numb
     ctx.fillStyle = g;
   } else ctx.fillStyle = st.fill;
   ctx.fillText(text, 0, ty);
+  ctx.restore();
+}
+
+// ------------------------------------------------------------------ stickers as cached pictures
+
+interface StickerPic { cv: HTMLCanvasElement; w: number; h: number }
+/** each sticker look is painted once per text and size into a small canvas (the oldest are dropped past the cap) */
+const PICS = new Map<string, StickerPic>();
+const PICS_CAP = 220;
+const STYLE_IDS = new WeakMap<StickerStyle, number>();
+let styleN = 0;
+/** device px per unit the pictures are painted at (the battle view draws at about 1 unit = 1 screen px) */
+let picRes = 2;
+
+/** Sets how sharp the cached stickers are painted: the screen's device pixel ratio (1..3). Clears the cache. */
+export function setStickerRes(ratio: number): void {
+  const r = clamp(Math.round(ratio * 4) / 4, 1, 3);
+  if (r === picRes) return;
+  picRes = r;
+  PICS.clear();
+}
+
+/**
+ * sticker() through a cache: the word is painted once into a small canvas and then drawn with one drawImage, so
+ * dozens of damage numbers and words cost next to nothing a frame. Same arguments as sticker().
+ */
+export function stickerCached(ctx: Ctx, text: string, x: number, y: number, size: number, st: StickerStyle, rot = 0, sx = 1, sy = 1): void {
+  if (size < 2 || sx <= 0.01 || sy <= 0.01) return;
+  let id = STYLE_IDS.get(st);
+  if (id === undefined) STYLE_IDS.set(st, (id = ++styleN));
+  const q = Math.round(size * 2) / 2;
+  const key = `${id}|${q}|${text}`;
+  let pic = PICS.get(key);
+  if (!pic) {
+    if (PICS.size >= PICS_CAP) {
+      let n = 0;
+      for (const k of PICS.keys()) {
+        PICS.delete(k);
+        if (++n >= 60) break;
+      }
+    }
+    const m = document.createElement('canvas').getContext('2d')!;
+    m.font = `${STICKER_WEIGHT} ${Math.round(q)}px ${STICKER_FONT}`;
+    const tw = m.measureText(text).width;
+    const pad = q * 0.5;
+    const w = Math.ceil((st.burst ? tw * 1.3 + q * 0.9 : tw) + pad * 2);
+    const h = Math.ceil((st.burst ? q * 2.1 : q * 1.2) + pad * 2);
+    const cv = m.canvas;
+    cv.width = Math.ceil(w * picRes);
+    cv.height = Math.ceil(h * picRes);
+    m.setTransform(picRes, 0, 0, picRes, 0, 0);
+    sticker(m, text, w / 2, h / 2, q, st);
+    pic = { cv, w, h };
+    PICS.set(key, pic);
+  }
+  ctx.save();
+  ctx.translate(x, y);
+  if (rot) ctx.rotate(rot);
+  const k = size / q;
+  ctx.scale(sx * k, sy * k);
+  ctx.drawImage(pic.cv, -pic.w / 2, -pic.h / 2, pic.w, pic.h);
   ctx.restore();
 }
 

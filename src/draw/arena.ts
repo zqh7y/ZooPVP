@@ -21,31 +21,32 @@ import { makeRng, type Rng } from '../rng';
  * outside the pitch.
  */
 
-// ------------------------------------------------------------------ palette (calm, low saturation)
+// ------------------------------------------------------------------ palette (calm, a little more colour since v5)
 
-const BG = '#d8d4cb'; // the stands' concrete
-const STAND = '#cfcac0'; // the terraces behind the side crowds
-const STEP = 'rgba(110, 100, 86, 0.13)';
+const BG = '#cdc6dc'; // the stands' concrete, a soft lavender grey that sits with the deep interface
+const STAND = '#c3bbd6'; // the terraces behind the side crowds
+const STEP = 'rgba(80, 64, 120, 0.14)';
 const STEP_HI = 'rgba(255, 255, 255, 0.32)';
-const APRON = '#d1ccc2';
-const GRASS = ['#98b585', '#8fac7c'];
-const LINE = 'rgba(246, 248, 240, 0.88)';
-const WALL_TOP = '#74839a';
+const APRON = '#c8c1d8';
+const GRASS = ['#8fbf74', '#85b56b'];
+const LINE = 'rgba(248, 250, 240, 0.9)';
+const WALL_TOP = '#6f78b0';
 const WALL_HI = 'rgba(255, 255, 255, 0.22)';
-const WALL_FACE = '#5a667b';
-const WALL_EDGE = '#3e4757';
-const SEAM = 'rgba(40, 48, 62, 0.32)';
+const WALL_FACE = '#535c92';
+const WALL_EDGE = '#363d6b';
+const SEAM = 'rgba(30, 30, 70, 0.32)';
 const INK = '#343c49'; // outlines of props and the referee
+/** the crowd: soft, friendly colours (muted, never loud) */
 const PEOPLE = [
-  { body: '#a9aeb6', head: '#c8ccd1' },
-  { body: '#b9b4ac', head: '#d5d1ca' },
-  { body: '#9da3ac', head: '#bfc3c9' },
-  { body: '#c2c4c8', head: '#dbdde0' },
-  { body: '#a7a39c', head: '#cac6c0' },
-  { body: '#929aa3', head: '#bbbfc5' },
+  { body: '#8fb0d8', head: '#f0d5c0' },
+  { body: '#e3a39a', head: '#e8c4a8' },
+  { body: '#a3cfa6', head: '#f2dcc8' },
+  { body: '#c2aee0', head: '#dcb89c' },
+  { body: '#e8c983', head: '#f0d5c0' },
+  { body: '#9fc9cf', head: '#c99c7c' },
 ];
-const HAT = ['#7f8690', '#8f8b85', '#737a84'];
-const PEOPLE_LINE = '#6d747e';
+const HAT = ['#6f6aa8', '#c77f6e', '#5d8a9e'];
+const PEOPLE_LINE = '#5e5878';
 const EYE = '#4c535d';
 const TEAMC = [
   { main: '#7499c8', dark: '#55779f', light: '#a9c1e0' },

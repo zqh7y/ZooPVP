@@ -8,25 +8,29 @@ import { params, param, paramNum } from './harness';
 
 /*
  * The real main screen with a chosen save, for screenshots:
- *   ?save=rich     a stage-4 army with units covering 1, 2 and 4 cells, items, some cells bought and earned
+ *   ?save=rich     a level-7 army with units covering 1, 2 and 4 cells, items, some cells bought and earned
  *   ?save=fresh    a new player (the guide)
- *   ?stage=3&wave=10&cash=500&gems=40&tut=99   override fields of either
+ *   ?save=v4       a version-4 save (stage 4) as v4 wrote it: the game migrates it on boot
+ *   ?level=5&xp=40&matches=4&streak=3&cash=500&gems=40&kos=90&tut=99   override fields of either
+ *     (matches=4: the next match is a CHAMPION match)
  * The save is written to localStorage (zoopvp-save) and the game boots on it.
  */
 
 function richSave(): SaveState {
   const s = newSave(7);
   s.tutorial = TUTORIAL_DONE;
-  s.stage = 4;
-  s.wave = 6;
+  s.level = 7;
+  s.xp = 80;
+  s.matches = 38;
+  s.wins = 27;
+  s.streak = 2;
+  s.bestStreak = 6;
+  s.champs = 4;
   s.cash = 260;
   s.gems = 34;
   s.cases = 22;
   s.rolled = 26;
-  s.fights = 38;
-  s.wins = 35;
   s.kos = 120;
-  s.stars = [3, 2, 3];
   s.open = START_OPEN | cellBit(0, 1) | cellBit(4, 2) | cellBit(1, 0) | cellBit(2, 0) | cellBit(3, 0) | cellBit(1, 4) | cellBit(2, 4);
   s.cellBuys = 2;
   const g: [PieceType, number, number, number, number, boolean?][] = [
@@ -46,14 +50,21 @@ function richSave(): SaveState {
   return s;
 }
 
-const state = param('save') === 'rich' ? richSave() : newSave();
-for (const k of ['stage', 'wave', 'cash', 'gems', 'tut', 'kos'] as const) {
+/** A save as v4 wrote it (version 4, stages and waves), from the rich army: the game must migrate it. */
+function v4Save(): Record<string, unknown> {
+  const { level: _l, xp: _x, streak: _s, slump: _sl, bestStreak: _b, matches: _m, wins, champs: _c, ...rest } = richSave();
+  return { ...rest, version: 4, stage: 4, wave: 6, tries: 0, stars: [3, 2, 3], fights: 38, wins };
+}
+
+const kind = param('save');
+const state = kind === 'rich' ? richSave() : newSave();
+for (const k of ['level', 'xp', 'matches', 'streak', 'cash', 'gems', 'tut', 'kos'] as const) {
   if (!params.has(k)) continue;
   const v = paramNum(k, 0);
   if (k === 'tut') state.tutorial = v;
   else state[k] = v;
 }
-localStorage.setItem(SAVE_KEY, JSON.stringify(state));
+localStorage.setItem(SAVE_KEY, JSON.stringify(kind === 'v4' ? v4Save() : state));
 
 const canvas = document.createElement('canvas');
 canvas.id = 'game';

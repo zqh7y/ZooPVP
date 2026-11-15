@@ -7,7 +7,7 @@ import { drawPiece } from '../src/draw/pieces';
 
 const H = 2760;
 const r = (x: number, y: number, w: number, h: number): Rect => ({ x, y, w, h });
-const head = (c: Ctx, s: string, y: number) => label(c, s.toUpperCase(), 16, y, TYPE.small, { align: 'left', color: UI.textDim, track: 1.5 });
+const head = (c: Ctx, s: string, y: number) => label(c, s.toUpperCase(), 16, y, TYPE.small, { align: 'left', color: UI.hiDim, track: 1.5 });
 const tokenIcon = (c: Ctx, x: number, y: number, z: number) => I.rollToken(c, x, y, z);
 
 stage({
@@ -26,7 +26,7 @@ stage({
     head(c, 'buttons: primary / roll / secondary / quiet', y);
     y += 14;
     U.button(c, r(16, y, 250, S.btnH), { variant: 'case', text: 'CASE', icon: tokenIcon, badge: 3 });
-    U.button(c, r(274, y, 250, S.btnH), { variant: 'primary', text: 'START WAVE', pulse: (t * 1.2) % 1 });
+    U.button(c, r(274, y, 250, S.btnH), { variant: 'primary', text: 'BATTLE', pulse: (t * 1.2) % 1 });
     y += 100;
     U.button(c, r(16, y, 250, S.btnSmallH), { variant: 'secondary', text: 'Auto', icon: I.wand });
     U.button(c, r(274, y, 250, S.btnSmallH), { variant: 'quiet', text: 'Trash', icon: I.trash });
@@ -84,7 +84,7 @@ stage({
     y += 56;
     U.scoreBug(c, r(12, y, 516, U.SCORE_BUG.h), { home: { name: 'You', score: 17 }, away: { name: 'Wave 4', score: 18 }, clock: '0:54', flash: 0 });
     y += U.SCORE_BUG.h + 12;
-    U.scoreBug(c, r(12, y, 516, U.SCORE_BUG.h), { home: { name: 'You', score: 3 }, away: { name: 'Boss wave', score: 3 }, clock: '+0:12', hot: true });
+    U.scoreBug(c, r(12, y, 516, U.SCORE_BUG.h), { home: { name: 'You', score: 3 }, away: { name: 'Lil Noodle', score: 3 }, clock: '+0:12', hot: true });
     y += U.SCORE_BUG.h + 20;
     U.powerChip(c, r(16, y, 150, 36), 3314);
     y += 56;
@@ -102,17 +102,17 @@ stage({
 
     head(c, 'ribbons and toast', y);
     y += 48;
-    U.ribbon(c, 270, y, 400, 'STAGE 2 CLEAR!', { color: 'reward', sub: '3 stars  ·  +9 gems' });
+    U.ribbon(c, 270, y, 400, 'VICTORY!', { color: 'reward', sub: 'CHAMPION BEATEN!' });
     y += 120;
     U.ribbon(c, 140, y, 230, 'SO CLOSE!', { color: 'muted', size: 36 });
-    U.ribbon(c, 400, y, 200, 'WAVE 3 CLEAR', { color: 'accent', size: 30 });
+    U.ribbon(c, 400, y, 200, 'LEVEL UP!', { color: 'accent', size: 30 });
     y += 62;
     U.ribbon(c, 270, y, 240, 'FIGHT', { color: 'plain', size: 44 });
     U.toast(c, 'Not enough cash', 270, y + 80, 0.5);
     y += 130;
 
     head(c, 'hint (a tail when near, an arrow over a far target)', y);
-    U.hint(c, r(40, y + 20, 220, 70), 'Tap START WAVE', { x: 150, y: y + 130 }, t);
+    U.hint(c, r(40, y + 20, 220, 70), 'Ready? Tap BATTLE!', { x: 150, y: y + 130 }, t);
     U.hint(c, r(280, y + 20, 220, 70), 'Drag a piece onto the grid', { x: 390, y: y + 190 }, t);
     y += 210;
 
