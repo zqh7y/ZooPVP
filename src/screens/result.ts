@@ -2,36 +2,39 @@ import { music, sfx } from '../audio/engine';
 import { LEAGUES, leagueOf } from '../data';
 import { Fx } from '../draw/fx';
 import { koStar, leagueBadge, rollToken, trophy } from '../draw/icons';
-import { button, panel, ribbon, veil, type IconFn } from '../draw/ui';
+import { button, panel, ribbon, vsBar, type IconFn } from '../draw/ui';
 import { claimRoad, applyMatch } from '../logic/progress';
 import { hashSeed, makeRng } from '../rng';
 import type { App, Screen } from '../screen';
-import { H, S, TYPE, UI, W } from '../theme';
+import { H, S, TEAM, TYPE, UI, W } from '../theme';
 import type { MatchResult } from '../types';
-import { clamp, easeOutCubic, inRect, label, type Ctx, type Rect } from '../util';
+import { clamp, easeOutCubic, inRect, label, rr, type Ctx, type Rect } from '../util';
 
-// layout: one column (title, score sheet, standing, CONTINUE) centred on the screen, a little above the middle,
-// so a short sheet leaves no hole above the button
+// layout: the VS bar at the top (who you played), then one column (title, score sheet with where you stand now at
+// its foot, CONTINUE right under it) centred in the space below, so no hole opens above the button
+const BAR: Rect = { x: S.pad + 4, y: 104, w: W - S.pad * 2 - 8, h: 72 };
 const RIBBON_W = 440;
 const TITLE_H = Math.round(TYPE.title * 1.3); // the ribbon's title row; its caption row adds SUB_H under it
 const SUB_H = TYPE.caption + S.pad + S.base;
+const RIBBON_H = TITLE_H + SUB_H + 8;
 const PANEL_X = S.pad * 3;
 const PANEL_W = W - S.pad * 6;
-const LINE_H = 76;
+const LINE_H = 70;
 const LINE_X = PANEL_X + S.pad * 2;
-const ICON = 26;
-const GAP = S.section + S.pad + S.base; // 40, between the blocks
-const STANDING_H = 40; // the league line under the panel
-const BTN_W = 320;
+const ICON = 30;
+const GAP = S.section + S.pad; // 36, between the blocks
+const STANDING_H = 76; // the league row at the foot of the sheet
+const BTN_W = 340;
 
 /** Where everything sits for a sheet of n lines. */
 function layout(n: number) {
-  const panelH = LINE_H * n + S.pad * 2;
-  const total = TITLE_H + SUB_H + GAP + panelH + GAP + STANDING_H + GAP + S.btnH;
-  const top = Math.max(S.section * 4, Math.round((H - total) * 0.45));
-  const panel: Rect = { x: PANEL_X, y: top + TITLE_H + SUB_H + GAP, w: PANEL_W, h: panelH };
-  const standY = panel.y + panelH + GAP + STANDING_H / 2;
-  const cont: Rect = { x: (W - BTN_W) / 2, y: standY + STANDING_H / 2 + GAP, w: BTN_W, h: S.btnH };
+  const panelH = LINE_H * n + STANDING_H + S.pad * 2;
+  const total = RIBBON_H + GAP + panelH + GAP + S.btnH;
+  const room0 = BAR.y + BAR.h + 56;
+  const top = room0 + Math.max(0, Math.round((H - 40 - room0 - total) * 0.42));
+  const panel: Rect = { x: PANEL_X, y: top + RIBBON_H + GAP, w: PANEL_W, h: panelH };
+  const standY = panel.y + S.pad + LINE_H * n + STANDING_H / 2;
+  const cont: Rect = { x: (W - BTN_W) / 2, y: panel.y + panelH + GAP, w: BTN_W, h: S.btnH };
   return { titleY: top + TITLE_H / 2, panel, standY, cont };
 }
 
@@ -78,16 +81,16 @@ export function createResult(app: App): Screen {
     };
     add({
       // gold only for a gain: a loss in the danger red, no change in plain grey
-      icon: trophy, text: 'Trophies', value: r.trophies, sign: true, color: r.trophies > 0 ? UI.accent : r.trophies < 0 ? UI.danger : UI.textDim,
+      icon: (c, x, y, z) => trophy(c, x, y, z, UI.accentDark), text: 'Trophies', value: r.trophies, sign: true, color: r.trophies > 0 ? '#c98a00' : r.trophies < 0 ? UI.danger : UI.textDim,
       done: () => (r.trophies > 0 ? sfx.play('trophyUp', r.trophies) : r.trophies < 0 ? sfx.play('trophyDown') : sfx.play('count')),
     });
-    add({ icon: koStar, text: 'Knock-outs', value: r.kills, sign: false, color: UI.text });
-    add({ icon: rollToken, text: 'Rolls earned', value: r.rolls, sign: true, color: UI.text, done: () => r.rolls > 0 && sfx.play('rollEarned') });
+    add({ icon: (c, x, y, z) => koStar(c, x, y, z, UI.text), text: 'Knock-outs', value: r.kills, sign: false, color: UI.text });
+    add({ icon: (c, x, y, z) => rollToken(c, x, y, z, UI.text), text: 'Rolls earned', value: r.rolls, sign: true, color: UI.text, done: () => r.rolls > 0 && sfx.play('rollEarned') });
     if (r.leagueUp >= 0) {
       const li = r.leagueUp;
       add({ icon: (c, x, y, s) => leagueBadge(c, x, y, s, li), text: `Promoted to ${LEAGUES[li].name}`, value: NaN, sign: false, color: UI.accent, done: () => sfx.play('leagueUp', li) }, 0.4);
     }
-    if (roadRolls > 0) add({ icon: rollToken, text: 'Trophy road', value: roadRolls, sign: true, color: UI.text, done: () => sfx.play('rollEarned') });
+    if (roadRolls > 0) add({ icon: (c, x, y, z) => rollToken(c, x, y, z, UI.text), text: 'Trophy road', value: roadRolls, sign: true, color: UI.text, done: () => sfx.play('rollEarned') });
     buttonAt = at - LINE_GAP + BUTTON_AFTER;
     L = layout(lines.length);
   }
@@ -106,7 +109,7 @@ export function createResult(app: App): Screen {
     ctx.globalAlpha *= clamp(age / 0.2, 0, 1);
     l.icon(ctx, LINE_X + ICON / 2, y, ICON);
     const plain = Number.isNaN(l.value);
-    label(ctx, l.text.toUpperCase(), LINE_X + ICON + S.pad + 2, y + 1, TYPE.body, { align: 'left', track: 1.5, color: plain ? l.color : UI.text });
+    label(ctx, l.text.toUpperCase(), LINE_X + ICON + S.pad + 4, y + 1, TYPE.lead, { align: 'left', track: 1.5, weight: 700, color: plain ? l.color : UI.text });
     if (!plain) {
       const shown = Math.round(l.value * easeOutCubic(clamp(age / COUNT_FOR, 0, 1)));
       const s = l.sign && shown > 0 ? `+${shown}` : `${shown}`;
@@ -134,7 +137,7 @@ export function createResult(app: App): Screen {
       build(res, roadRolls);
       if (res.won) {
         // a win is marked by one quiet burst behind the title, in the accent
-        fx.burst(W / 2, L.titleY, { colors: [UI.accent, UI.text], n: 22, speed: 340, size: 4, life: 0.8, gravity: 260 });
+        fx.burst(W / 2, L.titleY, { colors: [UI.accent, '#ffffff', '#ffe27a', TEAM[0].main], n: 30, speed: 380, size: 5, life: 0.9, gravity: 300, shape: 'star' });
         sfx.play('victory');
         music.set('victory');
       } else {
@@ -167,7 +170,7 @@ export function createResult(app: App): Screen {
           if (l.done && age >= 0.2) {
             l.done();
             l.done = undefined;
-            fx.burst(LINE_X + ICON / 2, L.panel.y + S.pad + LINE_H / 2 + lines.indexOf(l) * LINE_H, { colors: [UI.accent, UI.text], n: 10, speed: 240, size: 4, life: 0.5, gravity: 300 });
+            fx.burst(LINE_X + ICON / 2, L.panel.y + S.pad + LINE_H / 2 + lines.indexOf(l) * LINE_H, { colors: [UI.accent, '#ffffff'], n: 10, speed: 240, size: 4, life: 0.5, gravity: 300 });
           }
           continue;
         }
@@ -185,11 +188,12 @@ export function createResult(app: App): Screen {
     },
     render(ctx) {
       app.arena.drawDusk(ctx, app.t);
-      veil(ctx, 1); // the stadium stays in the dark behind the score sheet
       ctx.save();
       ctx.translate(fx.camera.x, fx.camera.y);
       fx.drawUnder(ctx);
       if (res) {
+        const m = app.match;
+        if (m) vsBar(ctx, BAR, { left: { name: app.state.name, trophies: app.state.trophies }, right: { name: m.opponent.name, trophies: m.opponent.trophies, bot: true } });
         const k = clamp(t / RIBBON_POP, 0, 1);
         const s = k < 1 ? 1.25 - 0.25 * easeOutCubic(k) : 1;
         ctx.save();
@@ -207,23 +211,26 @@ export function createResult(app: App): Screen {
           ctx.save();
           ctx.globalAlpha = pk;
           const P = L.panel;
-          panel(ctx, P, { tone: 'dark' });
+          panel(ctx, P);
           ctx.fillStyle = UI.border;
           for (let i = 1; i < lines.length; i++) if (t >= lines[i].at) ctx.fillRect(LINE_X, P.y + S.pad + i * LINE_H, P.w - S.pad * 4, 1);
           lines.forEach((l, i) => drawLine(ctx, l, P.y + S.pad + LINE_H / 2 + i * LINE_H));
+          // where you stand now, at the sheet's foot on a cream band: league badge, league, trophies counting up
+          const band: Rect = { x: P.x + 8, y: L.standY - STANDING_H / 2 + 4, w: P.w - 16, h: STANDING_H - 12 };
+          rr(ctx, band.x, band.y, band.w, band.h, S.radius.m);
+          ctx.fillStyle = UI.surfaceAlt;
+          ctx.fill();
+          const y = L.standY - 2;
+          const li = leagueOf(app.state.trophies);
+          const before = app.state.trophies - res.trophies;
+          const tk = easeOutCubic(clamp((t - FIRST_LINE) / (COUNT_FOR + 0.2), 0, 1));
+          const shown = Math.round(before + (app.state.trophies - before) * tk);
+          leagueBadge(ctx, LINE_X + 16, y, 40, li);
+          label(ctx, `${LEAGUES[li].name} League`.toUpperCase(), LINE_X + 48, y - 11, TYPE.body, { align: 'left', weight: 700, track: 1.5, color: UI.text });
+          label(ctx, 'YOUR TROPHIES', LINE_X + 48, y + 13, TYPE.caption, { align: 'left', weight: 700, color: UI.textDim, track: 1.5 });
+          trophy(ctx, P.x + P.w - S.pad * 2 - 96, y, 28, UI.accentDark);
+          label(ctx, String(shown), P.x + P.w - S.pad * 2, y + 1, TYPE.h1, { align: 'right', weight: 700, color: tk < 1 && res.trophies !== 0 ? '#c98a00' : UI.text });
           ctx.restore();
-          // where you stand now: league badge and trophies
-          const sk = clamp((t - buttonAt + 0.2) / 0.3, 0, 1);
-          if (sk > 0) {
-            const y = L.standY;
-            const li = leagueOf(app.state.trophies);
-            ctx.save();
-            ctx.globalAlpha = sk;
-            leagueBadge(ctx, LINE_X + 18, y, 40, li);
-            label(ctx, `${LEAGUES[li].name} League`.toUpperCase(), LINE_X + 50, y - 11, TYPE.body, { align: 'left', weight: 700, track: 1.5 });
-            label(ctx, `${app.state.trophies} TROPHIES`, LINE_X + 50, y + 13, TYPE.caption, { align: 'left', color: UI.textDim, track: 1.5 });
-            ctx.restore();
-          }
         }
         if (t >= buttonAt) {
           const bk = easeOutCubic(clamp((t - buttonAt) / 0.25, 0, 1));

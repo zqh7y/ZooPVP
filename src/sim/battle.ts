@@ -1,6 +1,6 @@
 import { ARENA, FIGHT, unitStats, type UnitStats } from '../data';
 import { hashSeed, makeRng, type Rng } from '../rng';
-import type { ArmySpec, Team, WeaponType } from '../types';
+import type { ArmySpec, PetType, Team, WeaponType } from '../types';
 import type { Battle, SimEvent, SimSummary, SimUnit } from './types';
 
 /*
@@ -20,6 +20,7 @@ const ARC = 1.05;
 /** shield-bearers look this much closer to nearby foes */
 const TAUNT = 0.6;
 const TAUNT_RANGE = 150;
+
 
 interface Brain {
   st: UnitStats;
@@ -45,6 +46,10 @@ interface Brain {
   lastWeapon: WeaponType | null;
   lastKnock: number;
   lastDir: number;
+  /** seconds after the start before its row sets off (it still fights back when a foe comes close) */
+  wait: number;
+  /** seconds of the short pause after a knock-out it scored */
+  cheer: number;
 }
 
 interface Hit {
@@ -59,46 +64,57 @@ interface Hit {
   weapon: WeaponType | null;
 }
 
+/** within a kind: shield-bearers first, spears last */
 const rankOf = (w: WeaponType | null) => (w === 'shield' ? 0 : w === 'bat' ? 2 : w === 'spear' ? 3 : 1);
+/** the kinds from the front row back: the tough frogs in front, the quick ants behind them */
+const KIND_ORDER: readonly PetType[] = ['frog', 'ant'];
+/** px kept free along the side lines */
+const SIDE = 10;
 
-/** Lines a team up in its spawn band: rows from the front, shields first, squads kept together. */
+/**
+ * Lines a team up in clean rows by kind: the frogs (the tough kind) in front, the ants behind, each kind in rows
+ * of its own. Squads of a kind stay together (shield squads first, spears last); a kind's rows are filled evenly
+ * and spaced evenly across the width; nobody overlaps. The top team is the mirror image of the bottom one.
+ * The front kind sets off at the whistle, the kind behind it FIGHT.wave seconds later (or as soon as a foe
+ * comes close), so the lines meet one after the other.
+ */
 function lineUp(list: SimUnit[], team: Team, brains: Brain[]) {
-  list.sort((a, b) => rankOf(a.weapon) - rankOf(b.weapon) || a.squad - b.squad || a.id - b.id);
+  const usable = ARENA.w - SIDE * 2;
+  const gap = FIGHT.lineGap;
   const rows: SimUnit[][] = [];
-  const usable = ARENA.w - 24;
-  let row: SimUnit[] = [];
-  let width = 0;
-  for (const u of list) {
-    const w = u.r * 2 + 6;
-    if (row.length && width + w > usable) {
-      rows.push(row);
-      row = [];
-      width = 0;
+  /** which wave each row sets off in: the front kind first, the next kind FIGHT.wave seconds later */
+  const waveOf: number[] = [];
+  for (const kind of KIND_ORDER) {
+    const block = list.filter((u) => u.pet === kind).sort((a, b) => rankOf(a.weapon) - rankOf(b.weapon) || a.squad - b.squad || a.id - b.id);
+    if (block.length === 0) continue;
+    const rMax = block.reduce((m, u) => Math.max(m, u.r), 0);
+    const cap = Math.max(1, Math.floor((usable + gap) / (rMax * 2 + gap)));
+    const per = Math.ceil(block.length / Math.ceil(block.length / cap));
+    const wave = waveOf.length ? waveOf[waveOf.length - 1] + 1 : 0;
+    for (let i = 0; i < block.length; i += per) {
+      rows.push(block.slice(i, i + per));
+      waveOf.push(wave);
     }
-    row.push(u);
-    width += w;
   }
-  if (row.length) rows.push(row);
-  const depth = rows.map((r) => r.reduce((m, u) => Math.max(m, u.r * 2 + 4), 0));
-  const total = depth.reduce((a, b) => a + b, 0);
-  const squeeze = Math.min(1, (FIGHT.spawnBand[1] - FIGHT.spawnBand[0]) / Math.max(1, total));
-  let dist = FIGHT.spawnBand[1];
+  const depth = rows.map((r) => r.reduce((m, u) => Math.max(m, u.r * 2), 0));
+  const total = depth.reduce((a, b) => a + b, 0) + gap * Math.max(0, rows.length - 1);
+  const room = ARENA.h / 2 - 24 - FIGHT.lineBack;
+  const front = Math.min(FIGHT.lineBack + room, Math.max(FIGHT.lineFront, FIGHT.lineBack + total));
+  const squeeze = Math.min(1, room / Math.max(1, total)); // only ever below 1 for armies far beyond a 5 x 5 grid
+  let dist = front;
   rows.forEach((r, i) => {
-    const d = depth[i] * squeeze;
-    dist -= d / 2;
-    const rowW = r.reduce((a, u) => a + u.r * 2 + 6, 0);
-    const avg = rowW / r.length;
-    const shift = Math.min((usable - rowW) / 2, avg / 4) * (i % 2 ? 1 : -1);
-    let x = (ARENA.w - rowW) / 2 + shift;
-    for (const u of r) {
+    const rMax = r.reduce((m, u) => Math.max(m, u.r), 0);
+    dist -= (depth[i] / 2) * squeeze;
+    const step = Math.min(usable / r.length, (rMax * 2 + gap) * 2.2);
+    r.forEach((u, k) => {
       const b = brains[u.id];
-      const w = u.r * 2 + 6;
-      u.x = clamp(x + w / 2 + b.rng.range(-1.5, 1.5), u.r, ARENA.w - u.r);
-      const yy = clamp(dist + b.rng.range(-1.5, 1.5), u.r, ARENA.h / 2 - u.r);
+      b.wait = waveOf[i] * FIGHT.wave;
+      const x = ARENA.w / 2 + (k - (r.length - 1) / 2) * step;
+      u.x = clamp(x + b.rng.range(-1, 1), u.r, ARENA.w - u.r);
+      const yy = clamp(dist + b.rng.range(-1, 1), u.r, ARENA.h / 2 - u.r);
       u.y = team === 0 ? ARENA.h - yy : yy;
-      x += w;
-    }
-    dist -= d / 2;
+    });
+    dist -= (depth[i] / 2 + gap) * squeeze;
   });
 }
 
@@ -133,7 +149,7 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number): Battle
         brains.push({
           st, rng, cd: rng.range(0, st.cd * 0.5), kx: 0, ky: 0, air: false, hopT: 0, rest: rng.range(0, HOP_REST),
           retarget: 0, checkT: 0, lastDist: 1e9, stall: 0, side: rng.chance(0.5) ? 1 : -1, px: 0, py: 0,
-          lastBy: -1, lastWeapon: null, lastKnock: 0, lastDir: 0,
+          lastBy: -1, lastWeapon: null, lastKnock: 0, lastDir: 0, wait: 0, cheer: 0,
         });
         size[team]++;
         maxHpSum[team] += st.hp;
@@ -183,6 +199,12 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number): Battle
   const living: [SimUnit[], SimUnit[]] = [[], []];
   let hits: Hit[] = [];
   let events: SimEvent[] = [];
+  /** how many units go for each unit, counted once at the start of every step (so the order never matters) */
+  const crowd = new Int32Array(Math.max(1, units.length));
+  const countCrowd = () => {
+    crowd.fill(0);
+    for (const u of units) if (u.alive && u.target >= 0 && units[u.target].alive) crowd[u.target]++;
+  };
   const forward = units.map((u) => u.id);
   const backward = forward.slice().reverse();
 
@@ -198,6 +220,8 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number): Battle
       let s = Math.sqrt(dx * dx * k * k + dy * dy);
       if (f.weapon === 'shield' && d < TAUNT_RANGE) s *= TAUNT;
       if (f.id === u.target) s *= 0.85;
+      const others = crowd[f.id] - (f.id === u.target ? 1 : 0);
+      if (others > 0) s *= 1 + FIGHT.crowd * others;
       if (s < bs || (s === bs && f.id < best)) {
         bs = s;
         best = f.id;
@@ -262,6 +286,23 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number): Battle
     u.phaseT += DT;
     if (!started) return;
     b.cd -= DT;
+    if (b.wait > 0) {
+      if (time < b.wait && u.sinceHit > 1) {
+        // its row has not set off yet: it holds its place unless a foe comes close
+        let close = false;
+        const look = u.r + st.reach + 40;
+        near(u.x, u.y, look + maxR, (f) => {
+          if (f.team !== u.team && hyp(f.x - u.x, f.y - u.y) < look + f.r) close = true;
+        });
+        if (!close) {
+          if (u.phase === 'move') setPhase(u, 'wait', 0);
+          u.vx = u.vy = 0;
+          return;
+        }
+      }
+      b.wait = 0;
+      if (u.phase === 'wait') setPhase(u, 'move', 0);
+    }
     let want = false;
     let dirX = 0;
     let dirY = 0;
@@ -274,7 +315,9 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number): Battle
         } else setPhase(u, 'move', 0);
       }
     }
-    if (u.phase === 'move') {
+    if (u.phase === 'move' && b.cheer > 0) {
+      b.cheer -= DT;
+    } else if (u.phase === 'move') {
       b.retarget -= DT;
       if (u.target < 0 || !units[u.target].alive || b.retarget <= 0) {
         chooseTarget(u);
@@ -313,8 +356,8 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number): Battle
           dirY = d > 1e-6 ? dy / d : u.team === 0 ? -1 : 1;
           if (b.stall > 0) {
             // press on toward the foe, slipping sideways around whatever is in the way
-            const sx = -dirY * b.side * 0.45 * b.stall;
-            const sy = dirX * b.side * 0.45 * b.stall;
+            const sx = -dirY * b.side * FIGHT.sidestep * b.stall;
+            const sy = dirX * b.side * FIGHT.sidestep * b.stall;
             dirX += sx;
             dirY += sy;
             const n = hyp(dirX, dirY) || 1;
@@ -474,7 +517,10 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number): Battle
       u.alive = false;
       alive[u.team]--;
       const b = brains[u.id];
-      if (b.lastBy >= 0) kills[units[b.lastBy].team]++;
+      if (b.lastBy >= 0) {
+        kills[units[b.lastBy].team]++;
+        brains[b.lastBy].cheer = FIGHT.cheer;
+      }
     }
     for (const u of dead) {
       const b = brains[u.id];
@@ -522,6 +568,7 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number): Battle
       events.push({ type: 'enrage' });
     }
     buildGrid();
+    countCrowd();
     for (const id of tickN % 2 ? forward : backward) if (units[id].alive) think(units[id]);
     collide();
     integrate();

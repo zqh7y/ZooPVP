@@ -5,7 +5,7 @@ import { ARENA } from '../src/data';
 import { project } from '../src/draw/camera';
 import { circle, ellipse, fillStroke, label, seeded } from '../src/util';
 
-// ?view=battle|stage|lobby|dusk  &cheer=1 to see the crowd jump
+// ?view=battle|stage|lobby|dusk  &cheer=1 to see the seven fans jump and wave
 const view = param('view', 'battle');
 const arena = new Arena();
 const b0 = performance.now();
@@ -24,28 +24,39 @@ const dots = Array.from({ length: 12 }, (_, i) => {
   };
 });
 
-// time drawBattle + drawBattleFront over 200 frames on a scratch canvas
+// time drawBattle + drawBattleFront over 200 frames on a scratch canvas. Each frame is read back (one pixel), so
+// it is really painted: the canvas would otherwise drop every frame but the last, as the opaque backdrop covers
+// the whole screen. The cost of the read-back alone is measured the same way and taken off.
 let perf = '';
 {
   const cv = document.createElement('canvas');
   const dpr = Math.max(1, window.devicePixelRatio || 1);
   cv.width = W * dpr;
   cv.height = H * dpr;
-  const c = cv.getContext('2d')!;
+  const c = cv.getContext('2d', { willReadFrequently: false })!;
   c.scale(dpr, dpr);
   for (let i = 0; i < 20; i++) {
     arena.drawBattle(c, i / 60);
     arena.drawBattleFront(c, i / 60);
+    c.getImageData(0, 0, 1, 1);
   }
-  c.getImageData(0, 0, 1, 1);
-  const t0 = performance.now();
-  for (let i = 0; i < 200; i++) {
+  const N = 200;
+  let t0 = performance.now();
+  for (let i = 0; i < N; i++) {
+    c.fillStyle = i % 2 ? '#fff' : '#000';
+    c.fillRect(0, 0, 1, 1);
+    c.getImageData(0, 0, 1, 1);
+  }
+  const base = (performance.now() - t0) / N;
+  t0 = performance.now();
+  for (let i = 0; i < N; i++) {
     arena.update(1 / 60);
     arena.drawBattle(c, i / 60);
     arena.drawBattleFront(c, i / 60);
+    c.getImageData(0, 0, 1, 1);
   }
-  c.getImageData(0, 0, 1, 1);
-  perf = `${((performance.now() - t0) / 200).toFixed(3)} ms/frame, build ${buildMs.toFixed(0)} ms`;
+  const ms = (performance.now() - t0) / N - base;
+  perf = `${ms.toFixed(3)} ms/frame (ratio ${dpr}), build ${buildMs.toFixed(0)} ms`;
   console.log('arena', perf);
 }
 

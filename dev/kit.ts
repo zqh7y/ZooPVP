@@ -3,8 +3,9 @@ import { COLOR, S, TYPE, UI } from '../src/theme';
 import { label, type Ctx, type Rect } from '../src/util';
 import * as I from '../src/draw/icons';
 import * as U from '../src/draw/ui';
+import { drawPiece } from '../src/draw/pieces';
 
-const H = 2230;
+const H = 2760;
 const r = (x: number, y: number, w: number, h: number): Rect => ({ x, y, w, h });
 const head = (c: Ctx, s: string, y: number) => label(c, s.toUpperCase(), 16, y, TYPE.small, { align: 'left', color: UI.textDim, track: 1.5 });
 const tokenIcon = (c: Ctx, x: number, y: number, z: number) => I.rollToken(c, x, y, z);
@@ -53,7 +54,7 @@ stage({
       const tr = r(12 + (lv - 1) * 74, y, 66, 66);
       U.tileFrame(c, tr, lv, { t });
       U.classFx(c, tr, lv, t);
-      U.classBadge(c, lv, tr.x + 4, tr.y + 52, 1, t);
+      U.classBadge(c, lv, tr.x + 5, tr.y + 18, 0.75, t);
     }
     y += 84;
     const t1 = r(16, y, 66, 66);
@@ -65,6 +66,24 @@ stage({
     for (let lv = 1; lv <= 7; lv++) label(c, 'Aa', 330 + (lv - 1) * 28, y + 33, 20, { color: U.classColor(lv, t) });
     U.rainbow(c, 0, 0, 1, 1, t);
     y += 90;
+
+    head(c, 'pieces on the grid: 1, 2 (across, standing) and 4 cells', y);
+    y += 14;
+    drawPiece(c, { type: 'knife', level: 5, count: 1 }, r(16, y, 84, 84), { t });
+    drawPiece(c, { type: 'ant', level: 3, count: 1 }, r(16, y + 92, 84, 84), { t });
+    drawPiece(c, { type: 'ant', level: 4, count: 2 }, r(108, y, 174, 84), { t });
+    drawPiece(c, { type: 'frog', level: 6, count: 2, turned: true } as never, r(290, y, 84, 176), { t });
+    drawPiece(c, { type: 'frog', level: 7, count: 4 }, r(382, y, 146, 146), { t });
+    drawPiece(c, { type: 'helmet', level: 1, count: 1 }, r(108, y + 92, 84, 84), { t, idle: true });
+    drawPiece(c, { type: 'chili', level: 2, count: 1 }, r(198, y + 92, 84, 84), { t, lifted: true });
+    y += 196;
+
+    head(c, 'the VS bar and the POWER plate', y);
+    y += 18;
+    U.vsBar(c, r(12, y, 516, 72), { left: { name: 'Kenji', trophies: 1284 }, right: { name: 'Hana_bot42', trophies: 1301, bot: true } });
+    y += 140;
+    U.powerBadge(c, 270, y, 1959 + Math.floor(t / 2) * 37, { w: 280, h: 76, key: 'kit' });
+    y += 70;
 
     head(c, 'name plates (you, and a BOT opponent)', y);
     y += 14;

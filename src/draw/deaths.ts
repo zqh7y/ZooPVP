@@ -5,7 +5,7 @@ import { COLOR, UI, W } from '../theme';
 import type { DeathKind, PetType, WeaponType } from '../types';
 import { clamp, easeOutCubic, lerp, smooth, type Ctx } from '../util';
 import { PITCH, project, TILT } from './camera';
-import type { Fx } from './fx';
+import { drawShard, GROUND_FLAT, GRASS_SHADE, type Fx } from './fx';
 import { restPose, type PetLook, type PetPose } from './petTypes';
 import { PET_COLORS, petArt } from './pets';
 
@@ -17,6 +17,10 @@ import { PET_COLORS, petArt } from './pets';
  *
  * A death happens at an arena point and is placed on screen by the match camera: everything about it is
  * drawn at that depth's scale, and what leaves the ground rises toward screen-up while its shadow stays down.
+ *
+ * Every knock-out leaves its mark on the pitch for the rest of the fight, painted once into the ground layer
+ * (fx.ground): a flat splat in the pet's colours, the pancake a squish leaves, a ring of settled petals, a little
+ * pile of stone bits, a skid, a cut in the grass. Small cartoon marks, never gore.
  */
 
 export const DEATH_KINDS: readonly DeathKind[] = ['pop', 'squish', 'launch', 'slice', 'spin', 'deflate', 'shatter', 'petals'];
@@ -44,9 +48,14 @@ const OWN: Record<PetType, readonly DeathKind[]> = {
 };
 /** body tones of the two teams, exactly as the pets are painted: [main, light, shade] */
 const BODY = PET_COLORS;
-const STONES = ['#a9aeb6', '#80868f', '#d3d7dd'];
-/** white and off-white, with a breath of floodlight gold: no extra hue */
-const PETALS = [COLOR.white, '#fbf7ee', '#efe9dc', COLOR.white, '#fff0c4'];
+const STONES = ['#b4b9c1', '#8d939c', '#d9dde2'];
+/** white and off-white, with a breath of sunny gold: no extra hue */
+const PETALS = [COLOR.white, '#fffaf0', '#f6efe0', COLOR.white, '#fff0c4'];
+/** the thin outline of a mark lying on the grass: the ink, softened */
+const MARK_INK = 'rgba(20, 24, 31, 0.55)';
+/** worn, sun-bleached grass (a skid, a swirl, a cut) */
+const WORN = 'rgba(246, 242, 200, 0.62)';
+const TAU = Math.PI * 2;
 const SPARK = [UI.accent, COLOR.white];
 const INFLATE = DEATH_PAYOFF.pop;
 const ZIP = 0.8; // the let-go balloon zips about this long
@@ -170,6 +179,10 @@ export class Deaths {
       b.th = Math.min((170 + 60 * b.power) * end.s, end.y - (PITCH.top - 150));
       b.b = Math.cos(hit.dir) >= 0 ? 1 : -1;
       fx.streak(x, y - r, Math.atan2(b.ty - b.th - y, b.tx - x), (70 + 40 * b.power) * s, COLOR.white, r * 0.4, 0.22);
+      // where it took off: a skid along the blow and a few drops of its colour
+      const g = fx.ground.paint();
+      skid(g, x, y, r * 1.2 + 3 * s, r * 0.6, hit.dir);
+      drops(g, x + Math.cos(hit.dir) * r * 0.6, y, r * 0.9 + 2 * s, hit.dir, BODY[look.pet][look.team]);
     } else if (k === 'slice') {
       pose.mood = 'scared';
       b.a = b.b * frand(0.18, 0.5);
@@ -291,10 +304,12 @@ export class Deaths {
           fx.ring(x, cy, COLOR.white, r * 0.8, r * 2.5 + 5 * s, 0.24);
           fx.burst(x, cy, {
             colors: [main, light, shade, main], n: Math.round(10 * few), speed: (330 + 90 * b.power) * s, size: r * 0.4 + 2.2, life: 0.9, gravity: 560 * s, shape: 'shard', drag: 2.6, ink: true,
-            floor: y, depth: r * 0.9, shadow: true,
+            floor: y, depth: r * 0.9, shadow: true, stay: 0.5,
           });
           fx.burst(x, cy, { colors: [COLOR.white, light], n: Math.round(6 * few), speed: 250 * s, size: r * 0.22 + 2.5, life: 0.9, gravity: 380 * s, shape: 'confetti', drag: 2.2, floor: y, depth: r, shadow: true });
           fx.shake(2, 0.15);
+          // a flat splat of its colour where it stood
+          splat(fx.ground.paint(), x, y, r * 2.2 + 3 * s, b.dir, BODY[b.look.pet][b.look.team]);
         }
         break;
       }
@@ -316,21 +331,23 @@ export class Deaths {
           p.squashX = 1.85 - 0.35 * wob;
           p.mood = 'dead';
           b.flat = true;
+          p.alpha = clamp((DUR.squish - t) / 0.3, 0, 1);
           if (!b.fired) {
             b.fired = 1;
-            // the grass stays pressed flat where it landed
-            fx.groundMark('flat', x, y, r * 4.4 + 4 * s, frand(14, 18));
+            // the grass stays pressed flat where it landed and the pancake stays on it, for the rest of the fight
+            // (the body wobbles on top of it, then fades into it)
+            fx.stampMark('flat', x, y, r * 4.4 + 4 * s);
+            pancake(fx.ground.paint(), x, y, r, BODY[b.look.pet][b.look.team], b.look.pet, false);
             fx.ring(x, y, COLOR.white, r, r * 3.2 + 6 * s, 0.28, 0);
             fx.dust(x, y - 2, Math.round(7 * few), r * 0.5 + 3 * s);
             fx.burst(x, y - 3, { colors: [COLOR.white, light], n: Math.round(5 * few), speed: 190 * s, size: r * 0.2 + 1.6, life: 0.45, gravity: 700 * s, dir: -Math.PI / 2, spread: 1.3, floor: y, depth: r * 0.6, shadow: true });
             fx.shake(1.5 + 1.5 * b.power, 0.18);
           }
         }
-        p.alpha = clamp((DUR.squish - t) / 0.25, 0, 1);
         break;
       }
       case 'launch': {
-        // a squeeze, then spinning away into the night sky, and a tiny twinkle where it went
+        // a squeeze, then spinning away into the blue sky, and a tiny twinkle where it went
         if (t < 0.05) {
           p.hurt = 1;
           p.squashX = 0.72;
@@ -375,6 +392,10 @@ export class Deaths {
         if (t >= 0.27 && b.fired < 1) {
           b.fired = 1;
           fx.dust(x + b.b * r * 1.5, y, 3, r * 0.35 + 2 * s);
+          // a soft stain of its colour, and the cut carried on into the grass
+          const g = fx.ground.paint();
+          splat(g, x + b.b * r * 0.4, y, r * 1.5 + 2 * s, b.a, BODY[b.look.pet][b.look.team], 0.55);
+          cut(g, x, y, r * 3.2 + 4 * s, b.a);
         }
         if (t >= 0.38 && b.fired < 2) {
           b.fired = 2;
@@ -414,6 +435,10 @@ export class Deaths {
           b.c = r * 0.45;
           if (!b.fired) {
             b.fired = 1;
+            // the swirl it spun into the grass, and a soft stain of its colour where it fell
+            const g = fx.ground.paint();
+            swirl(g, x + b.ox * 0.5, y + b.oy * 0.5, r * 1.5 + 3 * s, b.b);
+            splat(g, x + b.ox + b.b * r * 0.5, y + b.oy, r * 1.6 + 2 * s, b.dir, BODY[b.look.pet][b.look.team], 0.7);
             fx.dust(x + b.ox + b.b * r * 0.6, y + b.oy, Math.round(5 * few), r * 0.4 + 3 * s);
             fx.burst(x + b.ox, y + b.oy - r * 1.6, { colors: SPARK, n: 3, speed: 110 * s, size: r * 0.28 + 3, life: 0.5, gravity: 240, shape: 'star', dir: -Math.PI / 2, spread: 0.9 });
             fx.shake(1.2, 0.12);
@@ -463,6 +488,8 @@ export class Deaths {
             if (b.fired < 99) {
               b.fired = 99;
               fx.dust(x + b.ox, y, 3, r * 0.3 + 2 * s, true);
+              // the let-down skin stays where it lands
+              pancake(fx.ground.paint(), x + b.ox, y, r * 0.95, BODY[b.look.pet][b.look.team], b.look.pet, true);
             }
           }
           p.alpha = clamp((DUR.deflate - t) / 0.14, 0, 1);
@@ -495,8 +522,9 @@ export class Deaths {
           p.alpha = 0;
           fx.burst(x, cy, {
             colors: STONES, n: Math.round(13 * few), speed: (250 + 60 * b.power) * s, size: r * 0.4 + 2.5, life: 1.1, gravity: 950 * s, shape: 'shard', ink: true,
-            dir: -Math.PI / 2, spread: 1.7, scatter: r * 0.7, floor: y + 2, depth: r * 0.8, shadow: true,
+            dir: -Math.PI / 2, spread: 1.7, scatter: r * 0.7, floor: y + 2, depth: r * 0.8, shadow: true, stay: 0.4,
           });
+          pile(fx.ground.paint(), x, y, r * 0.55 + 1.5 * s);
           fx.dust(x, y - r * 0.5, Math.round(5 * few), r * 0.5 + 3 * s);
           fx.ring(x, cy, COLOR.white, r * 0.5, r * 1.8 + 4 * s, 0.2);
           fx.shake(1.8, 0.15);
@@ -513,7 +541,9 @@ export class Deaths {
           b.fired = 1;
           p.alpha = 0;
           fx.ring(x, cy, COLOR.white, r * 0.6, r * 2.1 + 5 * s, 0.3);
-          fx.burst(x, cy, { colors: PETALS, n: Math.round(16 * few), speed: 210 * s, size: Math.max(3, r * 0.4), life: 1.3, gravity: 70, shape: 'petal', scatter: r * 0.6, floor: y + 1, depth: r * 1.2, shadow: true });
+          fx.burst(x, cy, { colors: PETALS, n: Math.round(16 * few), speed: 210 * s, size: Math.max(3, r * 0.4), life: 1.5, gravity: 110, shape: 'petal', scatter: r * 0.6, floor: y + 1, depth: r * 1.2, shadow: true, stay: 0.6 });
+          // a soft stain of its colour in the middle of the ring the petals settle in
+          splat(fx.ground.paint(), x, y, r * 1.5 + 2 * s, b.dir, BODY[b.look.pet][b.look.team], 0.5);
           fx.burst(x, cy, { colors: [COLOR.white], n: 4, speed: 80 * s, size: r * 0.5 + 3, life: 0.4, gravity: -20, shape: 'puff' });
         }
         break;
@@ -600,4 +630,246 @@ export class Deaths {
       ctx.restore();
     }
   }
+}
+
+// ------------------------------------------------------------------ marks left on the pitch
+
+type Tones = readonly [string, string, string];
+
+/**
+ * A flat cartoon splat of a pet's colours lying on the grass: round lobes about a middle and a few drops thrown
+ * along the blow (dir, radians in the arena), with thickness (its shade showing on the lower right), a soft ink
+ * outline and a highlight from the sun at the upper left. soft (0..1) instead: a soft stain, no outline.
+ */
+function splat(g: Ctx, x: number, y: number, size: number, dir: number, tones: Tones, soft = 1): void {
+  const [main, light] = tones;
+  const blobs: number[] = [0, 0, size * 0.48];
+  const n = 6;
+  const turn = frand(0, TAU);
+  for (let i = 0; i < n; i++) {
+    const a = turn + (i / n) * TAU + frand(-0.3, 0.3);
+    const d = size * frand(0.34, 0.5);
+    blobs.push(Math.cos(a) * d, Math.sin(a) * d, size * frand(0.15, 0.25));
+  }
+  for (let i = 0; i < 4; i++) {
+    const a = dir + frand(-0.75, 0.75);
+    const d = size * frand(0.72, 1.1);
+    blobs.push(Math.cos(a) * d, Math.sin(a) * d, size * frand(0.05, 0.1));
+  }
+  const fill = (color: string, grow: number, dx: number, dy: number, also = false) => {
+    g.fillStyle = color;
+    g.beginPath();
+    for (let pass = 0; pass < (also ? 2 : 1); pass++) {
+      const ox = pass ? 0 : dx;
+      const oy = pass ? 0 : dy;
+      for (let i = 0; i < blobs.length; i += 3) {
+        const r = Math.max(0.3, blobs[i + 2] + grow);
+        g.moveTo(blobs[i] + ox + r, blobs[i + 1] + oy);
+        g.arc(blobs[i] + ox, blobs[i + 1] + oy, r, 0, TAU);
+      }
+    }
+    g.fill();
+  };
+  g.save();
+  g.translate(x, y);
+  g.scale(1, GROUND_FLAT);
+  if (soft < 1) {
+    // a stain: the pet's light tone (nearly opaque, so it stays pastel on the green), its middle paler
+    g.globalAlpha = 0.8 + 0.15 * soft;
+    fill(light, 0, 0, 0);
+    g.globalAlpha = 0.5;
+    fill(COLOR.white, -size * 0.14, -size * 0.04, -size * 0.06);
+    g.restore();
+    return;
+  }
+  // a pastel splat with thickness: the pet's colour as its lower-right lip, its light tone on top
+  const lip = Math.max(0.8, size * 0.07);
+  fill(MARK_INK, 1, lip * 0.5, lip, true);
+  fill(main, 0, lip * 0.5, lip);
+  fill(light, 0, 0, 0);
+  // the sun on its upper left
+  g.fillStyle = 'rgba(255, 255, 255, 0.6)';
+  g.beginPath();
+  g.ellipse(-size * 0.16, -size * 0.17, size * 0.22, size * 0.12, -0.3, 0, TAU);
+  g.fill();
+  g.fillStyle = 'rgba(255, 255, 255, 0.85)';
+  g.beginPath();
+  g.arc(-size * 0.24, -size * 0.22, Math.max(0.7, size * 0.05), 0, TAU);
+  g.fill();
+  g.restore();
+}
+
+/**
+ * What a squished pet leaves: flattened into a pancake of its colour lying on the grass, a few little legs poking
+ * out at the sides, with a lip of thickness, a soft outline and the sun's highlight. let-down: a deflated skin,
+ * a little smaller and crumpled.
+ */
+function pancake(g: Ctx, x: number, y: number, r: number, tones: Tones, pet: PetType, letDown: boolean): void {
+  const [main, light, shade] = tones;
+  const rx = r * (pet === 'frog' ? 1.75 : 1.55) * (letDown ? 0.85 : 1);
+  const ry = rx * GROUND_FLAT * 0.6;
+  const lip = Math.max(0.8, r * 0.14);
+  g.save();
+  g.translate(x, y);
+  // the little legs: short rounded strokes out of each side
+  g.lineCap = 'round';
+  const legs = pet === 'frog' ? [-0.35, 0.45] : [-0.45, 0.05, 0.5];
+  for (const pass of [0, 1]) {
+    g.strokeStyle = pass ? shade : MARK_INK;
+    g.lineWidth = Math.max(1.2, r * 0.24) + (pass ? 0 : 1.6);
+    g.beginPath();
+    for (const side of [-1, 1]) {
+      for (const a of legs) {
+        const c = Math.cos(a);
+        const sn = Math.sin(a);
+        g.moveTo(side * c * rx * 0.8, sn * ry * 0.8);
+        g.lineTo(side * c * rx * 1.18, sn * ry * 1.45 + ry * 0.1);
+      }
+    }
+    g.stroke();
+  }
+  // the body: an outline, a lip of its colour, its light tone on top, a highlight
+  const body = (dx: number, dy: number, grow: number) => {
+    g.beginPath();
+    if (letDown) {
+      // crumpled: a few soft bumps round the edge
+      for (let i = 0; i <= 10; i++) {
+        const a = (i / 10) * TAU;
+        const k = 1 + (i % 2 ? -0.08 : 0.05);
+        const px = dx + Math.cos(a) * (rx * k + grow);
+        const py = dy + Math.sin(a) * (ry * k + grow);
+        if (i) g.lineTo(px, py);
+        else g.moveTo(px, py);
+      }
+    } else g.ellipse(dx, dy, rx + grow, ry + grow, 0, 0, TAU);
+  };
+  body(lip * 0.3, lip * 0.6, 1);
+  g.fillStyle = MARK_INK;
+  g.fill();
+  body(lip * 0.3, lip * 0.6, 0);
+  g.fillStyle = main;
+  g.fill();
+  body(0, 0, 0);
+  g.fillStyle = light;
+  g.fill();
+  g.fillStyle = 'rgba(255, 255, 255, 0.6)';
+  g.beginPath();
+  g.ellipse(-rx * 0.32, -ry * 0.3, rx * 0.3, ry * 0.26, -0.15, 0, TAU);
+  g.fill();
+  if (letDown) {
+    // a crease across it
+    g.strokeStyle = main;
+    g.lineWidth = Math.max(0.8, r * 0.1);
+    g.beginPath();
+    g.moveTo(-rx * 0.35, ry * 0.15);
+    g.quadraticCurveTo(0, -ry * 0.25, rx * 0.4, ry * 0.2);
+    g.stroke();
+  }
+  g.restore();
+}
+
+/** A few round drops of a pet's light tone with a lip of its colour, thrown along dir (arena radians). */
+function drops(g: Ctx, x: number, y: number, size: number, dir: number, tones: Tones): void {
+  const [main, light] = tones;
+  for (let i = 0; i < 3; i++) {
+    const a = dir + frand(-0.6, 0.6);
+    const d = size * frand(0.2, 1);
+    const px = x + Math.cos(a) * d;
+    const py = y + Math.sin(a) * d * GROUND_FLAT;
+    const r = Math.max(0.9, size * frand(0.1, 0.17));
+    g.fillStyle = MARK_INK;
+    g.beginPath();
+    g.ellipse(px + r * 0.15, py + r * 0.2, r + 0.8, r * GROUND_FLAT + 0.8, 0, 0, TAU);
+    g.fill();
+    g.fillStyle = main;
+    g.beginPath();
+    g.ellipse(px + r * 0.15, py + r * 0.2, r, r * GROUND_FLAT, 0, 0, TAU);
+    g.fill();
+    g.fillStyle = light;
+    g.beginPath();
+    g.ellipse(px, py, r * 0.85, r * GROUND_FLAT * 0.85, 0, 0, TAU);
+    g.fill();
+  }
+}
+
+/** A skid of worn grass along dir (arena radians), len long and w wide, from (x, y). */
+function skid(g: Ctx, x: number, y: number, len: number, w: number, dir: number): void {
+  g.save();
+  g.translate(x, y);
+  g.scale(1, GROUND_FLAT);
+  g.rotate(dir);
+  g.fillStyle = WORN;
+  g.beginPath();
+  g.moveTo(-w * 0.3, -w * 0.5);
+  g.quadraticCurveTo(len * 0.5, -w * 0.62, len, 0);
+  g.quadraticCurveTo(len * 0.5, w * 0.62, -w * 0.3, w * 0.5);
+  g.arc(-w * 0.3, 0, w * 0.5, Math.PI / 2, -Math.PI / 2);
+  g.fill();
+  // a few blades combed along it, in the deeper green of the grass
+  g.strokeStyle = 'rgba(46, 120, 52, 0.45)';
+  g.lineWidth = Math.max(0.8, w * 0.1);
+  g.beginPath();
+  for (let i = 0; i < 4; i++) {
+    const o = frand(-0.3, 0.3) * w;
+    const a = frand(0, 0.5) * len;
+    g.moveTo(a, o);
+    g.lineTo(a + len * frand(0.2, 0.4), o * 0.8);
+  }
+  g.stroke();
+  g.restore();
+}
+
+/** A cut carried on into the grass at angle a (screen radians): a thin bright scratch with its shadow under it. */
+function cut(g: Ctx, x: number, y: number, len: number, a: number): void {
+  g.save();
+  g.translate(x, y);
+  g.scale(1, GROUND_FLAT);
+  g.rotate(a);
+  const w = Math.max(1, len * 0.035);
+  for (const [dy, color] of [[w * 0.9, 'rgba(18, 58, 34, 0.28)'], [0, 'rgba(255, 253, 236, 0.92)']] as const) {
+    g.fillStyle = color;
+    g.beginPath();
+    g.moveTo(-len / 2, dy);
+    g.quadraticCurveTo(0, dy - w, len / 2, dy);
+    g.quadraticCurveTo(0, dy + w, -len / 2, dy);
+    g.fill();
+  }
+  g.restore();
+}
+
+/** The swirl a pet spun into the grass: two open rings of worn grass, turning the way it spun (side). */
+function swirl(g: Ctx, x: number, y: number, r: number, side: number): void {
+  g.save();
+  g.translate(x, y);
+  g.scale(side, GROUND_FLAT);
+  g.strokeStyle = WORN;
+  g.lineCap = 'round';
+  const a0 = frand(0, TAU);
+  g.lineWidth = Math.max(1.2, r * 0.22);
+  g.beginPath();
+  g.arc(0, 0, r, a0, a0 + TAU * 0.72);
+  g.stroke();
+  g.lineWidth = Math.max(1, r * 0.15);
+  g.beginPath();
+  g.arc(r * 0.12, 0, r * 0.55, a0 + 2, a0 + 2 + TAU * 0.6);
+  g.stroke();
+  g.restore();
+}
+
+/** A little pile of stone bits: a few chunky chips leaning together, lit from the upper left, with a soft shadow. */
+function pile(g: Ctx, x: number, y: number, size: number): void {
+  g.fillStyle = GRASS_SHADE;
+  g.globalAlpha = 0.2;
+  g.beginPath();
+  g.ellipse(x + size * 0.3, y + size * 0.15, size * 1.5, size * 1.5 * GROUND_FLAT * 0.7, 0, 0, TAU);
+  g.fill();
+  g.globalAlpha = 1;
+  const bits = [
+    [-0.8, 0.1, 0.7, 1],
+    [0.75, 0.15, 0.65, 0],
+    [0, -0.3, 0.9, 2],
+    [-0.25, 0.35, 0.55, 1],
+    [0.4, 0.4, 0.5, 2],
+  ];
+  for (const [dx, dy, k, c] of bits) drawShard(g, x + dx * size, y + dy * size - size * 0.3, size * k, frand(0, TAU), STONES[c], true);
 }

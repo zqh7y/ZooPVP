@@ -16,35 +16,35 @@ export const FONT = '"Barlow Condensed", "Arial Narrow", "Helvetica Neue", Arial
  * UI below. The few interface entries left here (page, grid, health, bot) are tuned to match UI.
  */
 export const COLOR = {
-  page: '#0c1016', // behind the canvas
+  page: '#f3ead9', // behind the canvas (and the screen-change fade): warm cream
   ink: '#14181f', // every outline: a neutral slate-black, so the art sits with the interface
   white: '#ffffff',
-  textDim: '#8a94a3',
-  textInk: '#4a3a52', // text on paper
-  toast: '#ffd84a',
-  shade: 'rgba(8, 11, 16, 0.8)', // the veil behind a panel that covers the screen
+  textDim: '#6b7380',
+  textInk: '#1f2733', // text on paper
+  toast: '#ffc21a',
+  shade: 'rgba(255, 248, 236, 0.8)', // the light wash behind a panel that covers the screen
 
   // paper: panels, pills and cards
-  paper: '#fff6e6',
-  paperDark: '#ecd9bd',
-  paperEdge: '#c9ad86',
-  well: '#1e252f', // a recessed window in paper (numbers sit in it)
-  wellShade: 'rgba(0, 0, 0, 0.25)',
+  paper: '#fffaf2',
+  paperDark: '#f1e6d3',
+  paperEdge: '#dccbb0',
+  well: '#efe4d1', // a recessed window in paper (numbers sit in it)
+  wellShade: 'rgba(120, 92, 52, 0.18)',
 
   // accents
   sakura: '#ff9ec4',
   sakuraLight: '#ffd3e4',
   sakuraDark: '#e0649a',
-  vermilion: '#ef4b34', // the main action (BATTLE)
+  vermilion: '#ef4b34',
   vermilionLight: '#ff8a6b',
   vermilionDark: '#b82f20',
-  indigo: '#3d4a9e', // secondary actions
+  indigo: '#3d4a9e',
   indigoLight: '#7d8ee6',
   indigoDark: '#28306e',
-  gold: '#ffc93c', // trophies, rewards
+  gold: '#ffc21a', // trophies, rewards
   goldLight: '#fff0a8',
-  goldDark: '#d9951a',
-  jade: '#3fc48a', // rolls
+  goldDark: '#d99400',
+  jade: '#3fc48a',
   jadeLight: '#a6f0cb',
   jadeDark: '#1f8f5f',
 
@@ -63,19 +63,19 @@ export const COLOR = {
   hpBad: '#e5484d',
   hpBack: '#1a2029',
 
-  // the grid
-  gridFrame: '#151a22',
-  gridInner: '#151a22',
-  gridInnerEdge: '#2b3441',
-  cell: 'rgba(0, 0, 0, 0.28)',
-  cellLight: 'rgba(255, 255, 255, 0.04)',
-  joint: '#ffd21f', // a link in use
-  jointIdle: 'rgba(255, 255, 255, 0.22)', // a link the pet does not use (it has a better one)
-  valid: 'rgba(70, 196, 107, 0.22)',
+  // the grid: a sand tray with cream cells
+  gridFrame: '#e9dcc5',
+  gridInner: '#efe4d1',
+  gridInnerEdge: '#dccbb0',
+  cell: 'rgba(120, 92, 52, 0.08)',
+  cellLight: 'rgba(255, 255, 255, 0.6)',
+  joint: '#ffc21a', // a link in use
+  jointIdle: 'rgba(31, 39, 51, 0.22)', // a link the pet does not use (it has a better one)
+  valid: 'rgba(60, 170, 90, 0.22)',
   invalid: 'rgba(229, 72, 77, 0.22)',
-  fuse: '#ffd21f',
+  fuse: '#ffc21a',
 
-  bot: '#3a4554', // the BOT tag
+  bot: '#2b3441', // the BOT tag
 };
 
 /** Team colours: 0 = you (blue), 1 = the opponent (red). */
@@ -85,37 +85,52 @@ export const TEAM = [
 ] as const;
 
 /**
- * The interface: a match-day scoreboard. Dark slate surfaces, off-white text, one grey for secondary text and
- * one accent (a floodlight yellow that reads on slate and on grass) for the main action and highlights.
- * Team blue / red appear only where something belongs to a team; class colours only as thin lines and letters.
+ * The interface: sunny match day. Warm white and cream surfaces, dark slate text, one grey for secondary text and
+ * one main colour (a sunny gold) for the main action and highlights, with dark text on it. Team blue / red appear
+ * only where something belongs to a team; class tones only on class plates and tile rims.
  */
 export const UI = {
-  bg: '#0c1016', // the page behind everything
-  surface: '#151a22', // bars, panels, plates
-  surfaceAlt: '#1f2630', // neutral buttons, chips
-  tile: '#28313d', // the tile a piece sits on
-  tileHi: '#343f4d', // a lifted tile
-  track: '#242c37', // the empty part of a bar
-  border: '#2b3441',
-  borderStrong: '#4a5767',
-  text: '#f1f3f5',
-  textDim: '#8a94a3',
-  textMute: '#566170',
-  accent: '#ffd21f',
-  accentDim: '#d9b010', // the accent, pressed
-  accentText: '#11151b', // text on the accent
-  ok: '#e9edf1', // a good state is plain light (one hue only: the gold)
+  bg: '#f6efe3', // the page behind everything: warm cream
+  surface: '#fffaf2', // bars, panels, plates: warm white
+  surfaceAlt: '#f3eadb', // neutral chips, inner cells
+  tile: '#fffdf8', // the top face of the tile a piece sits on
+  tileHi: '#ffffff', // a lifted tile
+  track: '#ebe0cd', // the empty part of a bar
+  border: '#e8dcc8',
+  borderStrong: '#d3c3a6',
+  text: '#1f2733',
+  textDim: '#6b7380',
+  textMute: '#a4a9b0',
+  accent: '#ffc21a',
+  accentDim: '#e8a900', // the accent, pressed
+  accentDark: '#d18f00', // the side face of a gold block
+  accentText: '#1f2733', // text on the accent
+  ok: '#3caa5a', // a drop that fits: the grass green
   danger: '#e5484d',
-  /** the thin dark edge of text that sits directly on the pitch */
-  edge: 'rgba(8, 11, 16, 0.8)',
-  /** a see-through slate, for plates that float over the pitch */
-  glass: 'rgba(12, 16, 22, 0.9)',
-  scrim: 'rgba(8, 11, 16, 0.8)',
-  /** class line colours E..SSS (greys, silver, then gold: see TIER) and the lighter ones for letters */
-  tier: ['#4f5968', '#7f8a99', '#a0aab7', '#cfd6de', '#d9a52e', '#ffd21f', '#fff3c4'],
-  tierText: ['#838d9b', '#aeb7c3', '#c3cbd5', '#eef1f4', '#f0c75a', '#ffd21f', '#fff6dc'],
-  /** one colour per league, Sprout..Legend: metals, ending in the main gold */
-  league: ['#7d8794', '#a37a52', '#b9c1cb', '#e0b84a', '#d8dee6', '#eef3f7', '#ffd21f'],
+  sky: '#e3f3ff', // a pale sky tint, where a panel wants air
+  /** the soft warm shadow everything casts on the cream (sun from the upper left) */
+  shadow: 'rgba(110, 80, 40, 0.16)',
+  /** the thin dark edge of light text that sits directly on the pitch */
+  edge: 'rgba(22, 40, 26, 0.72)',
+  /** a see-through warm white, for plates that float over the pitch */
+  glass: 'rgba(255, 250, 242, 0.95)',
+  scrim: 'rgba(250, 243, 230, 0.78)',
+  /** class rim colours E..SSS on light surfaces: greys, silver, then gold (see TIER) */
+  tier: ['#a9afb7', '#8e96a1', '#737c88', '#9fb0c2', '#e4a311', '#f5b700', '#f0c64a'],
+  /** the class plate: fill top, fill bottom, letter */
+  tierPlate: [
+    ['#d6d9de', '#bfc4cb', '#3d4552'],
+    ['#b8bec6', '#9ea6b0', '#ffffff'],
+    ['#8f98a4', '#77818e', '#ffffff'],
+    ['#f4f7fa', '#bcc7d3', '#2c3644'],
+    ['#ffd04a', '#e8a10c', '#3a2700'],
+    ['#ffe15c', '#f5ae00', '#3a2400'],
+    ['#fffdf2', '#ffd96a', '#8a5600'],
+  ],
+  /** class letters on a light surface (odds rows, captions) */
+  tierText: ['#8a919b', '#737b86', '#5b6470', '#5e7389', '#c98a00', '#d99a00', '#b8860b'],
+  /** one colour per league, Sprout..Legend: metals readable on cream, ending in the main gold */
+  league: ['#8a939e', '#b07a48', '#8f9cab', '#e0a516', '#6f8fa8', '#4fa3c7', '#f2b200'],
 };
 
 /**
@@ -139,6 +154,7 @@ export const CLASS_FX = { s: '#ffd21f', sss: '#fff3c4', spark: '#fffbe8' };
  * missing, it is added here with its role.
  */
 export const TYPE = {
+  power: 46, // the lobby's POWER number
   title: 60, // VICTORY, FIGHT!
   h1: 40, // a screen's main number or name
   button: 36, // the word on a main button
@@ -149,6 +165,7 @@ export const TYPE = {
   label: 18, // a small button
   caption: 16, // a caption beside or under a value
   small: 15, // captions
+  badge: 20, // the class letter on a piece tile
   tag: 13, // the BOT tag, a button's second line, a class letter at full size
   tiny: 12, // badges on tiles (the smallest text the game draws)
 };
@@ -159,7 +176,7 @@ export const S = {
   gap: 8, // between neighbours
   pad: 12, // inside a panel, and the screen's side margin
   section: 24, // between sections
-  radius: { s: 4, m: 6, l: 8 },
+  radius: { s: 6, m: 10, l: 16 },
   line: { thin: 1, ui: 1.5, bold: 2 }, // border widths
   barH: 48, // a top-bar pill
   btnH: 84, // a main button
@@ -177,4 +194,4 @@ export const TOPBAR = { y: 14, h: S.barH };
 export const FIELD = { x: 40, y: 295, w: 460, h: 657 };
 
 /** The strip of the field in the lobby where your army stands idle. */
-export const STAGE = { x: 0, y: 104, w: W, h: 250 };
+export const STAGE = { x: 0, y: 90, w: W, h: 206 };

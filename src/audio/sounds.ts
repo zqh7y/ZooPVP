@@ -26,6 +26,17 @@ const yo = (i: number) => ROOT + 12 * Math.floor(i / 5) + YO_SCALE[((i % 5) + 5)
 const chord = (root: number) => WIDE.map((x) => root + x);
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
+// ------------------------------------------------------------------ hit building blocks
+/** The crisp transient: a few milliseconds of bright noise. */
+function click(s: Synth, t: number, f: number, v: number) {
+  s.noise({ t, filter: 'highpass', f, a: 0.0002, d: 0.007, v: v * 0.8 });
+  s.noise({ t, filter: 'bandpass', f: f * 0.55, q: 1.2, a: 0.0002, d: 0.012, v });
+}
+/** The body: a sine that drops fast, driven, felt more than heard. */
+function thump(s: Synth, t: number, f: number, d: number, v: number) {
+  s.tone({ t, f: [[0, f * 2.2], [0.03, f], [d, f * 0.45]], a: 0.0006, d, v, to: s.drive(2.2) });
+}
+
 /** A value, or [time, value] points joined by exponential ramps (as in the synth). */
 type Pts = number | [number, number][];
 
@@ -737,107 +748,105 @@ export const SOUNDS: Record<SoundName, SoundDef> = {
     },
   },
   bite: {
-    // a nip: the jaws clack shut twice, faster than you can count, with a tiny yelp
-    dur: 0.14, vars: 5, vol: 0.14, cat: 'battle', gap: 0.04, max: 4, jitter: 150,
+    // a wet slap: crisp click, a squishy chomp, a low thump that drops fast
+    dur: 0.2, vars: 5, vol: 0.3, cat: 'battle', gap: 0.035, max: 4, jitter: 180,
     make: (s) => {
-      const r = s.rand(0.8, 1.24);
-      s.noise({ filter: 'bandpass', f: 2600 * r, q: 3, a: 0.0004, d: 0.012, v: 0.9 });
-      s.noise({ t: 0.022, filter: 'bandpass', f: 3400 * r, q: 3, a: 0.0004, d: 0.01, v: 0.6 });
-      s.tone({ f: [[0, 1700 * r], [0.05, 800 * r]], a: 0.001, d: 0.05, v: 0.4 });
-      s.tone({ f: [[0, 260], [0.04, 130]], a: 0.0008, d: 0.045, v: 0.5 });
+      const r = s.rand(0.82, 1.22);
+      thump(s, 0, 190 * r, 0.09, 0.95);
+      click(s, 0, 4200 * r, 0.75);
+      s.noise({ t: 0.004, filter: 'bandpass', f: [[0, 1500 * r], [0.05, 380]], q: 4, a: 0.001, d: 0.06, v: 0.8 });
+      s.tone({ t: 0.004, f: [[0, 520 * r], [0.05, 210 * r]], lp: 1400, a: 0.001, d: 0.06, v: 0.45 });
+      s.tone({ t: 0.03, f: [[0, 900 * r], [0.04, 1500 * r]], a: 0.002, d: 0.035, v: 0.12 });
     },
   },
   knife: {
-    // a stab: a thin, quick rip of air and a glint of steel
-    dur: 0.14, vars: 4, vol: 0.13, cat: 'battle', gap: 0.04, max: 3, jitter: 120,
+    // a short whoosh only
+    dur: 0.14, vars: 4, vol: 0.14, cat: 'battle', gap: 0.04, max: 3, jitter: 120,
     make: (s) => {
       const r = s.rand(0.82, 1.22);
-      s.noise({ color: 'pink', filter: 'bandpass', f: [[0, 2200 * r], [0.06, 6800 * r]], q: 2.2, a: 0.018, d: 0.05, v: 0.9 });
-      s.noise({ filter: 'highpass', f: 7000, a: 0.01, d: 0.04, v: 0.25 });
-      s.bell({ t: 0.02, f: 4200 * r, ratio: 1.53, index: 1, d: 0.05, v: 0.08 });
+      s.noise({ color: 'pink', filter: 'bandpass', f: [[0, 2200 * r], [0.07, 6800 * r]], q: 2.2, a: 0.02, d: 0.05, v: 0.9 });
+      s.noise({ filter: 'highpass', f: 7000, a: 0.012, d: 0.04, v: 0.22 });
     },
   },
   knifeHit: {
-    // tchk: a snap, a ping of steel, a small soft thup
-    dur: 0.2, vars: 4, vol: 0.2, cat: 'battle', gap: 0.035, max: 4, jitter: 100,
+    // tik-THUD: a sharp tick, a bright steel ting and a meaty thud
+    dur: 0.22, vars: 5, vol: 0.34, cat: 'battle', gap: 0.035, max: 4, jitter: 120,
     make: (s) => {
       const r = s.rand(0.84, 1.2);
-      s.noise({ filter: 'highpass', f: 3500, a: 0.0003, d: 0.008, v: 0.8 });
-      s.noise({ filter: 'bandpass', f: [[0, 2400 * r], [0.03, 1100]], q: 1.6, a: 0.0005, d: 0.035, v: 0.8 });
-      s.bell({ f: 3300 * r, ratio: 1.53, index: 1.4, d: 0.09, v: 0.22 });
-      s.tone({ f: [[0, 210], [0.05, 90]], a: 0.0008, d: 0.06, v: 0.7, to: s.drive(2) });
+      click(s, 0, 6200 * r, 1);
+      thump(s, 0, 170 * r, 0.1, 1);
+      s.noise({ t: 0.002, filter: 'bandpass', f: [[0, 2600 * r], [0.03, 900]], q: 1.8, a: 0.0006, d: 0.04, v: 0.7 });
+      s.bell({ f: 3600 * r, ratio: 1.53, index: 1.2, d: 0.07, v: 0.16 });
+      s.tone({ t: 0.002, f: [[0, 300 * r], [0.06, 110]], lp: 900, a: 0.001, d: 0.07, v: 0.6 });
     },
   },
   bat: {
-    // a heavy swing: a low rush of air
-    dur: 0.32, vars: 3, vol: 0.2, cat: 'battle', gap: 0.06, max: 3, jitter: 100,
+    // a short heavy whoosh only
+    dur: 0.28, vars: 3, vol: 0.2, cat: 'battle', gap: 0.06, max: 3, jitter: 100,
     make: (s) => {
       const r = s.rand(0.86, 1.16);
-      whoosh(s, 0, 220 * r, 1300 * r, 300, 0.24, 0.9, 1.6);
-      s.noise({ color: 'brown', filter: 'lowpass', f: [[0, 200], [0.1, 600], [0.24, 150]], a: 0.08, d: 0.14, v: 0.5 });
-      s.tone({ type: 'triangle', f: [[0, 130 * r], [0.1, 260 * r], [0.22, 110]], lp: 800, a: 0.07, d: 0.14, v: 0.2 });
+      whoosh(s, 0, 220 * r, 1300 * r, 300, 0.22, 0.9, 1.6);
+      s.noise({ color: 'brown', filter: 'lowpass', f: [[0, 200], [0.1, 600], [0.22, 150]], a: 0.07, d: 0.12, v: 0.45 });
     },
   },
   batHit: {
-    // BONK: the crack of the bat, a hollow wooden note that sags, weight behind it, and the bonked head ringing
-    dur: 0.6, vars: 4, vol: 0.44, cat: 'battle', verb: 0.15, gap: 0.05, max: 4, jitter: 50,
+    // BONK: wooden crack, a huge hollow bonk, a deep thump and a short bouncy boing
+    dur: 0.46, vars: 5, vol: 0.6, cat: 'battle', verb: 0.1, gap: 0.05, max: 4, jitter: 70,
     make: (s) => {
       const r = s.rand(0.88, 1.14);
-      const hot = s.drive(2.5);
-      s.noise({ filter: 'bandpass', f: 1900 * r, q: 1.8, a: 0.0004, d: 0.016, v: 0.9 });
-      s.noise({ filter: 'highpass', f: 5000, a: 0.0003, d: 0.006, v: 0.5 });
-      s.tone({ type: 'triangle', f: [[0, 470 * r], [0.03, 360 * r], [0.2, 300 * r]], a: 0.0006, d: 0.2, v: 1, to: hot });
-      s.tone({ f: [[0, 940 * r], [0.03, 730 * r]], a: 0.0006, d: 0.07, v: 0.4 });
-      s.noise({ filter: 'bandpass', f: 720 * r, q: 7, a: 0.0005, d: 0.09, v: 0.8 });
-      s.tone({ f: [[0, 160], [0.14, 52]], a: 0.001, d: 0.18, v: 0.9, to: hot });
-      boing(s, 0.035, 250 * r, 0.3, 0.22, 21, 420);
-      s.bell({ t: 0.01, f: 2100 * r, ratio: 2.76, index: 0.8, d: 0.16, v: 0.08 });
+      const hot = s.drive(2.6);
+      click(s, 0, 3800 * r, 1);
+      thump(s, 0, 150 * r, 0.16, 1.1);
+      s.tone({ type: 'triangle', f: [[0, 480 * r], [0.03, 360 * r], [0.16, 290 * r]], a: 0.0006, d: 0.15, v: 1, to: hot });
+      s.noise({ filter: 'bandpass', f: 760 * r, q: 7, a: 0.0005, d: 0.08, v: 0.8 });
+      s.noise({ filter: 'bandpass', f: 1900 * r, q: 1.8, a: 0.0004, d: 0.018, v: 0.8 });
+      boing(s, 0.04, 240 * r, 0.2, 0.2, 21, 420);
     },
   },
   spear: {
-    // a thrust: a narrow, fast rush of air with a whistle in it
-    dur: 0.2, vars: 3, vol: 0.15, cat: 'battle', gap: 0.05, max: 3, jitter: 100,
+    // a quick whistling whoosh only
+    dur: 0.18, vars: 3, vol: 0.15, cat: 'battle', gap: 0.05, max: 3, jitter: 100,
     make: (s) => {
       const r = s.rand(0.86, 1.16);
       s.noise({ color: 'pink', filter: 'bandpass', f: [[0, 900 * r], [0.07, 4600 * r]], q: 3.5, a: 0.03, d: 0.06, v: 0.9 });
-      s.tone({ f: [[0, 1100 * r], [0.08, 2600 * r]], a: 0.03, d: 0.05, v: 0.12 });
-      s.noise({ filter: 'highpass', f: 6000, a: 0.04, d: 0.04, v: 0.2 });
+      s.tone({ f: [[0, 1100 * r], [0.08, 2600 * r]], a: 0.03, d: 0.04, v: 0.1 });
     },
   },
   spearHit: {
-    // thok-drrr: it lands, and the shaft quivers
-    dur: 0.34, vars: 3, vol: 0.24, cat: 'battle', verb: 0.08, gap: 0.045, max: 3, jitter: 80,
+    // a rush into a firm THUNK, the shaft quivering a moment
+    dur: 0.26, vars: 5, vol: 0.4, cat: 'battle', verb: 0.05, gap: 0.04, max: 4, jitter: 90,
     make: (s) => {
       const r = s.rand(0.86, 1.16);
-      s.noise({ filter: 'highpass', f: 3000, a: 0.0003, d: 0.008, v: 0.7 });
-      s.noise({ filter: 'bandpass', f: [[0, 1700 * r], [0.04, 600]], q: 1.5, a: 0.0005, d: 0.05, v: 0.9 });
-      s.tone({ f: [[0, 250 * r], [0.06, 100]], a: 0.0008, d: 0.08, v: 0.9, to: s.drive(2) });
-      s.tone({ t: 0.012, type: 'triangle', f: [[0, 560 * r], [0.2, 470 * r]], lp: 2400, a: 0.002, d: 0.2, v: 0.3, vib: [42, 260] });
+      s.noise({ filter: 'bandpass', f: [[0, 800 * r], [0.015, 3800 * r]], q: 3, a: 0.006, d: 0.012, v: 0.45 });
+      click(s, 0.014, 3200 * r, 0.9);
+      thump(s, 0.014, 140 * r, 0.12, 1.1);
+      s.noise({ t: 0.016, filter: 'bandpass', f: [[0, 1500 * r], [0.04, 500]], q: 1.5, a: 0.0005, d: 0.05, v: 0.8 });
+      s.tone({ t: 0.03, type: 'triangle', f: [[0, 600 * r], [0.12, 520 * r]], lp: 2200, a: 0.002, d: 0.12, v: 0.2, vib: [42, 240] });
     },
   },
   shieldBash: {
-    // a shove with the shield: a dull iron clonk on wood, with weight
-    dur: 0.5, vars: 3, vol: 0.32, cat: 'battle', verb: 0.12, gap: 0.06, max: 3, jitter: 60,
+    // a heavy iron clonk with weight
+    dur: 0.4, vars: 4, vol: 0.45, cat: 'battle', verb: 0.1, gap: 0.06, max: 3, jitter: 70,
     make: (s) => {
       const r = s.rand(0.88, 1.12);
-      s.bell({ f: 310 * r, ratio: 2.76, index: 1.8, d: 0.3, v: 0.45 });
-      s.bell({ f: 860 * r, ratio: 1.41, index: 1.2, d: 0.14, v: 0.2 });
-      s.tone({ f: [[0, 170], [0.14, 55]], a: 0.001, d: 0.17, v: 1, to: s.drive(2.5) });
-      s.noise({ filter: 'bandpass', f: 1500, q: 1.2, a: 0.0005, d: 0.05, v: 0.6 });
-      wood(s, 0, 420 * r, 0.5, 0.06, 0.6);
+      click(s, 0, 3000 * r, 0.9);
+      thump(s, 0, 120 * r, 0.16, 1.1);
+      s.bell({ f: 330 * r, ratio: 2.76, index: 1.8, d: 0.22, v: 0.5 });
+      s.bell({ f: 870 * r, ratio: 1.41, index: 1.2, d: 0.1, v: 0.22 });
+      wood(s, 0, 420 * r, 0.5, 0.05, 0.5);
     },
   },
   block: {
-    // a hit lands on a shield: clang
-    dur: 0.45, vars: 3, vol: 0.24, cat: 'battle', verb: 0.15, gap: 0.06, max: 3, jitter: 80,
+    // a metallic CLANG with a ringing tail
+    dur: 0.42, vars: 4, vol: 0.38, cat: 'battle', verb: 0.15, gap: 0.05, max: 3, jitter: 90,
     make: (s) => {
       const r = s.rand(0.86, 1.16);
-      s.noise({ filter: 'highpass', f: 4000, a: 0.0003, d: 0.007, v: 0.7 });
-      s.bell({ f: 540 * r, ratio: 2.76, index: 2.2, d: 0.32, v: 0.5 });
-      s.bell({ f: 1380 * r, ratio: 1.41, index: 1.6, d: 0.24, v: 0.3 });
-      s.bell({ f: 2950 * r, ratio: 1.83, index: 1, d: 0.12, v: 0.14 });
-      s.noise({ filter: 'bandpass', f: 2400, q: 1.2, a: 0.0005, d: 0.04, v: 0.5 });
-      s.tone({ f: [[0, 150], [0.08, 70]], a: 0.001, d: 0.09, v: 0.5 });
+      click(s, 0, 7000 * r, 1);
+      thump(s, 0, 130 * r, 0.08, 0.8);
+      s.bell({ f: 560 * r, ratio: 2.76, index: 2.2, d: 0.34, v: 0.5 });
+      s.bell({ f: 1400 * r, ratio: 1.41, index: 1.6, d: 0.24, v: 0.3 });
+      s.bell({ f: 3000 * r, ratio: 1.83, index: 1, d: 0.12, v: 0.14 });
+      s.noise({ filter: 'bandpass', f: 2400, q: 1.2, a: 0.0005, d: 0.035, v: 0.5 });
     },
   },
   hop: {

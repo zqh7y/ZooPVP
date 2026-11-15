@@ -71,6 +71,15 @@ export function rollToken(ctx: Ctx, x: number, y: number, size: number, color?: 
   });
 }
 
+/** A lightning bolt: an army's power. Filled, so it reads at a glance. */
+export function bolt(ctx: Ctx, x: number, y: number, size: number, color?: string) {
+  glyph(ctx, x, y, size, ink(color), () => {
+    poly(ctx, [8, -44, -26, 6, -2, 6, -10, 44, 26, -8, 2, -8]);
+    ctx.fill();
+    ctx.stroke();
+  });
+}
+
 /** Crossed blades: a fight, an army's power. */
 export function swords(ctx: Ctx, x: number, y: number, size: number, color?: string) {
   glyph(ctx, x, y, size, ink(color), () => {
@@ -205,7 +214,7 @@ export function leagueBadge(ctx: Ctx, x: number, y: number, size: number, index:
     ctx.closePath();
     if (solid) ctx.fill();
     ctx.stroke();
-    ctx.strokeStyle = ctx.fillStyle = solid ? UI.bg : color;
+    ctx.strokeStyle = ctx.fillStyle = solid ? '#ffffff' : color;
     if (i === 6) {
       starPath(ctx, 0, -2, 22, 9.5, 5);
       ctx.fill();

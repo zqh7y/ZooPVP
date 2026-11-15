@@ -124,6 +124,27 @@ export interface TextOpts {
   onPitch?: boolean;
 }
 
+/** true for a dark #rgb / #rrggbb / rgb() colour (relative luminance under about 0.4). */
+export function isDark(c: string): boolean {
+  let r = 255;
+  let g = 255;
+  let b = 255;
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(c.trim());
+  if (m) {
+    const h = m[1].length === 3 ? m[1].replace(/./g, (x) => x + x) : m[1];
+    r = parseInt(h.slice(0, 2), 16);
+    g = parseInt(h.slice(2, 4), 16);
+    b = parseInt(h.slice(4, 6), 16);
+  } else {
+    const q = /rgba?\(([\d.]+)[ ,]+([\d.]+)[ ,]+([\d.]+)/.exec(c);
+    if (!q) return false;
+    r = +q[1];
+    g = +q[2];
+    b = +q[3];
+  }
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b < 105;
+}
+
 /** Clean interface text. No outline, unless it sits on the pitch (onPitch, or a caller that asks for an edge). */
 export function label(ctx: Ctx, s: string, x: number, y: number, size: number, o: TextOpts = {}) {
   const track = o.track ?? trackOf(size);
@@ -135,13 +156,15 @@ export function label(ctx: Ctx, s: string, x: number, y: number, size: number, o
   // the spacing after the last letter counts in the advance: take it back so the text stays on its anchor
   const tx = align === 'center' ? x + track / 2 : align === 'right' || align === 'end' ? x + track : x;
   const edge = o.onPitch || (o.lw ?? 0) > 0 ? Math.max(2, Math.min(4, size * 0.09)) : 0;
+  // text on the pitch is white by default; whatever its colour, its edge takes the opposite tone so it reads on grass
+  const fill = o.color ?? (edge > 0 ? '#ffffff' : UI.text);
   if (edge > 0) {
     ctx.lineJoin = 'round';
     ctx.lineWidth = edge;
-    ctx.strokeStyle = o.outline ?? UI.edge;
+    ctx.strokeStyle = o.outline ?? (typeof fill === 'string' && isDark(fill) ? 'rgba(255, 255, 255, 0.9)' : UI.edge);
     ctx.strokeText(s, tx, y);
   }
-  ctx.fillStyle = o.color ?? UI.text;
+  ctx.fillStyle = fill;
   ctx.fillText(s, tx, y);
   setTrack(ctx, 0);
 }

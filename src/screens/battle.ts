@@ -1,55 +1,60 @@
 import { music, sfx } from '../audio/engine';
 import type { SoundName } from '../audio/engine';
-import { ARENA, FIGHT, REWARD } from '../data';
+import { ARENA, CLASSES, FIGHT, REWARD } from '../data';
 import { PITCH, project, projectInto, screenAngle, TILT, type Projected } from '../draw/camera';
 import { Deaths } from '../draw/deaths';
-import { Fx } from '../draw/fx';
+import { Fx, GRASS_SHADE } from '../draw/fx';
 import { koStar, rollToken } from '../draw/icons';
 import { restPose, type PetLook, type PetPose } from '../draw/petTypes';
 import { petArt } from '../draw/pets';
-import { fitLabel, meter, ribbon, tugBar } from '../draw/ui';
+import { meter, ribbon, SCORE_BUG, scoreBug, tugBar } from '../draw/ui';
 import { fchance, frand } from '../rng';
 import type { App, Screen } from '../screen';
 import { createBattle } from '../sim/battle';
 import type { Battle, SimEvent, SimUnit } from '../sim/types';
 import { COLOR, H, S, TEAM, TYPE, UI, W } from '../theme';
 import type { Team, WeaponType } from '../types';
-import { clamp, easeOutBack, easeOutCubic, label, rr, type Ctx } from '../util';
+import { clamp, easeOutBack, easeOutCubic, isDark, label, rr, type Ctx } from '../util';
 
 /*
- * The fight: one automatic battle on a floodlit pitch, seen by the match camera from behind your end, the
+ * The fight: one automatic battle on a sunny pitch, seen by the match camera from behind your end, the
  * opponent (red) at the far end and you (blue) at the near end. The simulator decides everything; this screen
  * only shows it, in depth (every fighter, effect and mark is placed with the camera and drawn at its depth's
  * scale) and makes every hit and knock-out felt with shape, timing, light and sound.
  *
+ * Each side lines up in rows, one pet kind per row, and the rows pop in one after the other. Every fighter
+ * stands on a crisp shadow cast toward the lower right (the sun is at the upper left) and wears a small plate
+ * with its class letter (from D up) over its head, the health bar of a fighter just hit beside it. What a
+ * knock-out leaves on the grass stays there for the whole fight (fx.ground).
+ *
  * A few things are only for the eye and never touch the simulator: a football that gets kicked about, marks
- * left on the grass, the crowd's cheers, a soft vignette and the floodlights swelling on the deciding blow.
+ * left on the grass, the crowd's cheers and the sunlight swelling on the deciding blow.
  */
 
-// ---- the HUD: one broadcast score bar
-const BAR = { x: S.pad, y: 12, w: W - 2 * S.pad, h: 38 };
-const CLOCK_W = 76;
-const CLOCK = { x: W / 2 - CLOCK_W / 2, y: BAR.y, w: CLOCK_W, h: BAR.h };
-const TICK = 4; // the team's colour at each end of the bar
-const TAG = { w: 34, h: 18 }; // the opponent's BOT tag
-const NAME = TYPE.body - 1;
-const COUNT = TYPE.h2 - 4;
-const TUG = { x: BAR.x, y: BAR.y + BAR.h + 6, w: BAR.w, h: 4 };
+// ---- the HUD: the VS bar (you, the clock, the BOT), the health tug of war under it, the roll meter under that
+const BAR = { x: S.pad, y: 12, w: W - 2 * S.pad, h: SCORE_BUG.h };
+const TUG = { x: BAR.x + 26, y: BAR.y + BAR.h + 12, w: BAR.w - 52, h: 10 };
 const PIPS = 10; // the roll meter: one roll is this many gold pips
-const METER = { x: W / 2 - 44, y: TUG.y + TUG.h + 9, w: 88, h: 4 };
-const TOKEN = { x: METER.x - 15, y: METER.y + METER.h / 2, size: 14 };
-const STREAK = { x: METER.x + METER.w + 10, y: METER.y + METER.h / 2 };
+const PILL = { x: W / 2 - 92, y: TUG.y + TUG.h + 12, w: 184, h: 30 }; // the roll meter's warm-white plate
+const METER = { x: PILL.x + 40, y: PILL.y + PILL.h / 2 - 4, w: PILL.w - 54, h: 8 };
+const TOKEN = { x: PILL.x + 21, y: PILL.y + PILL.h / 2, size: 19 };
+const STREAK = { x: PILL.x + PILL.w + 10, y: PILL.y + PILL.h / 2 };
 const BANNER_W = { short: 250, long: 330 };
-const HP_BAR = { minW: 9, h: 2, lift: 6, show: 1.1 }; // the thin health bar over a fighter that was just hit
+/** over a fighter: its class plate (from D up) and, while it was just hit, its health bar beside the plate */
+const HP_BAR = { minW: 18, h: 5, show: 1.0 };
+const TAG_LIFT = 5; // px between the top of the head and the plate's bottom, at the near end
+const TAG_FROM = 1; // the first class that wears a plate (1 = E: every fighter shows its class)
 const STAR = 14; // a knock-out star on its way to the roll meter
 const COUNT_SCALE = 2; // the 3, 2, 1 is the title size, this much larger
 const MID = project(ARENA.w / 2, ARENA.h / 2); // the centre spot: the countdown and the banners sit over it
 
 // ---- timing
-const DEPLOY_LEAD = 0.3; // before the first squad pops in
-const DEPLOY_SPAN = 1.1; // all the squads are in within this long
-const DEPLOY_REST = 0.3; // a breath before the countdown
-const POP_IN = 0.28;
+const DEPLOY_LEAD = 0.3; // before the first row pops in
+const DEPLOY_SPAN = 1.0; // all the rows are in within this long
+const ROW_GAP = { min: 0.14, max: 0.26 }; // between two rows
+const RIPPLE = 0.16; // within a row the pets pop from the middle out to the side lines over this long
+const DEPLOY_REST = 0.35; // a breath before the countdown
+const POP_IN = 0.3;
 const STREAK_GAP = 1.0; // knock-outs this close together make a streak
 const STREAK_SHOW = 1.6;
 const END_HOLD = 1.6; // from the deciding blow to the result screen
@@ -79,7 +84,8 @@ interface View {
   /** seconds since it popped onto the field, -1 while it has not */
   born: number;
 }
-interface Drop { team: Team; ids: number[]; at: number }
+/** a row of one side's line-up: it pops in at `at`, its pets one after the other from the middle out */
+interface Row { team: Team; ids: number[]; at: number; y: number }
 interface Banner { text: string; color: 'red' | 'gold' | 'indigo' | 'jade'; t: number; dur: number }
 
 /** The battle screen, with a few read-only numbers for the dev page. */
@@ -89,6 +95,8 @@ export interface BattleScreen extends Screen {
   readonly over: boolean;
   /** true once it has asked for the result screen */
   readonly left: boolean;
+  /** how many marks the fight has left on the grass so far */
+  readonly marks: number;
 }
 
 export function createBattleScreen(app: App): BattleScreen {
@@ -99,7 +107,11 @@ export function createBattleScreen(app: App): BattleScreen {
   let battle: Battle | null = null;
   let views: View[] = [];
   let order: SimUnit[] = [];
-  let drops: Drop[] = [];
+  let rows: Row[] = [];
+  /** when each fighter pops in (deploy time), by id */
+  let popAt = new Float32Array(0);
+  let popped = 0;
+  let deployEnd = 0;
   // where each fighter is on screen this frame, by id
   let sx = new Float32Array(0);
   let sy = new Float32Array(0);
@@ -171,13 +183,38 @@ export function createBattleScreen(app: App): BattleScreen {
     sy = new Float32Array(b.units.length);
     ss = new Float32Array(b.units.length);
     order = [];
-    // the squads pop in one after the other, the two sides taking turns
-    const bySquad: Drop[][] = [[], []];
-    for (const u of b.units) (bySquad[u.team][u.squad] ??= { team: u.team, ids: [], at: 0 }).ids.push(u.id);
-    drops = [];
-    for (let i = 0; i < Math.max(bySquad[0].length, bySquad[1].length); i++) for (const team of [0, 1]) if (bySquad[team][i]) drops.push(bySquad[team][i]);
-    const gap = clamp(DEPLOY_SPAN / Math.max(1, drops.length), 0.04, 0.16);
-    drops.forEach((d, i) => (d.at = DEPLOY_LEAD + i * gap));
+    // the line-up pops in row by row, the front rows first and both sides together (mirror images); in a row
+    // the pets pop from the middle out to the side lines
+    const bySide: Row[][] = [[], []];
+    for (const team of [0, 1] as Team[]) {
+      const mine = b.units.filter((u) => u.team === team).sort((p, q) => Math.abs(p.y - ARENA.h / 2) - Math.abs(q.y - ARENA.h / 2));
+      for (const u of mine) {
+        const list = bySide[team];
+        const last = list[list.length - 1];
+        if (last && Math.abs(last.y - u.y) < Math.max(4, u.r * 0.5)) last.ids.push(u.id);
+        else list.push({ team, ids: [u.id], at: 0, y: u.y });
+      }
+    }
+    const waves = Math.max(bySide[0].length, bySide[1].length);
+    const gap = clamp(DEPLOY_SPAN / Math.max(1, waves), ROW_GAP.min, ROW_GAP.max);
+    rows = [];
+    popAt = new Float32Array(b.units.length);
+    deployEnd = DEPLOY_LEAD;
+    for (let i = 0; i < waves; i++) {
+      for (const team of [0, 1] as Team[]) {
+        const row = bySide[team][i];
+        if (!row) continue;
+        row.at = DEPLOY_LEAD + i * gap;
+        rows.push(row);
+        for (const id of row.ids) {
+          popAt[id] = row.at + (Math.abs(b.units[id].x - ARENA.w / 2) / (ARENA.w / 2)) * RIPPLE;
+          deployEnd = Math.max(deployEnd, popAt[id]);
+        }
+      }
+    }
+    popped = 0;
+    fx.ground.band(PITCH.top - 70, PITCH.bottom + 40);
+    fx.ground.setRatio(app.ratio);
     meterBase = clamp(app.state.rollMeter, 0, 0.999);
     meterShown = meterBase;
     music.set('battle');
@@ -192,24 +229,21 @@ export function createBattleScreen(app: App): BattleScreen {
 
   // ------------------------------------------------------------------ deploy
 
-  function deploy(d: Drop): void {
-    const b = battle!;
-    let cx = 0;
-    let cy = 0;
-    let cs = 0;
-    for (const id of d.ids) {
-      const u = b.units[id];
-      views[id].born = 0;
-      order.push(u);
-      const p = projectInto(at, u.x, u.y);
-      cx += p.x / d.ids.length;
-      cy += p.y / d.ids.length;
-      cs += p.s / d.ids.length;
-      fx.dust(p.x, p.y - u.r * p.s * 0.4, d.ids.length > 4 ? 1 : 3, (u.r * 0.5 + 3) * p.s);
-    }
-    // a ring on the grass in the squad's colour: whose they are
-    fx.ring(cx, cy, TEAM[d.team].light, 6 * cs, (26 + d.ids.length * 3) * cs, 0.35, 0);
-    sfx.play('deploy', 0, { x: cx, enemy: d.team === 1 });
+  /** a row starts popping in: one sound for it, panned to its side */
+  function deployRow(row: Row): void {
+    const p = projectInto(at, ARENA.w / 2, row.y);
+    sfx.play('deploy', 0, { x: p.x, enemy: row.team === 1 });
+  }
+
+  /** one fighter pops onto the pitch, with a puff of dust and a quick ring of its side's colour on the grass */
+  function deployOne(id: number): void {
+    const u = battle!.units[id];
+    views[id].born = 0;
+    order.push(u);
+    popped++;
+    const p = projectInto(at, u.x, u.y);
+    fx.dust(p.x, p.y - u.r * p.s * 0.3, 2, (u.r * 0.45 + 3) * p.s, true);
+    fx.ring(p.x, p.y, TEAM[u.team].light, u.r * 0.6 * p.s, (u.r * 1.7 + 4) * p.s, 0.32, 0);
   }
 
   // ------------------------------------------------------------------ the fight's events
@@ -398,8 +432,9 @@ export function createBattleScreen(app: App): BattleScreen {
 
     if (phase === 'deploy') {
       deployT += dt;
-      while (drops.length && drops[0].at <= deployT) deploy(drops.shift()!);
-      if (!drops.length && deployT >= DEPLOY_LEAD + DEPLOY_SPAN + DEPLOY_REST) phase = 'fight';
+      while (rows.length && rows[0].at <= deployT) deployRow(rows.shift()!);
+      if (popped < views.length) for (let id = 0; id < views.length; id++) if (views[id].born < 0 && popAt[id] <= deployT) deployOne(id);
+      if (popped >= views.length && deployT >= deployEnd + POP_IN + DEPLOY_REST) phase = 'fight';
     } else if (phase === 'fight') {
       for (const ev of b.step(sdt)) onEvent(ev);
       if (b.time < 0) {
@@ -500,17 +535,32 @@ export function createBattleScreen(app: App): BattleScreen {
       sy[u.id] = p.y;
       ss[u.id] = p.s;
     }
-    // contact shadows first, all on the grass
-    for (let i = 0; i < n; i++) {
-      const u = order[i];
-      const v = views[u.id];
-      if (v.born < 0) continue;
-      const x = sx[u.id];
-      const y = sy[u.id];
-      ctx.translate(x, y);
-      petArt.drawShadow(ctx, v.look, u.r * ss[u.id] * Math.min(1, v.pose.squashX), u.hop);
-      ctx.translate(-x, -y);
+    // shadows first, all on the grass, each layer in one path (where two overlap they do not darken twice): a
+    // soft one cast toward the lower right, away from the sun, and a crisp contact core right under the feet
+    for (let pass = 0; pass < 2; pass++) {
+      ctx.beginPath();
+      for (let i = 0; i < n; i++) {
+        const u = order[i];
+        const v = views[u.id];
+        if (v.born < 0) continue;
+        const r = u.r * ss[u.id] * Math.min(1, v.pose.squashX) * (1 / (1 + u.hop * 0.6));
+        const rx = r * (u.pet === 'frog' ? 1.16 : 1.06);
+        const ry = r * 0.36;
+        const x = sx[u.id];
+        const y = sy[u.id];
+        if (pass === 0) {
+          ctx.moveTo(x + r * 0.24 + rx * 1.12, y + r * 0.06);
+          ctx.ellipse(x + r * 0.24, y + r * 0.06, rx * 1.12, ry * 1.12, 0, 0, TAU);
+        } else {
+          ctx.moveTo(x + r * 0.06 + rx * 0.74, y + r * 0.02);
+          ctx.ellipse(x + r * 0.06, y + r * 0.02, rx * 0.74, ry * 0.66, 0, 0, TAU);
+        }
+      }
+      ctx.fillStyle = GRASS_SHADE;
+      ctx.globalAlpha = pass === 0 ? 0.17 : 0.3;
+      ctx.fill();
     }
+    ctx.globalAlpha = 1;
     ball.drawShadow(ctx);
     // then the bodies, far to near, with the ball and the dying ones in their places
     deaths.beginDepth();
@@ -532,101 +582,87 @@ export function createBattleScreen(app: App): BattleScreen {
     }
     if (!ballDrawn) ball.draw(ctx);
     deaths.drawOver(ctx);
-    // over the crowd of bodies: a thin health bar on the ones just hit, sparkles round the dizzy ones
+    // over the crowd of bodies: each fighter's class plate (from D up), the health bar of the ones just hit
+    // beside it, sparkles round the dizzy ones
+    const plates = classPlates(app.ratio);
     for (let i = 0; i < n; i++) {
       const u = order[i];
-      const show = winner === null && u.hp < u.maxHp && u.sinceHit < HP_BAR.show;
-      if (!show && u.phase !== 'stun') continue;
       const v = views[u.id];
+      if (v.born < 0) continue;
+      const cls = u.spec.level;
+      const bar = winner === null && u.hp < u.maxHp && u.sinceHit < HP_BAR.show;
+      const stun = u.phase === 'stun';
+      if (!bar && !stun && cls < TAG_FROM) continue;
       const s = ss[u.id];
       const r = u.r * s;
       const x = sx[u.id];
-      const top = sy[u.id] - petArt.headTop(v.look, r) - u.hop * r * (u.pet === 'frog' ? 1.5 : 0.8);
-      if (show) {
-        const w = Math.round(Math.max(HP_BAR.minW, u.r * 1.4) * s);
-        const bx = Math.round(x - w / 2);
-        const by = Math.round(top - HP_BAR.lift * s);
-        ctx.globalAlpha = clamp((HP_BAR.show - u.sinceHit) / 0.3, 0, 1);
-        ctx.fillStyle = COLOR.ink;
-        ctx.fillRect(bx - 1, by - 1, w + 2, HP_BAR.h + 2);
-        ctx.fillStyle = TEAM[u.team].main;
-        ctx.fillRect(bx, by, Math.max(1, Math.round(w * clamp(u.hp / u.maxHp, 0, 1))), HP_BAR.h);
-        ctx.globalAlpha = 1;
+      const pop = v.born < POP_IN ? clamp(v.born / POP_IN, 0, 1) : 1;
+      const head = sy[u.id] - petArt.headTop(v.look, r) * Math.min(1.15, v.pose.squashY) - u.hop * r * (u.pet === 'frog' ? 1.5 : 0.8);
+      const plate = cls >= TAG_FROM ? plates[clamp(cls, 1, 7) - 1] : null;
+      const ps = Math.max(PLATE_MIN_S, s) * (cls <= 3 ? PLATE_COMMON : 1);
+      // one compact badge: the plate, and the health bar of a fighter just hit tucked right under it
+      const bh = bar ? Math.max(3, Math.round(HP_BAR.h * s)) : 0;
+      const bottom = head - TAG_LIFT * s;
+      if (plate) {
+        const pw = plate.w * ps;
+        const ph = plate.h * ps;
+        ctx.globalAlpha = pop;
+        ctx.drawImage(plate.cv, x - pw / 2, bottom - bh - ph + PLATE_PAD * ps, pw, ph);
       }
-      if (u.phase === 'stun') fx.orbitStars(ctx, x, top - 3 * s, (u.r * 0.8 + 3) * s, t + u.id);
+      if (bar) {
+        // a warm-white frame, a slate track and the team's colour
+        const bw = Math.round(Math.max(HP_BAR.minW * s, plate ? (plate.w - PLATE_PAD * 2) * ps + 4 : 0, u.r * 1.2 * s));
+        const bx = Math.round(x - bw / 2);
+        const by = Math.round(bottom - bh + (plate ? 1 : 0));
+        ctx.globalAlpha = clamp((HP_BAR.show - u.sinceHit) / 0.3, 0, 1);
+        ctx.fillStyle = UI.surface;
+        ctx.fillRect(bx - 1, by - 1, bw + 2, bh + 2);
+        ctx.fillStyle = HP_TRACK;
+        ctx.fillRect(bx, by, bw, bh);
+        ctx.fillStyle = TEAM[u.team].main;
+        ctx.fillRect(bx, by, Math.max(1, Math.round(bw * clamp(u.hp / u.maxHp, 0, 1))), bh);
+      }
+      ctx.globalAlpha = 1;
+      if (stun) fx.orbitStars(ctx, x, head - 2 * s, (u.r * 0.8 + 3) * s, t + u.id);
     }
   }
 
   function drawHud(ctx: Ctx): void {
     const b = battle!;
     const opp = app.match!.opponent;
-    const cy = BAR.y + BAR.h / 2;
-    // the bar: flat slate, a hairline of light along its top, a soft shadow under it on the stands
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.16)';
-    for (let i = 1; i <= 3; i++) {
-      rr(ctx, BAR.x - i, BAR.y + i, BAR.w + i * 2, BAR.h + i, S.radius.m + i);
-      ctx.fill();
-    }
-    rr(ctx, BAR.x, BAR.y, BAR.w, BAR.h, S.radius.m);
-    ctx.fillStyle = UI.surface;
-    ctx.fill();
-    ctx.save();
-    ctx.clip();
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.07)';
-    ctx.fillRect(BAR.x, BAR.y, BAR.w, 1);
-    // each end in its team's colour
-    ctx.fillStyle = TEAM[0].main;
-    ctx.fillRect(BAR.x, BAR.y, TICK, BAR.h);
-    ctx.fillStyle = TEAM[1].main;
-    ctx.fillRect(BAR.x + BAR.w - TICK, BAR.y, TICK, BAR.h);
-    // the clock sits in a darker well in the middle; gold, and solid gold once it is overtime
-    const hot = overtime && winner === null;
-    ctx.fillStyle = hot ? UI.accent : UI.bg;
-    ctx.fillRect(CLOCK.x, CLOCK.y, CLOCK.w, CLOCK.h);
-    if (hot) {
-      // a lit top edge and a shaded bottom one: the gold block stands out of the bar
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
-      ctx.fillRect(CLOCK.x, CLOCK.y, CLOCK.w, 1);
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
-      ctx.fillRect(CLOCK.x, CLOCK.y + CLOCK.h - 2, CLOCK.w, 2);
-    }
-    ctx.restore();
+    // the VS bar: you on the left (blue), the clock in the middle, the BOT on the right (red)
     const left = Math.max(0, FIGHT.timeLimit - Math.max(0, b.time));
     const secs = Math.ceil(left);
-    // in overtime every second ticks with a small nudge of the digits
-    const tick = hot ? 1 + 0.1 * Math.max(0, 1 - (secs - left) * 7) : 1;
-    ctx.save();
-    ctx.translate(W / 2, cy + 1);
-    ctx.scale(tick, tick);
-    label(ctx, `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`, 0, 0, TYPE.h2 - 3, { color: hot ? UI.accentText : UI.accent, weight: 700, track: 0.5 });
-    ctx.restore();
-
-    // you: tick, name, fighters left
-    const inL = BAR.x + TICK + 10;
-    const countL = CLOCK.x - 12;
-    label(ctx, String(b.alive[0]), countL, cy + 1, COUNT, { align: 'right', weight: 700 });
-    fitLabel(ctx, app.state.name, inL, cy + 1, NAME, countL - 34 - inL, { align: 'left', weight: 700, color: UI.text });
-    // the opponent: fighters left, name, BOT tag, tick
-    const countR = CLOCK.x + CLOCK.w + 12;
-    const tagX = BAR.x + BAR.w - TICK - 9 - TAG.w;
-    label(ctx, String(b.alive[1]), countR, cy + 1, COUNT, { align: 'left', weight: 700 });
-    rr(ctx, tagX, cy - TAG.h / 2, TAG.w, TAG.h, S.radius.s);
-    ctx.fillStyle = UI.borderStrong;
-    ctx.fill();
-    label(ctx, 'BOT', tagX + TAG.w / 2, cy + 1.5, TYPE.small - 2, { weight: 700, track: 1.5 });
-    fitLabel(ctx, opp.name, tagX - 8, cy + 1, NAME, tagX - 8 - (countR + 34), { align: 'right', weight: 700, color: UI.text });
+    const hot = overtime && winner === null;
+    scoreBug(ctx, BAR, {
+      home: { name: app.state.name, score: b.alive[0] },
+      away: { name: opp.name, score: b.alive[1], bot: true },
+      clock: `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`,
+      hot,
+      // in overtime every second lights the clock for a moment
+      flash: hot ? Math.max(0, 1 - (secs - left) * 4) : 0,
+    });
 
     // health as a tug of war under the bar
     tugBar(ctx, TUG, b.hpShare[0], b.hpShare[1], t);
 
-    // the roll meter: a row of gold pips your knock-outs fill
+    // the roll meter on its own small plate: the roll token and a row of gold pips your knock-outs fill
+    ctx.fillStyle = UI.shadow;
+    rr(ctx, PILL.x + 1.5, PILL.y + 2.5, PILL.w, PILL.h, PILL.h / 2);
+    ctx.fill();
+    rr(ctx, PILL.x, PILL.y, PILL.w, PILL.h, PILL.h / 2);
+    ctx.fillStyle = UI.surface;
+    ctx.fill();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = UI.border;
+    ctx.stroke();
     const shown = fullT > 0 ? 1 : meterShown - Math.floor(meterShown + 1e-6);
     meter(ctx, METER, shown, { ticks: PIPS, color: UI.accent, full: fullT > 0 });
-    rollToken(ctx, TOKEN.x, TOKEN.y, TOKEN.size * (1 + 0.25 * tokenBump), fullT > 0 || tokenBump > 0.3 ? UI.accent : UI.textDim);
+    rollToken(ctx, TOKEN.x, TOKEN.y, TOKEN.size * (1 + 0.25 * tokenBump), fullT > 0 || tokenBump > 0.3 ? UI.accentDark : UI.textDim);
     if (streak >= 2 && streakT < STREAK_SHOW) {
       const k = 1 + 0.2 * streakPop;
       ctx.globalAlpha = clamp((STREAK_SHOW - streakT) / 0.3, 0, 1);
-      label(ctx, `×${streak}`, STREAK.x, STREAK.y + 1, TYPE.body * k, { align: 'left', color: UI.accent, weight: 700 });
+      label(ctx, `×${streak}`, STREAK.x, STREAK.y + 1, TYPE.lead * k, { align: 'left', color: UI.accent, weight: 700, onPitch: true });
       ctx.globalAlpha = 1;
     }
   }
@@ -642,9 +678,9 @@ export function createBattleScreen(app: App): BattleScreen {
       ctx.translate(MID.x, MID.y);
       ctx.scale(s, s);
       const a = clamp(k * 8, 0, 1) * clamp((1 - k) * 4, 0, 1);
-      // a soft shadow cast down and to the right, away from the floodlights
-      ctx.globalAlpha = a * 0.35;
-      label(ctx, String(countN), 1.5, 2.5, TYPE.title, { color: UI.bg, weight: 700 });
+      // a soft shadow cast down and to the right, away from the sun
+      ctx.globalAlpha = a * 0.25;
+      label(ctx, String(countN), 2, 3, TYPE.title, { color: GRASS_SHADE, weight: 700 });
       ctx.globalAlpha = a;
       label(ctx, String(countN), 0, 0, TYPE.title, { color: countN === 1 ? UI.accent : UI.text, weight: 700, onPitch: true });
       ctx.restore();
@@ -674,6 +710,7 @@ export function createBattleScreen(app: App): BattleScreen {
     ctx.save();
     ctx.translate(cx, cy);
     app.arena.drawBattle(ctx, t);
+    fx.ground.draw(ctx);
     fx.drawUnder(ctx);
     deaths.drawUnder(ctx);
     drawFighters(ctx);
@@ -691,7 +728,10 @@ export function createBattleScreen(app: App): BattleScreen {
     leave,
     update,
     render,
-    resize: (ratio: number) => deaths.setRatio(ratio),
+    resize: (ratio: number) => {
+      deaths.setRatio(ratio);
+      fx.ground.setRatio(ratio);
+    },
     get time() {
       return phase === 'deploy' || !battle ? -99 : battle.time;
     },
@@ -701,7 +741,69 @@ export function createBattleScreen(app: App): BattleScreen {
     get left() {
       return left;
     },
+    get marks() {
+      return fx.ground.count;
+    },
   };
+}
+
+// ------------------------------------------------------------------ class plates
+
+/** A class plate's size at the near end line (logical px), and the slate of the health bar's empty part. */
+const PLATE = { h: 24, w1: 24, w3: 44, rad: 6, font: TYPE.badge };
+/** the common classes' plates (E, D, C) are drawn this much smaller than the rare ones' (B and up) */
+const PLATE_COMMON = 0.88;
+/** plates are read, not seen in depth: at the far end they shrink at most to this */
+const PLATE_MIN_S = 0.94;
+const HP_TRACK = 'rgba(31, 39, 51, 0.6)';
+/** painted this many times sharper than its logical size, so it stays crisp wherever it is drawn */
+const PLATE_RES = 2;
+/** the transparent margin round a plate sprite (for its shadow) */
+const PLATE_PAD = 2;
+
+interface PlateSprite { cv: HTMLCanvasElement; w: number; h: number }
+let plateCache: { ratio: number; list: PlateSprite[] } | null = null;
+
+/**
+ * The class plates E..SSS, painted once: the letter, bold, on a small rounded plate in the class's own tone
+ * (greys, silver, gold, white-gold), a lit top edge, a slightly darker rim and a soft shadow to the lower right.
+ */
+function classPlates(ratio: number): PlateSprite[] {
+  if (plateCache && plateCache.ratio === ratio) return plateCache.list;
+  const k = Math.max(1, ratio) * PLATE_RES;
+  const list = CLASSES.map((letter, i) => {
+    const w = letter.length > 1 ? PLATE.w3 : PLATE.w1;
+    const h = PLATE.h;
+    const pad = PLATE_PAD;
+    const cv = document.createElement('canvas');
+    cv.width = Math.ceil((w + pad * 2) * k);
+    cv.height = Math.ceil((h + pad * 2) * k);
+    const c = cv.getContext('2d')!;
+    c.scale(k, k);
+    c.translate(pad, pad);
+    const [top, low, ink] = UI.tierPlate[i];
+    rr(c, 0.8, 1.4, w, h, PLATE.rad);
+    c.fillStyle = 'rgba(18, 58, 34, 0.35)';
+    c.fill();
+    rr(c, 0, 0, w, h, PLATE.rad);
+    const g = c.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, top);
+    g.addColorStop(1, low);
+    c.fillStyle = g;
+    c.fill();
+    c.lineWidth = 1.2;
+    c.strokeStyle = i >= 4 ? '#9a6a00' : 'rgba(31, 39, 51, 0.7)';
+    c.stroke();
+    c.fillStyle = 'rgba(255, 255, 255, 0.6)';
+    c.fillRect(PLATE.rad * 0.7, 1.4, w - PLATE.rad * 1.4, 1.2);
+    // a white letter gets a thin slate edge, so it reads on the lighter greys too
+    const track = letter.length > 1 ? 0.3 : 0;
+    const white = !isDark(ink);
+    label(c, letter, w / 2, h / 2 + 1, PLATE.font, { color: ink, weight: 700, track, ...(white ? { lw: 1, outline: 'rgba(31, 39, 51, 0.75)' } : {}) });
+    return { cv, w: w + pad * 2, h: h + pad * 2 };
+  });
+  plateCache = { ratio, list };
+  return list;
 }
 
 // ------------------------------------------------------------------ the ball
@@ -972,8 +1074,8 @@ class Ball {
 
 // ------------------------------------------------------------------ light over the pitch
 
-let vignette: HTMLCanvasElement | null = null;
-let flood: HTMLCanvasElement | null = null;
+let haze: HTMLCanvasElement | null = null;
+let bloom: HTMLCanvasElement | null = null;
 
 /** A small canvas painted once and drawn stretched (a soft gradient loses nothing). */
 function soft(w: number, h: number, paint: (c: Ctx) => void): HTMLCanvasElement {
@@ -985,25 +1087,25 @@ function soft(w: number, h: number, paint: (c: Ctx) => void): HTMLCanvasElement 
 }
 
 /**
- * Over the pitch, under the HUD: a very soft vignette at the screen's edges, so the eye stays on the play, and
- * on the deciding blow the floodlights' glow swelling once from the upper corners.
+ * Over the pitch, under the HUD: the faintest warm haze of sunlight from the upper left (the day is bright, so no
+ * dark vignette), and on the deciding blow the sunlight swelling once from that corner.
  */
 function drawLight(ctx: Ctx, glowT: number): void {
-  vignette ??= soft(128, 128, (c) => {
-    const g = c.createRadialGradient(64, 66, 30, 64, 66, 92);
-    g.addColorStop(0, 'rgba(4, 6, 10, 0)');
-    g.addColorStop(0.55, 'rgba(4, 6, 10, 0.1)');
-    g.addColorStop(1, 'rgba(4, 6, 10, 0.42)');
+  haze ??= soft(128, 128, (c) => {
+    const g = c.createRadialGradient(0, 0, 0, 0, 0, 150);
+    g.addColorStop(0, 'rgba(255, 246, 214, 0.22)');
+    g.addColorStop(0.5, 'rgba(255, 246, 214, 0.06)');
+    g.addColorStop(1, 'rgba(255, 246, 214, 0)');
     c.fillStyle = g;
     c.fillRect(0, 0, 128, 128);
   });
-  ctx.drawImage(vignette, 0, 0, W, H);
+  ctx.drawImage(haze, 0, PITCH.top - 120, W, H * 0.6);
   if (glowT >= GLOW) return;
-  flood ??= soft(128, 128, (c) => {
+  bloom ??= soft(128, 128, (c) => {
     const g = c.createRadialGradient(64, 64, 0, 64, 64, 64);
-    g.addColorStop(0, 'rgba(255, 236, 160, 0.55)');
-    g.addColorStop(0.4, 'rgba(255, 226, 130, 0.18)');
-    g.addColorStop(1, 'rgba(255, 220, 120, 0)');
+    g.addColorStop(0, 'rgba(255, 240, 180, 0.6)');
+    g.addColorStop(0.4, 'rgba(255, 230, 150, 0.2)');
+    g.addColorStop(1, 'rgba(255, 225, 140, 0)');
     c.fillStyle = g;
     c.fillRect(0, 0, 128, 128);
   });
@@ -1011,16 +1113,11 @@ function drawLight(ctx: Ctx, glowT: number): void {
   const a = Math.sin(Math.PI * Math.min(1, k * 1.6) ** 0.7) * (1 - k * 0.4);
   const op = ctx.globalCompositeOperation;
   ctx.globalCompositeOperation = 'lighter';
-  const R = 560;
-  const top = PITCH.top - 170;
-  // the key light at the upper left is the strongest
-  ctx.globalAlpha = a;
-  ctx.drawImage(flood, -R / 2, top - R / 2, R, R);
-  ctx.globalAlpha = a * 0.7;
-  ctx.drawImage(flood, W - R / 2, top - R / 2, R, R);
-  ctx.globalAlpha = a * 0.35;
-  ctx.drawImage(flood, -R / 2, H - 120 - R / 2, R, R);
-  ctx.drawImage(flood, W - R / 2, H - 120 - R / 2, R, R);
+  const R = 640;
+  ctx.globalAlpha = a * 0.8;
+  ctx.drawImage(bloom, -R / 2, PITCH.top - 150 - R / 2, R, R);
+  ctx.globalAlpha = a * 0.3;
+  ctx.drawImage(bloom, W - R / 2, PITCH.top - 150 - R / 2, R, R);
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = op;
 }

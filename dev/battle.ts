@@ -66,6 +66,7 @@ const look = (pet: PetType, team: 0 | 1, weapon: WeaponType | null): PetLook =>
 
 function deathPage(which: string) {
   const fx = new Fx();
+  fx.ground.setRatio(dpr);
   const deaths = new Deaths(fx, dpr);
   const kinds = which === 'all' ? DEATH_KINDS : [which as DeathKind];
   const past = paramNum('t', 0.03);
@@ -99,6 +100,7 @@ function deathPage(which: string) {
         done = true;
       }
       arena.drawBattle(ctx, t);
+      fx.ground.draw(ctx);
       fx.drawUnder(ctx);
       deaths.drawUnder(ctx);
       deaths.drawOver(ctx);
@@ -157,7 +159,7 @@ function battlePage() {
         const slow: string[] = [];
         let n5 = 0;
         let sum5 = 0;
-        for (let i = 0; i < 6000 && !went; i++) {
+        for (let i = 0; i < paramNum('frames', 6000) && !went; i++) {
           const t0 = performance.now();
           tick(1 / 60);
           const t1 = performance.now();
@@ -180,7 +182,7 @@ function battlePage() {
           }
         }
         report = `${n} fr avg ${(sum / n).toFixed(2)} ms (update ${(sim / n).toFixed(2)}) first 5 s ${(sum5 / n5).toFixed(1)} worst ${worst.toFixed(0)} (upd ${worstUpd.toFixed(0)}) at ${worstAt.toFixed(1)} s`;
-        console.log(`BENCH ${report} | slow frames (t:ms/update) ${slow.join(' ')}`);
+        console.log(`BENCH ${report} marks ${screen.marks} | slow frames (t:ms/update) ${slow.join(' ')}`);
         frozen = true;
       } else if (at !== null && !frozen) {
         for (let i = 0; i < 9000 && screen.time < at && !screen.over; i++) tick(1 / 60);

@@ -8,9 +8,13 @@ import { clamp, easeOutBack, easeOutCubic, label, type Ctx } from '../util';
  * the grass, camera shake, hit-stop and slow motion. Everything is in logical screen px (the battle passes
  * points it has already put through the match camera, with sizes times the depth scale).
  *
- * One palette: light is white and floodlight gold; a team colour only where something belongs to a team.
- * One key light from the upper left: a flying shard has a lit upper-left face and a dark lower one, and
- * anything that flies over the grass can leave a small shadow on it.
+ * One palette: light is white and warm sunny gold; a team colour only where something belongs to a team.
+ * One sun from the upper left: a flying shard has a lit upper-left face and a shaded lower one, and anything
+ * that flies over the grass leaves a small soft shadow on it, a touch to the lower right.
+ *
+ * What should stay on the pitch for the whole fight (the marks a knock-out leaves, pieces given `stay` once
+ * they come to rest) is painted once into `ground`, a cached layer the screen draws under everything else; it is
+ * emptied only by clear().
  *
  * A screen calls update(dt) with real time, multiplies its own game time by timeScale, and draws the three
  * layers: drawUnder (on the ground), drawOver (above the fighters), drawScreen (flashes and words on top).
@@ -49,6 +53,9 @@ export interface BurstOpts {
   stagger?: number;
   /** pieces start scattered this far from the centre */
   scatter?: number;
+  /** once on the ground (needs floor) the pieces stay there for good, painted into the ground layer: true for all
+   *  of them, a number 0..1 for that share of them (the rest fade as usual) */
+  stay?: boolean | number;
 }
 
 const CAP = 500;
@@ -60,7 +67,11 @@ const TAU = Math.PI * 2;
 const GROUND_RING = 0.5;
 /** marks on the grass: at most this many, the oldest fade out first */
 const MARKS = 70;
-const DUST = ['#eef0ea', '#d9ddd4'];
+const DUST = ['#fffdf6', '#f1ead8'];
+/** the colour of a shadow on sunlit grass: a deep cool green, never black */
+export const GRASS_SHADE = 'rgb(18, 58, 34)';
+/** marks lying on the grass are flattened this much (seen from the stands, a little less than a ring) */
+export const GROUND_FLAT = 0.55;
 
 interface Particle {
   x: number;
@@ -80,6 +91,7 @@ interface Particle {
   layer: number;
   ink: boolean;
   shadow: boolean;
+  stay: boolean;
   ph: number;
 }
 interface Ring { x: number; y: number; color: string; r0: number; r1: number; life: number; age: number; layer: number }
@@ -97,7 +109,7 @@ interface Rays { x: number; y: number; level: number; age: number; life: number 
 interface Lines { x: number; y: number; color: string; age: number; life: number; top: number }
 
 const newParticle = (): Particle => ({
-  x: 0, y: 0, vx: 0, vy: 0, size: 1, life: 1, age: 0, color: '#fff', shape: 'dot', rot: 0, vr: 0, grav: 0, drag: 0, floor: Infinity, layer: OVER, ink: false, shadow: false, ph: 0,
+  x: 0, y: 0, vx: 0, vy: 0, size: 1, life: 1, age: 0, color: '#fff', shape: 'dot', rot: 0, vr: 0, grav: 0, drag: 0, floor: Infinity, layer: OVER, ink: false, shadow: false, stay: false, ph: 0,
 });
 
 export class Fx {
@@ -117,6 +129,8 @@ export class Fx {
   private marks: Mark[] = [];
   private rays: Rays[] = [];
   private lines: Lines[] = [];
+  /** what stays on the pitch for the whole fight */
+  readonly ground = new Ground();
 
   private shakeAmt = 0;
   private shakeDur = 0.3;
@@ -152,6 +166,7 @@ export class Fx {
     this.shakeAmt = this.kx = this.ky = this.stop = this.slowT = 0;
     this.slowF = 1;
     this.camera.x = this.camera.y = 0;
+    this.ground.clear();
   }
 
   // ------------------------------------------------------------------ time and camera
@@ -204,13 +219,17 @@ export class Fx {
       const p = ps[i];
       p.age += pdt;
       if (p.age >= p.life) {
+        // a piece meant to stay that has not come to rest yet lies down where its ground is
+        if (p.stay) this.settle(p);
         ps[i] = ps[--this.count];
         ps[this.count] = p;
         continue;
       }
-      i++;
-      if (p.shadow) shadows++;
-      if (p.age < 0) continue;
+      if (p.age < 0) {
+        i++;
+        if (p.shadow) shadows++;
+        continue;
+      }
       p.vy += p.grav * pdt;
       if (p.drag > 0) {
         const d = Math.max(0, 1 - p.drag * pdt);
@@ -230,8 +249,17 @@ export class Fx {
           p.grav = 0;
           p.vx *= 0.3;
           p.vr = 0;
+          if (p.stay) {
+            // at rest: into the ground layer for good
+            this.settle(p);
+            ps[i] = ps[--this.count];
+            ps[this.count] = p;
+            continue;
+          }
         }
       }
+      i++;
+      if (p.shadow) shadows++;
     }
     this.shadows = shadows;
     age(this.rings, pdt);
@@ -289,6 +317,8 @@ export class Fx {
       p.layer = layer;
       p.ink = o.ink ?? false;
       p.shadow = (o.shadow ?? false) && floor < Infinity;
+      const keep = o.stay === true || (typeof o.stay === 'number' && ((i + 0.5) * 0.618034) % 1 < o.stay);
+      p.stay = keep && floor < Infinity && layer !== SCREEN;
       p.ph = frand(0, TAU);
     }
   }
@@ -374,6 +404,55 @@ export class Fx {
     }
     if (this.marks.length >= MARKS + 16) this.marks.shift();
     this.marks.push({ x, y, size, sprite: base + Math.floor(frand(0, 3)), age: 0, life, fade: life * 0.45, flip: fchance(0.5) });
+  }
+
+  /** A mark of `kind` that stays for the whole fight, painted straight into the ground layer. */
+  stampMark(kind: MarkKind, x: number, y: number, size: number, alpha = 1): void {
+    const sp = markSprites()[(kind === 'scuff' ? 0 : kind === 'divot' ? 3 : 6) + Math.floor(frand(0, 3))];
+    const g = this.ground.paint();
+    g.globalAlpha = alpha;
+    g.translate(x, y);
+    if (fchance(0.5)) g.scale(-1, 1);
+    g.drawImage(sp, -size / 2, -size / 4, size, size / 2);
+    g.globalAlpha = 1;
+  }
+
+  /** A piece that came to rest on the ground: painted lying there into the ground layer, with its small shadow. */
+  private settle(p: Particle): void {
+    const g = this.ground.paint();
+    const s = p.size;
+    const x = p.x;
+    const y = p.floor < Infinity ? p.floor : p.y;
+    g.fillStyle = GRASS_SHADE;
+    g.globalAlpha = 0.16;
+    g.beginPath();
+    g.ellipse(x + s * 0.25, y + s * 0.2, s * 0.95, s * 0.42, 0, 0, TAU);
+    g.fill();
+    g.globalAlpha = 1;
+    if (p.shape === 'shard') {
+      drawShard(g, x, y - s * 0.15, s, p.rot, p.color, p.ink);
+      return;
+    }
+    g.fillStyle = p.color;
+    g.beginPath();
+    if (p.shape === 'petal') {
+      // lying flat: wide and thin, most of them turned across the view
+      g.ellipse(x, y, s, s * 0.5 * GROUND_FLAT + 0.4, Math.sin(p.rot) * 0.5, 0, TAU);
+      g.fill();
+      g.strokeStyle = 'rgba(31, 39, 51, 0.28)';
+      g.lineWidth = 0.8;
+      g.stroke();
+    } else if (p.shape === 'confetti') {
+      const c = Math.cos(p.rot) * 0.6;
+      g.ellipse(x, y, s * 0.55, s * 0.3, c, 0, TAU);
+      g.fill();
+    } else if (p.shape === 'star') {
+      sparkle(g, x, y, s * 0.6, p.rot);
+      g.fill();
+    } else {
+      g.ellipse(x, y, s * 0.6, s * 0.6 * GROUND_FLAT, 0, 0, TAU);
+      g.fill();
+    }
   }
 
   /** speed lines from the screen's edges toward a point (the deciding blow); top: they stay below this y (a HUD) */
@@ -507,7 +586,7 @@ export class Fx {
   /** a soft dark spot on the grass under every piece that flies, smaller and fainter the higher it is */
   private drawShadows(ctx: Ctx): void {
     const ps = this.ps;
-    ctx.fillStyle = COLOR.ink;
+    ctx.fillStyle = GRASS_SHADE;
     let alpha = -1;
     for (let i = 0; i < this.count; i++) {
       const p = ps[i];
@@ -515,12 +594,12 @@ export class Fx {
       const h = Math.max(0, p.floor - p.y);
       const k = 1 / (1 + h / 26);
       const fade = p.age / p.life > 0.75 ? (1 - p.age / p.life) * 4 : 1;
-      const a = Math.round(0.3 * k * fade * 20) / 20;
+      const a = Math.round(0.26 * k * (p.stay ? 1 : fade) * 20) / 20;
       if (a <= 0) continue;
       if (a !== alpha) ctx.globalAlpha = alpha = a;
       const rx = p.size * (0.4 + 0.5 * k);
       ctx.beginPath();
-      ctx.ellipse(p.x, p.floor + 0.5, rx, rx * 0.4, 0, 0, TAU);
+      ctx.ellipse(p.x + h * 0.12, p.floor + 0.5, rx, rx * 0.4, 0, 0, TAU);
       ctx.fill();
     }
     ctx.globalAlpha = 1;
@@ -667,32 +746,11 @@ export class Fx {
       const p = ps[i];
       if (p.layer !== layer || p.age < 0) continue;
       const k = p.age / p.life;
-      const a = p.shape === 'puff' ? 0.6 * (1 - k) : p.shape === 'dot' || p.shape === 'star' ? 1 : k > 0.75 ? (1 - k) * 4 : 1;
+      const a = p.shape === 'puff' ? 0.6 * (1 - k) : p.shape === 'dot' || p.shape === 'star' || p.stay ? 1 : k > 0.75 ? (1 - k) * 4 : 1;
       if (a !== alpha) ctx.globalAlpha = alpha = a;
       const s = p.size;
       if (p.shape === 'shard') {
-        // a chip with volume: its upper-left facet catches the floodlight, its lower facet is in shade
-        const c = Math.cos(p.rot);
-        const sn = Math.sin(p.rot);
-        const ax = p.x + c * s;
-        const ay = p.y + sn * s;
-        const bx = p.x - c * s * 0.7 - sn * s * 0.6;
-        const by = p.y - sn * s * 0.7 + c * s * 0.6;
-        const cx = p.x - c * s * 0.5 + sn * s * 0.7;
-        const cy = p.y - sn * s * 0.5 - c * s * 0.7;
-        ctx.beginPath();
-        ctx.moveTo(ax, ay);
-        ctx.lineTo(bx, by);
-        ctx.lineTo(cx, cy);
-        ctx.closePath();
-        if (p.color !== fill) ctx.fillStyle = fill = p.color;
-        ctx.fill();
-        if (p.ink) ctx.stroke();
-        const mx = (ax + bx + cx) / 3;
-        const my = (ay + by + cy) / 3;
-        facet(ctx, ax, ay, bx, by, mx, my, p.color);
-        facet(ctx, bx, by, cx, cy, mx, my, p.color);
-        facet(ctx, cx, cy, ax, ay, mx, my, p.color);
+        drawShard(ctx, p.x, p.y, s, p.rot, p.color, p.ink);
         fill = '';
         continue;
       }
@@ -735,6 +793,35 @@ export class Fx {
     }
     ctx.globalAlpha = 1;
   }
+}
+
+/** A chip with volume: its upper-left facet catches the sun, its lower facet is in shade. */
+export function drawShard(ctx: Ctx, x: number, y: number, s: number, rot: number, color: string, ink: boolean): void {
+  const c = Math.cos(rot);
+  const sn = Math.sin(rot);
+  const ax = x + c * s;
+  const ay = y + sn * s;
+  const bx = x - c * s * 0.7 - sn * s * 0.6;
+  const by = y - sn * s * 0.7 + c * s * 0.6;
+  const cx = x - c * s * 0.5 + sn * s * 0.7;
+  const cy = y - sn * s * 0.5 - c * s * 0.7;
+  ctx.beginPath();
+  ctx.moveTo(ax, ay);
+  ctx.lineTo(bx, by);
+  ctx.lineTo(cx, cy);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+  if (ink) {
+    ctx.strokeStyle = COLOR.ink;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+  const mx = (ax + bx + cx) / 3;
+  const my = (ay + by + cy) / 3;
+  facet(ctx, ax, ay, bx, by, mx, my, color);
+  facet(ctx, bx, by, cx, cy, mx, my, color);
+  facet(ctx, cx, cy, ax, ay, mx, my, color);
 }
 
 /** A four-point sparkle path (long arms, a narrow waist). */
@@ -815,25 +902,25 @@ function markSprites(): HTMLCanvasElement[] {
     c.ellipse(x, y, rx, ry, 0, 0, TAU);
     c.fill();
   };
-  const soft = (c: Ctx, x: number, y: number, rx: number, ry: number, a: number) => {
+  const soft = (c: Ctx, x: number, y: number, rx: number, ry: number, a: number, rgb = '24, 70, 36') => {
     c.save();
     c.translate(x, y);
     c.scale(1, ry / rx);
     const g = c.createRadialGradient(0, 0, 0, 0, 0, rx);
-    g.addColorStop(0, `rgba(6, 18, 10, ${a})`);
-    g.addColorStop(0.6, `rgba(6, 18, 10, ${a * 0.6})`);
-    g.addColorStop(1, 'rgba(6, 18, 10, 0)');
+    g.addColorStop(0, `rgba(${rgb}, ${a})`);
+    g.addColorStop(0.6, `rgba(${rgb}, ${a * 0.6})`);
+    g.addColorStop(1, `rgba(${rgb}, 0)`);
     c.fillStyle = g;
     c.fillRect(-rx, -rx, rx * 2, rx * 2);
     c.restore();
   };
-  // a frog's landing: a soft skid where the grass was scuffed, a few blades torn up along it
+  // a frog's landing: a pale worn skid in the sunlit grass, a few blades kicked up along it
   for (let v = 0; v < 3; v++) {
     make((c) => {
-      soft(c, 32, 16, 24, 9, 0.2);
-      soft(c, 28 + rnd() * 8, 16 + (rnd() - 0.5) * 3, 13, 4.5, 0.18);
-      c.globalAlpha = 0.3;
-      c.strokeStyle = '#06100a';
+      soft(c, 32, 16, 24, 9, 0.32, '236, 232, 186');
+      soft(c, 28 + rnd() * 8, 16 + (rnd() - 0.5) * 3, 13, 4.5, 0.3, '226, 214, 160');
+      c.globalAlpha = 0.35;
+      c.strokeStyle = '#3f8a3a';
       c.lineWidth = 1;
       c.beginPath();
       for (let i = 0; i < 5; i++) {
@@ -843,38 +930,38 @@ function markSprites(): HTMLCanvasElement[] {
         c.lineTo(x + 4 + rnd() * 4, y + (rnd() - 0.5) * 2);
       }
       c.stroke();
-      for (let i = 0; i < 3; i++) blob(c, 18 + rnd() * 28, 9 + rnd() * 14, 1.1, 0.7, '#a9c690', 0.4);
+      for (let i = 0; i < 3; i++) blob(c, 18 + rnd() * 28, 9 + rnd() * 14, 1.2, 0.8, '#f4f0c8', 0.7);
     });
   }
-  // a divot: a dark hole with its lit lower lip, and the clod of turf it threw
+  // a divot: a little hole of warm earth with its sunlit lower lip, and the clod of turf it threw
   for (let v = 0; v < 3; v++) {
     make((c) => {
       const x = 26 + rnd() * 6;
-      soft(c, x, 16, 18, 9, 0.25);
-      blob(c, x, 16, 11, 5, '#0b170d', 0.75);
-      blob(c, x - 1.5, 15, 8, 3.4, '#040a06', 0.5);
-      c.globalAlpha = 0.5;
-      c.strokeStyle = '#b7d29a';
+      soft(c, x, 16, 18, 9, 0.18);
+      blob(c, x, 16, 11, 5, '#9a6a3e', 0.95);
+      blob(c, x - 1.5, 15, 8, 3.4, '#6e4526', 0.9);
+      c.globalAlpha = 0.85;
+      c.strokeStyle = '#d8f2b0';
       c.lineWidth = 1.6;
       c.beginPath();
       c.ellipse(x, 16.4, 10.4, 4.6, 0, 0.15 * Math.PI, 0.85 * Math.PI);
       c.stroke();
-      // the clod: a lit top and a dark underside
+      // the clod: a grassy lit top and an earthy underside
       const cx = x + 18 + rnd() * 6;
       const cy = 13 + rnd() * 8;
-      blob(c, cx + 0.6, cy + 2.4, 5.5, 2, '#06100a', 0.35);
-      blob(c, cx, cy, 5, 3.4, '#2c3a1e', 0.95);
-      blob(c, cx - 1, cy - 1.2, 3.4, 1.8, '#5a7a3c', 0.95);
-      blob(c, cx + 1.5, cy + 1.6, 3, 1.1, '#1a2412', 0.8);
+      blob(c, cx + 0.8, cy + 2.4, 5.5, 2, '#183a22', 0.22);
+      blob(c, cx, cy + 0.6, 5, 3.2, '#8a5a32', 1);
+      blob(c, cx - 0.6, cy - 1, 4.2, 2.2, '#5fb046', 1);
+      blob(c, cx - 1.6, cy - 1.6, 2, 0.9, '#b9ea8a', 1);
     });
   }
-  // a flattened patch: darker pressed grass, the blades laid out from the middle, a faint sheen on the far side
+  // a flattened patch: grass pressed flat, its blades laid out from the middle and catching the sun
   for (let v = 0; v < 3; v++) {
     make((c) => {
-      soft(c, 32, 16, 30, 14, 0.4);
-      blob(c, 32, 16.5, 22, 9, '#0a160c', 0.28);
-      c.globalAlpha = 0.28;
-      c.strokeStyle = '#06100a';
+      soft(c, 32, 16, 30, 14, 0.22);
+      blob(c, 32, 16.5, 22, 9, '#2f7a33', 0.16);
+      c.globalAlpha = 0.5;
+      c.strokeStyle = '#d6f4ae';
       c.lineWidth = 1.2;
       c.beginPath();
       for (let i = 0; i < 14; i++) {
@@ -882,12 +969,6 @@ function markSprites(): HTMLCanvasElement[] {
         c.moveTo(32 + Math.cos(a) * 6, 16 + Math.sin(a) * 3);
         c.lineTo(32 + Math.cos(a) * (18 + rnd() * 9), 16 + Math.sin(a) * (8 + rnd() * 4));
       }
-      c.stroke();
-      c.globalAlpha = 0.18;
-      c.strokeStyle = '#e4f0d2';
-      c.lineWidth = 1.4;
-      c.beginPath();
-      c.ellipse(32, 16, 20, 8, 0, 1.1 * Math.PI, 1.6 * Math.PI);
       c.stroke();
     });
   }
@@ -900,5 +981,76 @@ function age<T extends { age: number; life: number }>(list: T[], dt: number): vo
   for (let i = list.length - 1; i >= 0; i--) {
     list[i].age += dt;
     if (list[i].age >= list[i].life) list.splice(i, 1);
+  }
+}
+
+// ------------------------------------------------------------------ the ground layer
+
+/** Kept at most this sharp: marks are soft shapes, and the layer is a full-width canvas. */
+const GROUND_RATIO = 2;
+
+/**
+ * Marks that stay on the ground for the whole fight, painted once into one cached canvas and drawn with a single
+ * drawImage, so hundreds of them cost nothing per frame. In screen px, inside a horizontal band (band()); the
+ * screen draws it under everything else on the pitch and clears it (Fx.clear) when a new fight starts.
+ */
+export class Ground {
+  private cv: HTMLCanvasElement | null = null;
+  private g: Ctx | null = null;
+  private ratio = 1;
+  private top = 0;
+  private h = H;
+  /** how many marks were painted since the last clear */
+  count = 0;
+
+  /** the screen band the layer covers (marks outside it are cut off) */
+  band(top: number, bottom: number): void {
+    const h = Math.max(1, Math.round(bottom - top));
+    if (top === this.top && h === this.h) return;
+    this.top = Math.round(top);
+    this.h = h;
+    this.cv = this.g = null;
+    this.count = 0;
+  }
+
+  /** the device pixel ratio; a change keeps what is painted (redrawn at the new size) */
+  setRatio(ratio: number): void {
+    const r = clamp(ratio, 1, GROUND_RATIO);
+    if (r === this.ratio) return;
+    const old = this.cv;
+    this.ratio = r;
+    this.cv = this.g = null;
+    if (old && this.count) {
+      const g = this.paint();
+      g.drawImage(old, 0, this.top, W, this.h);
+      this.count--;
+    }
+  }
+
+  clear(): void {
+    this.count = 0;
+    if (!this.g || !this.cv) return;
+    this.g.setTransform(1, 0, 0, 1, 0, 0);
+    this.g.clearRect(0, 0, this.cv.width, this.cv.height);
+  }
+
+  /** The layer's context set up in screen px, to paint one mark into (leave its transform as you like). */
+  paint(): Ctx {
+    if (!this.cv || !this.g) {
+      this.cv = document.createElement('canvas');
+      this.cv.width = Math.ceil(W * this.ratio);
+      this.cv.height = Math.ceil(this.h * this.ratio);
+      this.g = this.cv.getContext('2d')!;
+    }
+    const g = this.g;
+    g.setTransform(this.ratio, 0, 0, this.ratio, 0, -this.top * this.ratio);
+    g.globalAlpha = 1;
+    g.globalCompositeOperation = 'source-over';
+    this.count++;
+    return g;
+  }
+
+  draw(ctx: Ctx): void {
+    if (this.count && this.cv) ctx.drawImage(this.cv, 0, this.top, W, this.h);
   }
 }

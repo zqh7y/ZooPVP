@@ -18,6 +18,9 @@ const WIPE_IN = 0.2; // and the new one fades in
 /** The one game: canvas, save, screens, the frame loop and the shared screen transition. */
 export function createApp(canvas: HTMLCanvasElement): App {
   const ctx = canvas.getContext('2d')!;
+  // the page around the canvas takes the game's warm cream, so a wide window never frames it in a dark band
+  document.body.style.background = COLOR.page;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', COLOR.page);
   const state = load();
   const inv = new Inventory(state);
   const arena = new Arena();

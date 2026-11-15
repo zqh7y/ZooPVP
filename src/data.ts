@@ -92,14 +92,14 @@ export interface PetDef {
 }
 
 export const PETS: Record<PetType, PetDef> = {
-  ant: { hp: 70, dmg: 5, cd: 0.6, reach: 3, speed: 86, radius: 8, mass: 1, move: 'scurry' },
-  frog: { hp: 235, dmg: 13, cd: 1.0, reach: 8, speed: 52, radius: 14, mass: 2.6, move: 'hop' },
+  ant: { hp: 50, dmg: 4.6, cd: 0.6, reach: 4, speed: 56, radius: 16, mass: 1, move: 'scurry' },
+  frog: { hp: 85, dmg: 11, cd: 1.0, reach: 9, speed: 39, radius: 26, mass: 2.6, move: 'hop' },
 };
 
 /** What a pet's class changes: a higher class is bigger, tougher, stronger and a little slower. */
 export const PET_CLASS = {
-  hp: 1.6, // x per class
-  dmg: 1.45, // x per class
+  hp: 1.58, // x per class
+  dmg: 1.36, // x per class
   size: 0.11, // + per class (radius)
   speed: 0.95, // x per class
   mass: 1.25, // x per class
@@ -132,16 +132,16 @@ export interface WeaponDef {
 export const NO_WEAPON: WeaponDef = { dmg: 1, cd: 1, reach: 0, knock: 14, hp: 1, block: 0, stun: 0, splash: 1, pierce: 1 };
 
 export const WEAPONS: Record<WeaponType, WeaponDef> = {
-  knife: { dmg: 1.05, cd: 0.42, reach: 4, knock: 8, hp: 1, block: 0, stun: 0, splash: 1, pierce: 1 },
-  bat: { dmg: 2.4, cd: 1.6, reach: 9, knock: 120, hp: 1, block: 0, stun: 0, splash: 3, pierce: 1 },
-  shield: { dmg: 0.7, cd: 1.2, reach: 4, knock: 50, hp: 1.35, block: 0.35, stun: 0.15, splash: 1, pierce: 1 },
-  spear: { dmg: 1.35, cd: 1.1, reach: 30, knock: 20, hp: 1, block: 0, stun: 0, splash: 1, pierce: 2 },
+  knife: { dmg: 1.1, cd: 0.42, reach: 6, knock: 10, hp: 1, block: 0, stun: 0, splash: 1, pierce: 1 },
+  bat: { dmg: 2.2, cd: 1.5, reach: 12, knock: 45, hp: 1, block: 0, stun: 0, splash: 3, pierce: 1 },
+  shield: { dmg: 1.0, cd: 1.0, reach: 5, knock: 30, hp: 1.1, block: 0.1, stun: 0.06, splash: 1, pierce: 1 },
+  spear: { dmg: 1.25, cd: 1.1, reach: 24, knock: 14, hp: 1, block: 0, stun: 0, splash: 1, pierce: 2 },
 };
 
 /** What a weapon's class changes: fusing two identical weapons makes it hit harder and faster. */
 export const WEAPON_CLASS = {
-  dmg: 1.32, // x per class
-  cd: 0.96, // x per class
+  dmg: 1.2, // x per class
+  cd: 0.97, // x per class
 };
 
 // ------------------------------------------------------------------ gear
@@ -226,13 +226,27 @@ export const FIGHT = {
   /** seconds of "3, 2, 1" before anyone moves */
   countdown: 1.6,
   /** from this second on every hit grows stronger, so a fight always ends */
-  enrageAt: 40,
+  enrageAt: 50,
   /** + damage per second after enrageAt */
   enrageRamp: 0.25,
   /** the fight is called at this second: the side with more health left (as a share) wins */
-  timeLimit: 60,
-  /** how far from its own edge a team lines up */
-  spawnBand: [40, 190] as const,
+  timeLimit: 75,
+  /**
+   * The line-up (see lineUp in src/sim/battle.ts): the front row stands this far from its own end line, the
+   * rows behind it are spaced by body size, and no row stands closer to the end line than lineBack.
+   */
+  lineFront: 130,
+  lineBack: 26,
+  /** px between the bodies of neighbours in a row, and between rows */
+  lineGap: 8,
+  /** seconds between the front kind setting off and the kind lined up behind it */
+  wave: 5,
+  /** a foe already fought by others looks this much farther per attacker, so fights spread along the line */
+  crowd: 2,
+  /** how hard a stuck fighter slips sideways around what blocks it */
+  sidestep: 0.45,
+  /** seconds a fighter pauses after scoring a knock-out */
+  cheer: 0.8,
 };
 
 // ------------------------------------------------------------------ rolls
@@ -328,23 +342,31 @@ export const TROPHY_ROAD: readonly RoadReward[] = Array.from({ length: 40 }, (_,
 });
 
 /**
- * The army power an opponent has at a trophy count. The balance tool tunes this curve to the pace a
- * player's own army grows at, so climbing takes a stronger army, not just more matches.
+ * The opponent is a bot built against the player's own army (src/logic/bots.ts): about as many fighters and
+ * the player's army power x a difficulty factor that starts easy and climbs gently with trophies.
  */
-export function botPowerAt(trophies: number): number {
-  return BOT.base * BOT.growth ** (trophies / 100);
-}
 export const BOT = {
-  base: 14,
-  growth: 1.9,
-  /** the opponent's power is this curve x a random spread */
-  spread: [0.82, 1.1] as const,
-  /** the first matches are easier: x this for match 0, 1, 2 */
-  firstMatches: [0.35, 0.6, 0.8] as const,
+  /** x the player's power for match 0, 1, 2 */
+  firstMatches: [0.8, 0.9, 0.9] as const,
+  /** from then on x this at 0 trophies, rising evenly to `hard` at `hardAt` trophies */
+  easy: 0.95,
+  hard: 1.1,
+  hardAt: 1500,
+  /** +- this share of random spread on the target power */
+  spread: 0.06,
   /** after 2 defeats in a row the next opponent is this much weaker */
-  mercy: 0.8,
+  mercy: 0.85,
   /** after 3 wins in a row the next opponent is this much stronger */
-  heat: 1.1,
+  heat: 1.08,
+  /** the bot fields the player's fighter count x 1 +- this */
+  countSpread: 0.25,
+  /** its army power lands within this share of the target */
+  tolerance: 0.06,
+  /** at most this many squads and fighters (what a 5 x 5 grid can hold) */
+  maxSquads: 10,
+  maxFighters: 25,
+  /** against at most this many fighters the bot fields the player's own kinds of pets (and weapon in a 1 v 1) */
+  mirrorUpTo: 3,
 };
 
 export const TUTORIAL_DONE = 99;
