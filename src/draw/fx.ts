@@ -1,5 +1,5 @@
 import { fchance, frand } from '../rng';
-import { CLASS_FX, COLOR, H, RAINBOW, TEAM, TIER, TYPE, UI, W } from '../theme';
+import { CLASS_FX, COLOR, FONT, H, RAINBOW, TEAM, TIER, TYPE, UI, W } from '../theme';
 import type { Team } from '../types';
 import { clamp, easeOutBack, easeOutCubic, label, type Ctx } from '../util';
 
@@ -19,6 +19,11 @@ import { clamp, easeOutBack, easeOutCubic, label, type Ctx } from '../util';
  *
  * A screen calls update(dt) with real time, multiplies its own game time by timeScale, and draws the three
  * layers: drawUnder (on the ground), drawOver (above the fighters), drawScreen (flashes and words on top).
+ *
+ * v5 (the fights' juice, docs/v5.md section 4): comic() pops a chunky outlined sticker word (POW!, BONK!, a combo
+ * call) and number() a popping damage number that merges with the last one on the same victim; both come from a
+ * fixed pool (POPS) and are drawn last in their layer. sticker() draws that chunky text anywhere (the battle
+ * view's banners use it). word() / floatText() / tag() stay the clean interface words they were.
  */
 
 export type FxShape = 'dot' | 'star' | 'petal' | 'shard' | 'confetti' | 'puff' | 'drop' | 'bubble';
@@ -109,6 +114,55 @@ interface Streak { x: number; y: number; ang: number; len: number; w: number; co
 interface Impact { x: number; y: number; size: number; color: string; age: number; life: number; rot: number }
 interface Mark { x: number; y: number; size: number; sprite: number; age: number; life: number; fade: number; flip: boolean }
 interface Rays { x: number; y: number; level: number; age: number; life: number }
+/** a popping comic sticker word (kind 1) or damage number (kind 0); pooled */
+interface Pop {
+  kind: 0 | 1;
+  x: number;
+  y: number;
+  text: string;
+  /** a number's value (merged hits add up) */
+  value: number;
+  /** a number's victim, so the next hit on it merges into it (-1 = never merges) */
+  key: number;
+  size: number;
+  style: StickerStyle;
+  /** a small second sticker over it (CRIT!) */
+  sub: string;
+  rot: number;
+  rise: number;
+  drift: number;
+  age: number;
+  life: number;
+  layer: number;
+}
+
+/** How a sticker's chunky letters look: a fill (a top-to-bottom gradient with fill2), the ink outline, a rim round
+ *  the ink (null: none), and a starburst plate behind the word (null: none). */
+export interface StickerStyle {
+  fill: string;
+  fill2?: string;
+  ink?: string;
+  rim?: string | null;
+  burst?: string | null;
+  /** the drop shadow's strength 0..1 (default 0.35) */
+  shadow?: number;
+}
+
+/** the chunky letters of the stickers: the game's family at its heaviest */
+export const STICKER_FONT = `"Arial Black", ${FONT}`;
+const STICKER_INK = '#1d1a2b';
+/** how many words and numbers can pop at once (the oldest number gives way) */
+const POPS = 48;
+const newPop = (): Pop => ({ kind: 0, x: 0, y: 0, text: '', value: 0, key: -1, size: 16, style: { fill: '#fff' }, sub: '', rot: 0, rise: 0, drift: 0, age: 0, life: 1, layer: 1 });
+
+/** The damage numbers' looks: a hit by you, a hit on you, a crit, a poison glob. */
+export const NUMBER_STYLE = {
+  mine: { fill: '#ffffff', ink: STICKER_INK, rim: null, shadow: 0.3 },
+  theirs: { fill: '#ffaa9b', ink: STICKER_INK, rim: null, shadow: 0.3 },
+  crit: { fill: '#ffe45c', fill2: '#ff9a1f', ink: STICKER_INK, rim: '#ffffff', shadow: 0.4 },
+  poison: { fill: '#cdf25e', ink: STICKER_INK, rim: null, shadow: 0.3 },
+} as const satisfies Record<string, StickerStyle>;
+const CRIT_TAG: StickerStyle = { fill: '#ff6b3d', fill2: '#e8381f', ink: STICKER_INK, rim: '#ffffff', shadow: 0.3 };
 interface Lines { x: number; y: number; color: string; age: number; life: number; top: number }
 
 const newParticle = (): Particle => ({
@@ -132,6 +186,8 @@ export class Fx {
   private marks: Mark[] = [];
   private rays: Rays[] = [];
   private lines: Lines[] = [];
+  private pops: Pop[] = Array.from({ length: POPS }, newPop);
+  private popN = 0;
   /** what stays on the pitch for the whole fight */
   readonly ground = new Ground();
 
@@ -166,6 +222,7 @@ export class Fx {
     this.count = this.shadows = 0;
     this.rings.length = this.flashes.length = this.words.length = this.flyers.length = 0;
     this.streaks.length = this.impacts.length = this.marks.length = this.rays.length = this.lines.length = 0;
+    this.popN = 0;
     this.shakeAmt = this.kx = this.ky = this.stop = this.slowT = 0;
     this.slowF = 1;
     this.camera.x = this.camera.y = 0;
@@ -274,6 +331,14 @@ export class Fx {
     age(this.lines, dt);
     age(this.flashes, dt);
     age(this.words, dt);
+    for (let i = 0; i < this.popN; ) {
+      const p = this.pops[i];
+      p.age += dt;
+      if (p.age >= p.life) {
+        this.pops[i] = this.pops[--this.popN];
+        this.pops[this.popN] = p;
+      } else i++;
+    }
     for (let i = this.flyers.length - 1; i >= 0; i--) {
       const f = this.flyers[i];
       f.age += dt;
@@ -354,6 +419,95 @@ export class Fx {
     for (const w of this.words) if (w.over) n++;
     if (n > 10) return;
     this.words.push({ x, y, text, color, size, age: 0, life: 0.7, rise: true, over: true });
+  }
+
+  /**
+   * A chunky comic sticker word that pops in with a squash, holds and swells away (POW!, BONK!, DOUBLE KO!), in the
+   * caller's space: drawn last in drawOver, or in drawScreen with screen. rot: its tilt (default a small random one).
+   */
+  comic(x: number, y: number, text: string, style: StickerStyle, o: { size?: number; life?: number; rot?: number; rise?: number; screen?: boolean; delay?: number } = {}): void {
+    let words = 0;
+    for (let i = 0; i < this.popN; i++) if (this.pops[i].kind === 1) words++;
+    if (words >= 8) return;
+    const p = this.takePop();
+    p.kind = 1;
+    p.x = x;
+    p.y = y;
+    p.text = text;
+    p.value = 0;
+    p.key = -1;
+    p.size = o.size ?? 28;
+    p.style = style;
+    p.sub = '';
+    p.rot = o.rot ?? frand(-0.16, 0.16);
+    p.rise = o.rise ?? 14;
+    p.drift = 0;
+    p.age = -(o.delay ?? 0);
+    p.life = o.life ?? 0.62;
+    p.layer = o.screen ? SCREEN : OVER;
+  }
+
+  /**
+   * A damage number popping off a hit and rising (drawn last in drawOver): white for your hits, coral for hits on
+   * you, gold and bigger with "CRIT!" for a crit, lime for poison. key = the victim: a hit on it while its last
+   * number is young adds to that number and pops it again, so a flurry reads as one growing number.
+   */
+  number(x: number, y: number, value: number, o: { key?: number; crit?: boolean; style?: StickerStyle; size?: number } = {}): void {
+    const key = o.key ?? -1;
+    if (key >= 0) {
+      for (let i = 0; i < this.popN; i++) {
+        const p = this.pops[i];
+        if (p.kind !== 0 || p.key !== key || p.age > 0.32 || p.age < 0) continue;
+        p.value += value;
+        p.text = String(Math.max(1, Math.round(p.value)));
+        if (o.crit && !p.sub) {
+          p.sub = 'CRIT!';
+          p.style = NUMBER_STYLE.crit;
+        }
+        p.size = numberSize(p.value, !!p.sub, o.size);
+        p.age = Math.min(p.age, 0.05);
+        p.x += (x - p.x) * 0.5;
+        p.y += (y - p.y) * 0.5;
+        return;
+      }
+    }
+    const p = this.takePop();
+    p.kind = 0;
+    p.x = x + frand(-4, 4);
+    p.y = y;
+    p.value = value;
+    p.text = String(Math.max(1, Math.round(value)));
+    p.key = key;
+    p.sub = o.crit ? 'CRIT!' : '';
+    p.style = o.crit ? NUMBER_STYLE.crit : (o.style ?? NUMBER_STYLE.mine);
+    p.size = numberSize(value, !!o.crit, o.size);
+    p.rot = o.crit ? frand(-0.12, 0.12) : 0;
+    p.rise = o.crit ? 34 : 26;
+    p.drift = frand(-10, 10);
+    p.age = 0;
+    p.life = o.crit ? 0.95 : 0.72;
+    p.layer = OVER;
+  }
+
+  /** how many words and numbers are up (for the dev pages) */
+  get popping(): number {
+    return this.popN;
+  }
+
+  /** a free pop, or the oldest number (a word only when nothing else is left) */
+  private takePop(): Pop {
+    if (this.popN < POPS) return this.pops[this.popN++];
+    let best = 0;
+    let bestK = -1;
+    for (let i = 0; i < POPS; i++) {
+      const p = this.pops[i];
+      const k = p.age / p.life + (p.kind === 0 ? 1 : 0);
+      if (k > bestK) {
+        bestK = k;
+        best = i;
+      }
+    }
+    return this.pops[best];
   }
 
   /** an icon arcs across the screen with a trail and pops where it lands */
@@ -594,6 +748,40 @@ export class Fx {
       ctx.closePath();
       ctx.fill();
     }
+    this.drawPops(ctx, OVER);
+  }
+
+  /** the words and numbers of one layer: they pop in with a squash, wobble, then rise and fade (words swell away) */
+  private drawPops(ctx: Ctx, layer: number): void {
+    for (let i = 0; i < this.popN; i++) {
+      const p = this.pops[i];
+      if (p.layer !== layer || p.age < 0) continue;
+      const k = p.age / p.life;
+      const a = clamp(p.age / 0.13, 0, 1);
+      // in: from small with an overshoot; then a wobble that dies out
+      let s = a < 1 ? 0.35 + 0.65 * easeOutBack(a) : 1;
+      const wob = Math.sin(p.age * 34) * Math.exp(-p.age * 9) * 0.16;
+      let sx = s * (1 + wob + (1 - a) * 0.25);
+      let sy = s * (1 - wob - (1 - a) * 0.2);
+      const out = clamp((k - 0.72) / 0.28, 0, 1);
+      if (p.kind === 1) {
+        // a word swells a little as it fades
+        s = 1 + 0.18 * out;
+        sx *= s;
+        sy *= s;
+      } else {
+        sx *= 1 - 0.25 * out;
+        sy *= 1 - 0.25 * out;
+      }
+      const alpha = 1 - out * out;
+      if (alpha <= 0.01) continue;
+      const y = p.y - p.rise * easeOutCubic(Math.min(1, k * 1.5));
+      const x = p.x + p.drift * k;
+      ctx.globalAlpha = alpha;
+      sticker(ctx, p.text, x, y, p.size, p.style, p.rot, sx, sy);
+      if (p.sub) sticker(ctx, p.sub, x, y - p.size * 0.82, p.size * 0.52, CRIT_TAG, -0.1, sx, sy);
+    }
+    ctx.globalAlpha = 1;
   }
 
   /** a soft dark spot on the grass under every piece that flies, smaller and fainter the higher it is */
@@ -700,6 +888,7 @@ export class Fx {
       f.draw(ctx, bez(f.x0, f.cx, f.x1, p), bez(f.y0, f.cy, f.y1, p), s);
     }
     this.drawWords(ctx, false);
+    this.drawPops(ctx, SCREEN);
   }
 
   private drawWords(ctx: Ctx, over: boolean): void {
@@ -860,6 +1049,94 @@ export function drawShard(ctx: Ctx, x: number, y: number, s: number, rot: number
   facet(ctx, ax, ay, bx, by, mx, my, color);
   facet(ctx, bx, by, cx, cy, mx, my, color);
   facet(ctx, cx, cy, ax, ay, mx, my, color);
+}
+
+/** A damage number's size: bigger for bigger hits, and for a crit. */
+function numberSize(value: number, crit: boolean, base?: number): number {
+  const s = (base ?? 15) + Math.min(9, Math.sqrt(Math.max(0, value)) * 0.85);
+  return crit ? s * 1.3 : s;
+}
+
+const BURST_PTS = 14;
+
+/**
+ * Chunky cartoon letters, centred on (x, y): a soft drop shadow, a starburst plate when the style has one, a rim,
+ * a thick ink outline and the fill (a gradient when fill2 is given), tilted by rot and scaled (sx, sy) about the
+ * middle. In the caller's space; the caller sets globalAlpha.
+ */
+export function sticker(ctx: Ctx, text: string, x: number, y: number, size: number, st: StickerStyle, rot = 0, sx = 1, sy = 1): void {
+  if (size < 2 || sx <= 0.01 || sy <= 0.01) return;
+  ctx.save();
+  ctx.translate(x, y);
+  if (rot) ctx.rotate(rot);
+  if (sx !== 1 || sy !== 1) ctx.scale(sx, sy);
+  ctx.font = `900 ${Math.round(size)}px ${STICKER_FONT}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round';
+  const ink = st.ink ?? STICKER_INK;
+  const rim = st.rim === undefined ? null : st.rim;
+  const lw = Math.max(2, size * 0.2);
+  const rimW = rim ? lw + Math.max(2, size * 0.13) : lw;
+  const shade = st.shadow ?? 0.35;
+  const ty = size * 0.04;
+  if (st.burst) {
+    // a jagged comic plate behind the word, as wide as it, with its own outline and shadow
+    const w = ctx.measureText(text).width;
+    const rx = w * 0.62 + size * 0.42;
+    const ry = size * 0.98;
+    const path = () => {
+      ctx.beginPath();
+      for (let i = 0; i < BURST_PTS * 2; i++) {
+        const a = (i / (BURST_PTS * 2)) * Math.PI * 2;
+        const k = i % 2 ? 0.72 + 0.06 * Math.sin(i * 2.3) : 1 + 0.05 * Math.sin(i * 1.7);
+        const px = Math.cos(a) * rx * k;
+        const py = Math.sin(a) * ry * k;
+        if (i) ctx.lineTo(px, py);
+        else ctx.moveTo(px, py);
+      }
+      ctx.closePath();
+    };
+    const a0 = ctx.globalAlpha;
+    ctx.translate(size * 0.07, size * 0.1);
+    path();
+    ctx.globalAlpha = a0 * shade;
+    ctx.fillStyle = ink;
+    ctx.fill();
+    ctx.globalAlpha = a0;
+    ctx.translate(-size * 0.07, -size * 0.1);
+    path();
+    ctx.fillStyle = st.burst;
+    ctx.fill();
+    ctx.lineWidth = Math.max(1.5, size * 0.08);
+    ctx.strokeStyle = ink;
+    ctx.stroke();
+  }
+  // the drop shadow
+  if (shade > 0) {
+    const a0 = ctx.globalAlpha;
+    ctx.globalAlpha = a0 * shade;
+    ctx.lineWidth = rimW;
+    ctx.strokeStyle = ink;
+    ctx.strokeText(text, size * 0.05, ty + size * 0.09);
+    ctx.globalAlpha = a0;
+  }
+  if (rim) {
+    ctx.lineWidth = rimW;
+    ctx.strokeStyle = rim;
+    ctx.strokeText(text, 0, ty);
+  }
+  ctx.lineWidth = lw;
+  ctx.strokeStyle = ink;
+  ctx.strokeText(text, 0, ty);
+  if (st.fill2) {
+    const g = ctx.createLinearGradient(0, ty - size * 0.4, 0, ty + size * 0.4);
+    g.addColorStop(0, st.fill);
+    g.addColorStop(1, st.fill2);
+    ctx.fillStyle = g;
+  } else ctx.fillStyle = st.fill;
+  ctx.fillText(text, 0, ty);
+  ctx.restore();
 }
 
 /** A four-point sparkle path (long arms, a narrow waist). */
