@@ -1,37 +1,48 @@
 /*
- * Balance check: npx tsx tools/balance.ts [ladder] [waves] [player] [honest] [quick]
+ * Balance check: npx tsx tools/balance.ts [ladder] [player] [themes] [honest] [quick]
  * (no section named = all of them).
  * - ladder: POWER doubles every rung (bare, and with the natural kit).
- * - waves: the wave curve, stage 1..10 x wave 1..10: recommendedPower, the enemy army (POWER, fighters, rungs, the
- *   boss) and the POWER a stand-in army needs to win half / four in five of its fights.
- * - player: a typical player who spends their cash on cases (and cells) as they go, with AUTO arrange, from a new
- *   save through stage 10: their POWER against the recommended power, retries, cases, and the fight lengths
- *   (aim: a normal wave 15-25 s, a boss wave 25-40 s).
- * - honest: the stronger of two random armies wins more the bigger the POWER gap; a mirror is even.
+ * - player: a modelled player from a new save through their first 50 matches against the matched bot: they spend
+ *   their cash on cases (and cheap cells) as they go and AUTO arrange. Win rate (aim about 60-70%), the longest
+ *   losing streak (aim: never more than 3 at the start), champion matches, POWER and level growth, and the fight
+ *   lengths (aim: a normal match 15-25 s, a champion match 25-35 s).
+ * - themes: each theme against stand-in armies at an even difficulty (1.0): how often the player wins (aim
+ *   40-60%: a theme must not be stronger or weaker than its POWER says).
+ * - honest: the stronger of two random armies wins more the bigger the POWER gap; a mirror is even; a boss is
+ *   worth its POWER.
  */
-import { CELL_LOCKS, ENEMY, PET_TYPES, RECOMMENDED, WAVES, armyPower, formatPower, isBossWave, recommendedPower, rungOf, squadPower, tierOf } from '../src/data';
+import { CELL_LOCKS, MATCH, PET_TYPES, armyPower, formatPower, rungOf, squadPower, tierOf } from '../src/data';
 import { makeRng, type Rng } from '../src/rng';
 import { runBattle } from '../src/sim/battle';
-import { buildArmy, enemyArmy, fightSeed, nextWave, waveFighters } from '../src/logic/waves';
+import { buildArmy, difficulty, fightSeed, findOpponent } from '../src/logic/match';
 import { Inventory } from '../src/logic/inventory';
 import { autoArrange } from '../src/logic/auto';
 import { caseBlock, casePrice, openCase } from '../src/logic/rolls';
-import { applyWave, cellLock, cellPrice, outcomeOf, unlockCell } from '../src/logic/progress';
+import { applyMatch, cellLock, cellPrice, outcomeOf, unlockCell } from '../src/logic/progress';
 import { newSave } from '../src/logic/save';
-import type { ArmySpec, SaveState, SquadSpec } from '../src/types';
+import type { ArmySpec, SaveState, SquadSpec, ThemeId } from '../src/types';
 
 const args = process.argv.slice(2);
 const QUICK = args.includes('quick');
-const wanted = (s: string) => !args.some((a) => ['ladder', 'waves', 'player', 'honest'].includes(a)) || args.includes(s);
-// "natural": every wave far below the player, to measure how fast a typical player grows on their own
-if (args.includes('natural')) RECOMMENDED.stages = RECOMMENDED.stages.map((x) => x * 0.02);
+const SECTIONS = ['ladder', 'player', 'themes', 'honest'];
+const wanted = (s: string) => !args.some((a) => SECTIONS.includes(a)) || args.includes(s);
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 const quant = (a: number[], q: number) => (a.length ? a.slice().sort((x, y) => x - y)[Math.floor(q * (a.length - 1))] : NaN);
 const fighters = (a: ArmySpec) => a.squads.reduce((s, q) => s + q.count, 0);
-const rungs = (a: ArmySpec) => {
-  const r = a.squads.filter((q) => !q.boss).map((q) => rungOf(q.pet));
-  return r.length ? `${Math.min(...r)}-${Math.max(...r)}` : '-';
-};
+
+/** win share of `me` against `them` over n seeds, sides alternated */
+function winShare(me: ArmySpec, them: ArmySpec, n: number, seed: number): { win: number; times: number[] } {
+  let w = 0;
+  const times: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const flip = i % 2 === 1;
+    const s = runBattle(flip ? [them, me] : [me, them], seed + i * 7919);
+    times.push(s.time);
+    if (s.winner === (flip ? 1 : 0)) w++;
+    else if (s.winner === -1) w += 0.5;
+  }
+  return { win: w / n, times };
+}
 
 // ------------------------------------------------------------------ ladder
 if (wanted('ladder')) {
@@ -47,78 +58,25 @@ if (wanted('ladder')) {
   }
 }
 
-// ------------------------------------------------------------------ waves
-/** win share of `me` against `them` over n seeds, sides alternated */
-function winShare(me: ArmySpec, them: ArmySpec, n: number, seed: number): { win: number; times: number[] } {
-  let w = 0;
-  const times: number[] = [];
-  for (let i = 0; i < n; i++) {
-    const flip = i % 2 === 1;
-    const s = runBattle(flip ? [them, me] : [me, them], seed + i * 7919);
-    times.push(s.time);
-    if (s.winner === (flip ? 1 : 0)) w++;
-    else if (s.winner === -1) w += 0.5;
-  }
-  return { win: w / n, times };
-}
-
-/** the POWER a stand-in army (shaped like the wave's own) needs to win this share of fights against the wave */
-function powerNeeded(stage: number, wave: number, enemy: ArmySpec, share: number, r: Rng): number {
-  let lo = 0.3;
-  let hi = 3;
-  const base = armyPower(enemy.squads);
-  const n = Math.max(1, waveFighters(stage, wave) + (isBossWave(wave) ? 1 : 0));
-  for (let step = 0; step < (QUICK ? 4 : 6); step++) {
-    const mid = Math.sqrt(lo * hi);
-    let w = 0;
-    const tries = QUICK ? 6 : 10;
-    for (let k = 0; k < tries; k++) {
-      const me: ArmySpec = { squads: buildArmy(base * mid, n, r, 10) };
-      w += winShare(me, enemy, 2, r.int(1, 1e9)).win;
-    }
-    if (w / tries >= share) hi = mid;
-    else lo = mid;
-  }
-  return base * Math.sqrt(lo * hi);
-}
-
-if (wanted('waves')) {
-  console.log('\n== the wave curve: recommended POWER, the enemy army, and the POWER a stand-in army needs to win 50% / 80% ==');
-  const r = makeRng(31);
-  const waves = QUICK ? [1, 10] : [1, 4, 7, 9, 10];
-  for (let stage = 1; stage <= 10; stage++) {
-    for (const wave of waves) {
-      const enemy = enemyArmy(stage, wave, 1234 + stage);
-      const rec = recommendedPower(stage, wave);
-      const p50 = powerNeeded(stage, wave, enemy, 0.5, r);
-      const p80 = powerNeeded(stage, wave, enemy, 0.8, r);
-      const boss = enemy.squads.find((q) => q.boss);
-      console.log(
-        `stage ${String(stage).padStart(2)} wave ${String(wave).padStart(2)}  rec ${formatPower(rec).padStart(6)}  enemy ${formatPower(armyPower(enemy.squads)).padStart(6)} (${String(fighters(enemy)).padStart(2)} fighters, rungs ${rungs(enemy).padEnd(5)}${boss ? `, boss ${boss.pet}` : ''})` +
-          `  needs: 50% at ${formatPower(p50).padStart(6)} (${(p50 / rec).toFixed(2)}x rec), 80% at ${formatPower(p80).padStart(6)} (${(p80 / rec).toFixed(2)}x rec)`,
-      );
-    }
-  }
-}
-
-// ------------------------------------------------------------------ the typical player
-interface WaveLog {
-  stage: number;
-  wave: number;
+// ------------------------------------------------------------------ the modelled player
+interface MatchLog {
+  n: number;
   power: number;
-  rec: number;
+  opp: number;
   won: boolean;
   time: number;
-  boss: boolean;
+  champion: boolean;
+  theme: ThemeId;
   fighters: number;
-  cases: number;
+  level: number;
   top: number;
+  cash: number;
 }
 
 /** what a typical player does in prep: open every case they can afford, AUTO arrange, buy a cell when it is cheap next to a case */
 function prep(s: SaveState, inv: Inventory, rng: Rng): void {
   for (let guard = 0; guard < 60; guard++) {
-    // a cell when it costs no more than 3 cases and the grid is the bottleneck
+    // a cell when it costs no more than 3 cases
     const cash = Object.keys(CELL_LOCKS).map((k) => k.split(',').map(Number)).find(([c, r]) => cellLock(s, c, r)?.kind === 'cash');
     if (cash && s.cash >= cellPrice(s) && cellPrice(s) <= 3 * casePrice(s, 'case')) {
       unlockCell(s, cash[0], cash[1]);
@@ -141,64 +99,85 @@ function prep(s: SaveState, inv: Inventory, rng: Rng): void {
   }
 }
 
-function playThrough(seed: number, stages: number, maxFights: number): WaveLog[] {
+function playThrough(seed: number, matches: number): MatchLog[] {
   const s = newSave(seed);
   const inv = new Inventory(s);
   const rng = makeRng(seed * 31 + 7);
   autoArrange(inv);
-  const log: WaveLog[] = [];
-  while (s.stage <= stages && s.fights < maxFights) {
+  const log: MatchLog[] = [];
+  while (s.matches < matches) {
     prep(s, inv, rng);
     const army = inv.army();
-    const w = nextWave(s);
-    const sum = runBattle([army, w.army], fightSeed(s));
+    const o = findOpponent(s, undefined, army);
+    const sum = runBattle([army, o.army], fightSeed(s));
     const top = Math.max(0, ...army.squads.map((q) => rungOf(q.pet)));
-    log.push({ stage: s.stage, wave: s.wave, power: armyPower(army.squads), rec: w.recommended, won: sum.winner === 0, time: sum.time, boss: w.boss, fighters: fighters(army), cases: s.cases, top });
-    applyWave(s, outcomeOf(sum));
+    const res = applyMatch(s, outcomeOf(sum, army));
+    log.push({ n: s.matches, power: armyPower(army.squads), opp: o.power, won: res.won, time: sum.time, champion: o.champion, theme: o.theme.id, fighters: fighters(army), level: s.level, top, cash: res.cash });
   }
   return log;
 }
 
+const longestLoss = (l: MatchLog[]) => {
+  let best = 0;
+  let run = 0;
+  for (const x of l) {
+    run = x.won ? 0 : run + 1;
+    best = Math.max(best, run);
+  }
+  return best;
+};
+
 if (wanted('player')) {
-  const players = QUICK ? 6 : 16;
-  const stages = 10;
-  console.log(`\n== a typical player (${players} runs): spends cash on cases and cheap cells as they go, AUTO arranges, fights every wave ==`);
-  const logs = Array.from({ length: players }, (_, i) => playThrough(1000 + i, stages, 600));
-  const t0 = logs.map((l) => l.length);
-  console.log(`fights to finish stage ${stages}: median ${quant(t0, 0.5)} (${quant(t0, 0.1)}..${quant(t0, 0.9)}); runs stuck at the 600-fight cap: ${t0.filter((n) => n >= 600).length}`);
-  console.log('stage | fights (p50 / p90) | POWER at wave 1 vs rec | at wave 9 vs rec | at the boss vs rec | losses on 1-9 / boss | fighters | top rung | cases');
-  for (let stage = 1; stage <= stages; stage++) {
-    const rows = logs.map((l) => l.filter((x) => x.stage === stage));
-    const firstAt = (wave: number) => rows.map((r) => r.find((x) => x.wave === wave)).filter((x): x is WaveLog => !!x);
-    const ratio = (xs: WaveLog[]) => quant(xs.map((x) => x.power / x.rec), 0.5);
-    const w1 = firstAt(1);
-    const w9 = firstAt(9);
-    const w10 = firstAt(10);
-    const n = rows.map((r) => r.length);
-    const lossN = rows.map((r) => r.filter((x) => !x.won && !x.boss).length);
-    const lossB = rows.map((r) => r.filter((x) => !x.won && x.boss).length);
-    const all = rows.flat();
+  const players = QUICK ? 8 : 24;
+  const N = 50;
+  console.log(`\n== a modelled player (${players} runs, ${N} matches each): spends cash on cases and cheap cells, AUTO arranges, fights the matched bot ==`);
+  const logs = Array.from({ length: players }, (_, i) => playThrough(1000 + i, N));
+  const all = logs.flat();
+  const wr = (xs: MatchLog[]) => (xs.length ? xs.filter((x) => x.won).length / xs.length : NaN);
+  console.log(`win rate over ${N} matches: ${pct(wr(all))} (aim 60-70%); per run p10 ${pct(quant(logs.map(wr), 0.1))} .. p90 ${pct(quant(logs.map(wr), 0.9))}`);
+  console.log(`the first 3 matches won: ${pct(wr(logs.flatMap((l) => l.slice(0, 3))))}; champion matches won: ${pct(wr(all.filter((x) => x.champion)))}; normal: ${pct(wr(all.filter((x) => !x.champion)))}`);
+  const ls = logs.map(longestLoss);
+  const ls20 = logs.map((l) => longestLoss(l.slice(0, 20)));
+  console.log(`longest losing streak: in the first 20 matches max ${Math.max(...ls20)} (median ${quant(ls20, 0.5)}); in all ${N}: max ${Math.max(...ls)} (median ${quant(ls, 0.5)}) (aim: never more than 3 at the start)`);
+  console.log('matches | win rate | POWER (p50) | bot / you | fighters | top rung | level | cash / match');
+  for (let a = 0; a < N; a += 10) {
+    const xs = logs.flatMap((l) => l.slice(a, a + 10));
     console.log(
-      `${String(stage).padStart(5)} | ${String(quant(n, 0.5)).padStart(4)} / ${String(quant(n, 0.9)).padStart(4)}` +
-        `        | ${formatPower(quant(w1.map((x) => x.power), 0.5)).padStart(6)} (${ratio(w1).toFixed(2)}x)` +
-        `      | ${formatPower(quant(w9.map((x) => x.power), 0.5)).padStart(6)} (${ratio(w9).toFixed(2)}x)` +
-        ` | ${formatPower(quant(w10.map((x) => x.power), 0.5)).padStart(6)} (${ratio(w10).toFixed(2)}x)` +
-        `       | ${quant(lossN, 0.5)} / ${quant(lossB, 0.5)} (p90 ${quant(lossN, 0.9)} / ${quant(lossB, 0.9)})` +
-        `          | ${quant(all.map((x) => x.fighters), 0.5)} | ${quant(all.map((x) => x.top), 0.5)} | ${quant(w10.map((x) => x.cases), 0.5)}`,
+      `${String(a + 1).padStart(3)}-${String(a + 10).padEnd(3)} | ${pct(wr(xs)).padStart(8)} | ${formatPower(quant(xs.map((x) => x.power), 0.5)).padStart(11)} | ${quant(xs.map((x) => x.opp / x.power), 0.5).toFixed(2).padStart(9)} |` +
+        ` ${String(quant(xs.map((x) => x.fighters), 0.5)).padStart(8)} | ${String(quant(xs.map((x) => x.top), 0.5)).padStart(8)} | ${String(quant(xs.map((x) => x.level), 0.5)).padStart(5)} | ${quant(xs.map((x) => x.cash), 0.5)}`,
     );
   }
-  const all = logs.flat();
-  const normal = all.filter((x) => !x.boss).map((x) => x.time);
-  const boss = all.filter((x) => x.boss).map((x) => x.time);
-  const bossWon = all.filter((x) => x.boss && x.won).map((x) => x.time);
-  console.log(`fight length, normal waves: p10 ${quant(normal, 0.1).toFixed(1)}s  median ${quant(normal, 0.5).toFixed(1)}s  p90 ${quant(normal, 0.9).toFixed(1)}s (aim 15-25 s)`);
-  console.log(`fight length, boss waves:   p10 ${quant(boss, 0.1).toFixed(1)}s  median ${quant(boss, 0.5).toFixed(1)}s  p90 ${quant(boss, 0.9).toFixed(1)}s; won ones median ${quant(bossWon, 0.5).toFixed(1)}s (aim 25-40 s)`);
-  const late = all.filter((x) => x.stage >= 3);
-  const lateN = late.filter((x) => !x.boss).map((x) => x.time);
-  const lateB = late.filter((x) => x.boss).map((x) => x.time);
-  console.log(`  from stage 3: normal median ${quant(lateN, 0.5).toFixed(1)}s, boss median ${quant(lateB, 0.5).toFixed(1)}s; clock-decided ${pct(all.filter((x) => x.time >= 74.9).length / all.length)}`);
-  const first = logs.map((l) => l.slice(0, 3).every((x) => x.won));
-  console.log(`the first three waves won at the first try: ${first.filter(Boolean).length} of ${players} runs`);
+  const themes = new Map<ThemeId, MatchLog[]>();
+  for (const x of all) themes.set(x.theme, [...(themes.get(x.theme) ?? []), x]);
+  console.log('by theme: ' + [...themes].map(([t, xs]) => `${t} ${xs.length} (won ${pct(wr(xs))})`).join(', '));
+  const normal = all.filter((x) => !x.champion).map((x) => x.time);
+  const champ = all.filter((x) => x.champion).map((x) => x.time);
+  console.log(`fight length, normal:   p10 ${quant(normal, 0.1).toFixed(1)}s  median ${quant(normal, 0.5).toFixed(1)}s  p90 ${quant(normal, 0.9).toFixed(1)}s (aim 15-25 s)`);
+  console.log(`fight length, champion: p10 ${quant(champ, 0.1).toFixed(1)}s  median ${quant(champ, 0.5).toFixed(1)}s  p90 ${quant(champ, 0.9).toFixed(1)}s (aim 25-35 s)`);
+  console.log(`clock-decided: ${pct(all.filter((x) => x.time >= 74.9).length / all.length)}; level after ${N}: median ${quant(logs.map((l) => l[l.length - 1].level), 0.5)}`);
+}
+
+// ------------------------------------------------------------------ themes at an even difficulty
+if (wanted('themes')) {
+  console.log('\n== themes at difficulty 1.0 (a champion at CHAMPION.power x): the player\'s win share against each theme (aim 40-60%) ==');
+  const r = makeRng(71);
+  const tally = new Map<ThemeId, { w: number; n: number; t: number[] }>();
+  const runs = QUICK ? 300 : 900;
+  for (let i = 0; i < runs; i++) {
+    const mine: ArmySpec = { squads: buildArmy(30 * 2 ** r.range(0, 11), r.int(2, 14), r, 8).map((q, k) => ({ ...q, key: k + 1 })) };
+    // a mid-game save with a win streak that cancels the base (difficulty 1.0 for normal matches)
+    // (every 5th of these runs is a champion match, at CHAMPION.power x that)
+    const s: SaveState = { ...newSave(), matches: 20 + (i % 5), seed: 5000 + i, streak: 1 + Math.round((1 - MATCH.base) / MATCH.hot), slump: 0 };
+    if (Math.abs(difficulty(s) - 1) > 1e-9) throw new Error(`difficulty ${difficulty(s)}`);
+    const o = findOpponent(s, i, mine);
+    const res = winShare(mine, o.army, 2, i * 3 + 1);
+    const e = tally.get(o.theme.id) ?? { w: 0, n: 0, t: [] };
+    e.w += res.win * 2;
+    e.n += 2;
+    e.t.push(...res.times);
+    tally.set(o.theme.id, e);
+  }
+  for (const [t, e] of tally) console.log(`${t.padEnd(8)} ${String(e.n).padStart(4)} fights: the player wins ${pct(e.w / e.n)}, median ${quant(e.t, 0.5).toFixed(1)}s`);
 }
 
 // ------------------------------------------------------------------ honesty
@@ -250,6 +229,4 @@ if (wanted('honest')) {
     bw += res.win;
   }
   console.log(`a boss alone against an army of its POWER wins ${pct(bw / bn)} (aim about 50%)`);
-  void ENEMY;
-  void WAVES;
 }

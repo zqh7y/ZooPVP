@@ -12,9 +12,9 @@ export type UnitPhase =
   | 'windup' // drawing back for an attack
   | 'recover' // following through after the strike (and a Sumo standing up after a slam)
   | 'stun' // knocked silly
-  | 'air' // a Pogo's opening leap: it cannot be targeted, hit, pushed or collided with
-  | 'shell' // a Snailor hiding in its shell: it takes 85% less, cannot be pushed or stunned, and regrows
-  | 'slide'; // a Sumo's belly slide toward its target
+  | 'air' // a Dandy (pogo) floating onto the back line at the bell: it cannot be targeted, hit, pushed or collided with
+  | 'shell' // a Tulip (snailor) closed into its bud: it takes 85% less, cannot be pushed or stunned, and regrows
+  | 'slide'; // a Pumpkin (sumo) rolling toward its target
 
 export interface SimUnit {
   id: number;
@@ -50,7 +50,7 @@ export interface SimUnit {
   target: number;
   /** its unit's rung, 1..12 */
   rung: number;
-  /** a boss (wave 10): draw it as a giant (r is already BOSS.radius x) with a crown */
+  /** a boss (a champion match's leader): draw it as a giant (r is already BOSS.radius x) with a crown */
   boss: boolean;
   /** a hop (Roos, Pogos): 0 on the ground, up to 1 at the top; also the Pogo's opening leap arc */
   hop: number;
@@ -64,9 +64,13 @@ export interface SimUnit {
   sinceHit: number;
   /** the direction the last hit pushed it in, radians */
   hitDir: number;
+  /** foes it has knocked out so far this fight (the MVP) */
+  kos: number;
+  /** damage it has dealt so far this fight (hits, thorns and its poison) */
+  dealt: number;
 }
 
-/** How a unit died: a hit (an attack, a jab, a landing, a slam, a stomp), a Buzzy's poison, or a Briar's thorns. */
+/** How a unit died: a hit (an attack, a jab, a glob, a landing, a slam, a stomp), a Scorp's poison, or a Spike's thorns. */
 export type DeathCause = 'hit' | 'poison' | 'spike';
 /** The special blow that dealt a hit (null for a plain attack). */
 export type Blow = 'charge' | 'slam' | 'landing' | 'stomp' | null;
@@ -87,7 +91,7 @@ export interface HitEvent {
   blocked: boolean;
   /** it stunned the target */
   stun: boolean;
-  /** sprout: other Sprouts packed around the biter, 0..3 (+10% each) */
+  /** sprout (Chick): other Chicks flocked around the pecker, 0..3 (+TRAIT.sprout.per each) */
   pack: number;
   /** cacto (the double hit): 0 when not a Cacto, else which of its two jabs (1 or 2; the view draws the 2nd 0.12 s later) */
   pinch: 0 | 1 | 2;
@@ -105,6 +109,12 @@ export interface HitEvent {
   slap: boolean;
   /** it broke off the target's wind-up */
   interrupt: boolean;
+  /** a critical hit (CRIT.chance, CRIT.mul x the damage): show it big and gold with "CRIT!" */
+  crit: boolean;
+  /** how far the hit shoves the target, px (spread over the next half second); 0 when it does not move it (a bud, thorns) */
+  knock: number;
+  /** buzzy (Scorp): its poison glob splatting on the target (from far away: no thorns back) */
+  glob: boolean;
 }
 
 export type SimEvent =
@@ -112,8 +122,15 @@ export type SimEvent =
   | { type: 'start' }
   /** a unit begins an attack (its weapon draws back) */
   | { type: 'windup'; unit: number }
-  /** the attack lands or misses now: play the swing */
+  /** the attack lands or misses now: play the swing (a Scorp's attack is a 'throw' instead, or a swing with hit false when it had nothing to throw at) */
   | { type: 'swing'; unit: number; weapon: WeaponType | null; hit: boolean }
+  /**
+   * buzzy (Scorp): it lobs a glob of poison from its tail at `target`, from (x0, y0) (its tail) to (x1, y1) (where the
+   * target stands now), landing in dur s with a 'splat'. Draw it as an arc; the glob is not a unit.
+   */
+  | { type: 'throw'; unit: number; target: number; x0: number; y0: number; x1: number; y1: number; dur: number }
+  /** the glob of `unit` lands at (x, y): hit is the ids of the foes it hit (their 'hit' events, glob true, follow this step); [] = a miss */
+  | { type: 'splat'; unit: number; x: number; y: number; hit: number[] }
   /** damage dealt (see HitEvent) */
   | HitEvent
   /**
@@ -138,7 +155,7 @@ export type SimEvent =
   | { type: 'charge'; unit: number; x: number; y: number }
   /** boulder: a stomp lands round it at (x, y) on n foes */
   | { type: 'stomp'; unit: number; x: number; y: number; n: number }
-  /** buzzy poison: `unit` (at x, y) lost dmg to poison since its last poison event (at most one every 0.5 s per victim); by = the Buzzy of its newest pool */
+  /** scorp poison: `unit` (at x, y) lost dmg to poison since its last poison event (at most one every 0.5 s per victim); by = the Scorp of its newest pool */
   | { type: 'poison'; unit: number; by: number; dmg: number; x: number; y: number }
   /** from now on hits grow stronger every second */
   | { type: 'enrage' }
@@ -161,6 +178,12 @@ export interface SimSummary {
   bossKos: [number, number];
   /** share of its total health each team has left, 0..1 */
   hpLeft: [number, number];
+  /** knock-outs scored by each unit (index = unit id: team 0's units first, squad by squad, then team 1's) */
+  kos: number[];
+  /** damage dealt by each unit (index = unit id), thorns and poison included */
+  dealt: number[];
+  /** critical hits each team landed */
+  crits: [number, number];
 }
 
 export interface Battle {

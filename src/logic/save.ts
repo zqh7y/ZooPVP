@@ -1,4 +1,4 @@
-import { BENCH_SLOTS, ECON, GRID, MAX_COUNT, MAX_LEVEL, PET_TYPES, PIECE_TYPES, START_OPEN, STARTER_KIT, WAVES, cellBit, footprint, isPet, rungOf } from '../data';
+import { BENCH_SLOTS, ECON, GRID, LEVEL, MAX_COUNT, MAX_LEVEL, PET_TYPES, PIECE_TYPES, START_OPEN, STARTER_KIT, cellBit, footprint, isPet, levelForStage, rungOf, xpToNext } from '../data';
 import { hashSeed } from '../rng';
 import type { PetType, Piece, PieceType, SaveState } from '../types';
 
@@ -17,11 +17,14 @@ function store(): Store | null {
 }
 
 /**
- * The save format. A save of any other version is replaced by a fresh start (version 1 was the 8 x 8 grid,
- * version 2 the ant and frog with classes, version 3 the twelve-pet ladder with trophies; version 4 is the twelve
- * units with stages and waves).
+ * The save format. Version 5 is the twelve fighters with matched fights and a player level. A version-4 save (the
+ * stages and waves) is migrated: it keeps everything but the stage fields, and starts at levelForStage(its stage).
+ * Anything older is replaced by a fresh start (version 1 was the 8 x 8 grid, version 2 the ant and frog with
+ * classes, version 3 the twelve-pet ladder with trophies).
  */
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
+/** The last version that is migrated rather than replaced. */
+export const MIGRATES_FROM = 4;
 /** The toast the main screen shows once when an older save was replaced (see replacedOldSave). */
 export const FRESH_START_TOAST = 'A new adventure! Your army starts fresh.';
 
@@ -29,7 +32,7 @@ const ownBit = (pet: PetType) => 1 << (rungOf(pet) - 1);
 const ALL_RUNGS = (1 << PET_TYPES.length) - 1;
 const ALL_CELLS = (1 << (GRID.cols * GRID.rows)) - 1;
 
-/** A fresh player: stage 1 wave 1, the starter kit on the tray, cash for the guide's first cases. */
+/** A fresh player: level 1, no matches yet, the starter kit on the tray, cash for the guide's first cases. */
 export function newSave(seed = 48213): SaveState {
   const pieces: Piece[] = STARTER_KIT.map((k, i) => ({ id: i + 1, type: k.type, level: isPet(k.type) ? 1 : k.level, count: 1, col: -1, row: -1, slot: i }));
   const owned = pieces.reduce((m, p) => (isPet(p.type) ? m | ownBit(p.type) : m), ownBit('sprout'));
@@ -37,10 +40,14 @@ export function newSave(seed = 48213): SaveState {
     version: SAVE_VERSION,
     cash: ECON.startCash,
     gems: ECON.startGems,
-    stage: 1,
-    wave: 1,
-    tries: 0,
-    stars: [],
+    level: 1,
+    xp: 0,
+    streak: 0,
+    slump: 0,
+    bestStreak: 0,
+    matches: 0,
+    wins: 0,
+    champs: 0,
     cases: 0,
     elites: 0,
     pity: 0,
@@ -53,35 +60,42 @@ export function newSave(seed = 48213): SaveState {
     auto: false,
     tutorial: 0,
     tips: 0,
-    fights: 0,
-    wins: 0,
     seed: hashSeed(seed, 0x2004) || 1,
     pieces,
     nextId: pieces.length + 1,
   };
 }
 
-/** true when this stored save is one of an older version (so load() starts fresh): show FRESH_START_TOAST once. */
+/** true when this stored save is too old to migrate (so load() starts fresh): show FRESH_START_TOAST once. */
 export function replacedOldSave(raw: unknown): boolean {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
   const v = (raw as Record<string, unknown>).version;
-  return typeof v === 'number' && v !== SAVE_VERSION;
+  return typeof v === 'number' && v !== SAVE_VERSION && v !== MIGRATES_FROM;
 }
+
+/** true when this stored save is a version-4 one (stages and waves) that load() migrates to matched fights. */
+export function migratedOldSave(raw: unknown): boolean {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+  return (raw as Record<string, unknown>).version === MIGRATES_FROM;
+}
+/** The toast the main screen may show once after a version-4 save was migrated. */
+export const MIGRATED_TOAST = 'No more stages: BATTLE now finds you a matched opponent!';
 
 const num = (v: unknown, def: number, min = -Infinity, max = Infinity): number =>
   typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : def;
 const whole = (v: unknown, def: number, min?: number, max?: number) => Math.floor(num(v, def, min, max));
 
 /**
- * Turns anything into a valid SaveState: a save of another version (or no save) becomes a fresh start; a damaged
- * one keeps what it can (a piece that no longer fits its open cells goes to the tray, and is dropped only when
- * there is no room anywhere).
+ * Turns anything into a valid SaveState: a version-4 save is migrated (see SAVE_VERSION); a save of any other
+ * version (or no save) becomes a fresh start; a damaged one keeps what it can (a piece that no longer fits its open
+ * cells goes to the tray, and is dropped only when there is no room anywhere).
  */
 export function repair(raw: unknown): SaveState {
   const base = newSave();
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return base;
   const r = raw as Record<string, unknown>;
-  if (r.version !== SAVE_VERSION) return base;
+  const v4 = r.version === MIGRATES_FROM;
+  if (r.version !== SAVE_VERSION && !v4) return base;
   // the middle 3 x 3 is always open
   const open = (whole(r.open, START_OPEN, 0) & ALL_CELLS) | START_OPEN;
   const pieces: Piece[] = [];
@@ -140,16 +154,23 @@ export function repair(raw: unknown): SaveState {
   // every unit it owns counts as owned
   let owned = (whole(r.owned, base.owned, 0) & ALL_RUNGS) | ownBit('sprout');
   for (const p of kept) if (isPet(p.type)) owned |= ownBit(p.type);
-  const stage = whole(r.stage, 1, 1, 1e6);
-  const stars = Array.isArray(r.stars) ? r.stars.slice(0, stage - 1).map((v) => whole(v, 0, 0, 3)) : [];
+  // a version-4 save: its stage gives the starting level, its waves fought and won the match counts
+  const level = v4 ? levelForStage(whole(r.stage, 1, 1, 1e6)) : whole(r.level, 1, 1, LEVEL.max);
+  const matches = whole(v4 ? r.fights : r.matches, 0, 0);
+  const wins = Math.min(matches, whole(r.wins, 0, 0));
+  const streak = v4 ? 0 : whole(r.streak, 0, 0, matches);
   return {
     version: SAVE_VERSION,
     cash: whole(r.cash, 0, 0),
     gems: whole(r.gems, 0, 0),
-    stage,
-    wave: whole(r.wave, 1, 1, WAVES),
-    tries: whole(r.tries, 0, 0),
-    stars,
+    level,
+    xp: v4 ? 0 : whole(r.xp, 0, 0, xpToNext(level)),
+    streak,
+    slump: v4 || streak > 0 ? 0 : whole(r.slump, 0, 0, matches),
+    bestStreak: v4 ? 0 : Math.max(streak, whole(r.bestStreak, 0, 0, matches)),
+    matches,
+    wins,
+    champs: v4 ? 0 : whole(r.champs, 0, 0, wins),
     cases: whole(r.cases, 0, 0),
     elites: whole(r.elites, 0, 0),
     pity: whole(r.pity, 0, 0),
@@ -162,8 +183,6 @@ export function repair(raw: unknown): SaveState {
     auto: r.auto === true,
     tutorial: whole(r.tutorial, 0, 0),
     tips: whole(r.tips, 0, 0),
-    fights: whole(r.fights, 0, 0),
-    wins: whole(r.wins, 0, 0),
     seed: whole(r.seed, base.seed, 1, 0xffffffff),
     pieces: kept,
     nextId: Math.max(whole(r.nextId, 1, 1), maxId + 1),

@@ -390,12 +390,28 @@ export function rustle(s: Synth, t: number, d: number, v: number, f = 3600) {
   s.noise({ t, color: 'pink', filter: 'bandpass', f: [[0, f * 0.6], [d, f * 1.1]], q: 1.2, a: d * 0.25, d: d * 0.75, v: v * 0.35 });
 }
 
-/** A padded boxing glove landing: a soft heavy thump, the padded smack, and the leather's "pff". */
+/**
+ * A boxing glove landing, meaty: the leather's hard thwack, the padded smack, the body of the blow (a driven drop
+ * that rings in the low mids, where a phone speaker still hears it) and a low thump under it you feel on headphones.
+ * f: the glove's size (lower = a bigger glove).
+ */
 export function glove(s: Synth, t: number, v: number, f = 120) {
-  s.tone({ t, f: [[0, f * 2], [0.025, f], [0.12, f * 0.5]], a: 0.001, d: 0.12, v: v * 0.55, to: s.drive(1.8) });
-  s.tone({ t, f: [[0, f * 6], [0.04, f * 3.6]], a: 0.0008, d: 0.05, v: v * 0.5 });
-  s.noise({ t, color: 'pink', filter: 'bandpass', f: [[0, 1300], [0.05, 450]], q: 0.8, a: 0.001, d: 0.07, v: v * 1.6 });
-  s.noise({ t, filter: 'bandpass', f: 950, q: 1.4, a: 0.0006, d: 0.022, v: v * 0.7 });
+  // the leather: a hard, short thwack
+  s.noise({ t, filter: 'bandpass', f: 2200, q: 0.8, a: 0.0003, d: 0.02, v: v * 1.1 });
+  s.noise({ t, filter: 'highpass', f: 4500, a: 0.0002, d: 0.008, v: v * 0.45 });
+  // the padded smack
+  s.noise({ t, color: 'pink', filter: 'bandpass', f: [[0, 1600], [0.06, 500]], q: 0.9, a: 0.0008, d: 0.08, v: v * 2.2 });
+  s.noise({ t, filter: 'bandpass', f: 900, q: 1.2, a: 0.0006, d: 0.035, v: v * 0.9 });
+  // the body of the blow, and the low thump
+  s.tone({ t, f: [[0, f * 3], [0.02, f * 1.6], [0.12, f * 0.7]], a: 0.0008, d: 0.12, v: v * 0.55, to: s.drive(3.5) });
+  s.tone({ t, f: [[0, f * 6], [0.04, f * 3.6]], a: 0.0008, d: 0.05, v: v * 0.35 });
+  s.tone({ t, f: [[0, 95], [0.04, 62], [0.16, 42]], a: 0.0015, d: 0.16, v: v * 0.3 });
+}
+
+/** The heavy body of a big blow, pitched where phones hear it: a driven drop from the low mids. */
+export function body(s: Synth, t: number, f: number, d: number, v: number) {
+  s.tone({ t, f: [[0, f * 2.4], [0.025, f], [d, f * 0.5]], a: 0.0008, d, v, to: s.drive(3) });
+  s.noise({ t, color: 'pink', filter: 'bandpass', f: [[0, f * 6], [d * 0.6, f * 2]], q: 1, a: 0.0008, d: d * 0.7, v: v * 0.9 });
 }
 
 /** A fleshy slap (a belly, a cheek): a bright smack and a wobble under it. */
@@ -546,4 +562,232 @@ export function snare(s: Synth, t: number, v: number) {
   s.tone({ t, f: [[0, 330], [0.03, 190]], a: 0.0006, d: 0.06, v: v * 0.6 });
   s.noise({ t, filter: 'bandpass', f: 3800, q: 0.7, a: 0.0006, d: 0.11, v });
   s.noise({ t, filter: 'highpass', f: 6500, a: 0.0004, d: 0.05, v: v * 0.4 });
+}
+
+// ------------------------------------------------------------------ v5: the weird cast's props and the boxing night
+
+/** A chick's peep: a tiny whistle that leaps up and falls. fierce 0..1 adds a tiny scratchy shout under it. */
+export function peep(s: Synth, t: number, f: number, d: number, v: number, fierce = 0) {
+  s.tone({ t, f: [[0, f * 0.78], [d * 0.25, f * 1.15], [d, f * 0.8]], a: 0.002, h: d * 0.25, d: d * 0.75, v });
+  s.tone({ t, f: [[0, f * 1.56], [d * 0.25, f * 2.3], [d, f * 1.6]], a: 0.002, d: d * 0.6, v: v * 0.1 });
+  if (fierce > 0) voice(s, { t, f: [[0, f * 0.3], [d * 0.25, f * 0.42], [d, f * 0.3]], vow: [[0, 'i'], [d * 0.5, 'e']], size: 1.9, a: 0.003, h: d * 0.2, d: d * 0.7, v: v * fierce * 0.9, rough: 0.6 });
+}
+
+/** An eggshell cracking: dry little snaps and brittle crumbs. */
+export function eggshell(s: Synth, t: number, d: number, v: number) {
+  s.crackle({ t, density: 900, filter: 'bandpass', f: 3600, q: 0.8, a: 0.001, d, v });
+  for (let i = 0; i < 3; i++) {
+    const at = t + s.rand(0, d * 0.6);
+    s.noise({ t: at, filter: 'bandpass', f: s.rand(2200, 4800), q: 2.5, a: 0.0003, d: s.rand(0.006, 0.014), v: v * s.rand(0.7, 1.2) });
+    s.tone({ t: at, f: s.rand(3500, 6000), a: 0.0003, d: 0.012, v: v * 0.12 });
+  }
+}
+
+/** Breath through a gas mask: a hollow, rubbery hiss with the valve fluttering. inhale rises, an exhale falls. */
+export function wheeze(s: Synth, t: number, d: number, v: number, inhale = true) {
+  const valve = osc(s, 'sine', s.rand(20, 28), t, t + d + 0.05);
+  s.noise({ t, color: 'pink', filter: 'bandpass', f: inhale ? [[0, 650], [d, 1250]] : [[0, 1200], [d, 560]], q: 4, a: d * 0.35, h: d * 0.25, d: d * 0.4, v, to: chopper(s, valve) });
+  s.noise({ t, filter: 'bandpass', f: inhale ? [[0, 2300], [d, 3200]] : [[0, 3000], [d, 2100]], q: 6, a: d * 0.35, h: d * 0.25, d: d * 0.4, v: v * 0.3 });
+  s.noise({ t, color: 'pink', filter: 'bandpass', f: 420, q: 5, a: d * 0.3, h: d * 0.3, d: d * 0.4, v: v * 0.45 });
+}
+
+/** Liquid glugging out of a bottle: a few hollow, rising gulps. */
+export function glug(s: Synth, t: number, n: number, v: number, f = 260) {
+  let at = t;
+  for (let i = 0; i < n; i++) {
+    const p = f * s.rand(0.9, 1.12) * (1 + i * 0.07);
+    s.tone({ t: at, f: [[0, p], [0.05, p * 2.1]], lp: 1600, a: 0.004, d: 0.06, v: v * (1 - i * 0.12) });
+    s.noise({ t: at, filter: 'bandpass', f: p * 2.4, q: 6, a: 0.003, d: 0.04, v: v * 0.35 });
+    at += s.rand(0.07, 0.09);
+  }
+}
+
+/** Little bubbles rising in water. */
+export function bubbles(s: Synth, t: number, d: number, n: number, v: number, lo = 700, hi = 1600) {
+  for (let i = 0; i < n; i++) drip(s, t + s.rand(0, d), s.rand(lo, hi), v * s.rand(0.5, 1));
+}
+
+/** Water sloshing in a bowl: a wash that swings back and forth. */
+export function slosh(s: Synth, t: number, d: number, v: number) {
+  s.noise({ t, color: 'pink', filter: 'bandpass', f: [[0, 450], [d * 0.3, 1300], [d * 0.6, 520], [d, 900]], q: 2.2, a: d * 0.15, d: d * 0.85, v });
+  s.noise({ t, filter: 'bandpass', f: [[0, 1800], [d * 0.35, 3400], [d, 1500]], q: 1.5, a: d * 0.2, d: d * 0.7, v: v * 0.25 });
+  s.tone({ t, f: [[0, 160], [d * 0.4, 260], [d, 140]], lp: 700, a: d * 0.2, d: d * 0.8, v: v * 0.3, vib: [9, 160] });
+}
+
+/** Squeaky little wheels going round: a rusty "eek" every turn. */
+export function wheels(s: Synth, t: number, n: number, gap: number, v: number, f = 2600) {
+  for (let i = 0; i < n; i++) {
+    const at = Math.max(0, t + i * gap + s.rand(-0.004, 0.004));
+    const p = f * s.rand(0.94, 1.06);
+    s.tone({ t: at, type: 'sawtooth', f: [[0, p * 0.85], [0.02, p], [0.05, p * 0.9]], lp: p * 2.2, q: 4, hp: p * 0.6, a: 0.006, d: 0.045, v: v * s.rand(0.7, 1), vib: [60, 40] });
+  }
+}
+
+/** A puffy seed-head popping open like a parachute: a soft "fwoomp" of air, and fluff drifting. */
+export function fwoomp(s: Synth, t: number, v: number) {
+  s.noise({ t, color: 'pink', filter: 'lowpass', f: [[0, 300], [0.06, 1600], [0.3, 400]], q: 1.5, a: 0.02, d: 0.3, v });
+  s.tone({ t, f: [[0, 90], [0.05, 160], [0.25, 80]], a: 0.015, d: 0.25, v: v * 0.6 });
+  s.noise({ t: t + 0.04, filter: 'highpass', f: 5000, a: 0.08, d: 0.35, v: v * 0.12 });
+  for (let i = 0; i < 4; i++) furin(s, t + 0.08 + i * 0.07, s.rand(3000, 4600), 0.25, v * 0.08);
+}
+
+/** A jelly wobble: a round, rubbery note that shivers and settles (blbl-bl), with a squelchy skin. */
+export function jelly(s: Synth, t: number, f: number, d: number, v: number, rate = 11) {
+  const stop = t + d + 0.05;
+  const o = osc(s, 'sine', [[0, f * 1.3], [0.04, f], [d, f * 0.92]], t, stop);
+  const lfo = osc(s, 'sine', rate, t, stop);
+  const depth = s.ac.createGain();
+  along(depth.gain, t, [[0, 600], [d, 30]]);
+  lfo.connect(depth);
+  depth.connect(o.detune);
+  o.connect(shape(s, t, 0.004, d * 0.1, d * 0.85, v));
+  s.noise({ t, color: 'pink', filter: 'bandpass', f: f * 3, q: 5, a: 0.004, d: d * 0.6, v: v * 0.5, to: chopper(s, lfo) });
+}
+
+/** Clicky mechanical legs: quick little metal ticks, like a wind-up crab scuttling. */
+export function scuttle(s: Synth, t: number, n: number, gap: number, v: number, f = 3200) {
+  for (let i = 0; i < n; i++) {
+    const at = t + i * gap * s.rand(0.85, 1.15);
+    const p = f * s.rand(0.85, 1.15) * (i % 2 ? 0.8 : 1);
+    s.noise({ t: at, filter: 'bandpass', f: p, q: 4, a: 0.0002, d: 0.006, v });
+    s.tone({ t: at, f: p * 1.3, a: 0.0002, d: 0.014, v: v * 0.25 });
+    s.tone({ t: at, f: p * 0.31, a: 0.0002, d: 0.01, v: v * 0.3 });
+  }
+}
+
+/** A little servo motor whining as it moves. */
+export function servo(s: Synth, t: number, d: number, v: number, f0 = 500, f1 = 900) {
+  s.tone({ t, type: 'square', f: [[0, f0], [d * 0.7, f1], [d, f1 * 0.95]], lp: 2200, q: 2, a: 0.01, h: d * 0.6, d: d * 0.4, v, vib: [70, 25] });
+  s.noise({ t, filter: 'bandpass', f: 4200, q: 3, a: 0.01, h: d * 0.6, d: d * 0.4, v: v * 0.15 });
+}
+
+/** A pencil scribbling hard: scratchy strokes back and forth. */
+export function scribble(s: Synth, t: number, d: number, v: number, strokes = 3) {
+  const len = d / strokes;
+  for (let i = 0; i < strokes; i++) {
+    const at = t + i * len;
+    const f = s.rand(2600, 3800) * (i % 2 ? 1.15 : 1);
+    s.noise({ t: at, filter: 'bandpass', f: [[0, f], [len, f * (i % 2 ? 0.8 : 1.25)]], q: 3, a: len * 0.2, d: len * 0.8, v });
+    s.crackle({ t: at, density: 2200, filter: 'bandpass', f: f * 1.3, q: 1.2, a: len * 0.2, d: len * 0.8, v: v * 0.8 });
+  }
+}
+
+/** Pencils rattling together: dry little wooden clicks. */
+export function pencils(s: Synth, t: number, d: number, n: number, v: number) {
+  for (let i = 0; i < n; i++) wood(s, t + s.rand(0, d), s.rand(1700, 2900), v * s.rand(0.5, 1), 0.016);
+}
+
+/** An empty tin can knocked: a thin, rattly, hollow ring. */
+export function tin(s: Synth, t: number, v: number, f = 820) {
+  click(s, t, 5200, v * 0.6);
+  s.bell({ t, f, ratio: 1.47, index: 1.8, d: 0.12, v: v * 0.5 });
+  s.bell({ t, f: f * 2.13, ratio: 1.31, index: 1.2, d: 0.07, v: v * 0.3 });
+  s.noise({ t, filter: 'bandpass', f: f * 1.9, q: 7, a: 0.0005, d: 0.08, v: v * 0.6 });
+  s.crackle({ t: t + 0.005, density: 600, filter: 'bandpass', f: 3000, q: 1, a: 0.001, d: 0.05, v: v * 0.4 });
+}
+
+/** Roller skates rolling: the wheels' hum and the bearings' grainy rattle. */
+export function skates(s: Synth, t: number, d: number, v: number, f = 340, f1 = f * 1.3) {
+  const turn = osc(s, 'sine', s.rand(28, 36), t, t + d + 0.05);
+  s.noise({ t, color: 'pink', filter: 'bandpass', f: [[0, f * 2], [d, f1 * 2]], q: 1.4, a: d * 0.2, h: d * 0.4, d: d * 0.4, v, to: chopper(s, turn) });
+  s.tone({ t, type: 'triangle', f: [[0, f], [d, f1]], lp: 1500, a: d * 0.2, h: d * 0.4, d: d * 0.4, v: v * 0.35 });
+  s.crackle({ t, density: 700, filter: 'bandpass', f: 2200, q: 1, a: d * 0.2, h: d * 0.4, d: d * 0.4, v: v * 0.4 });
+}
+
+/** Jaws snapping shut: a hard, wet SNAP with a chomp under it. */
+export function chomp(s: Synth, t: number, v: number, p = 1) {
+  s.noise({ t, filter: 'highpass', f: 2500, a: 0.0002, d: 0.01, v });
+  s.noise({ t, filter: 'bandpass', f: 1800 * p, q: 2, a: 0.0003, d: 0.025, v: v * 0.9 });
+  s.tone({ t, f: [[0, 900 * p], [0.03, 220 * p]], a: 0.0005, d: 0.04, v: v * 0.6, to: s.drive(2.5) });
+  s.noise({ t: t + 0.01, color: 'pink', filter: 'bandpass', f: [[0, 1200], [0.06, 400]], q: 3, a: 0.001, d: 0.07, v: v * 0.6 });
+  s.tone({ t, f: [[0, 160], [0.08, 70]], a: 0.001, d: 0.09, v: v * 0.5 });
+}
+
+/** A stretchy vine: it pulls tight (straining upward), then lets go with a rubbery twang. */
+export function twang(s: Synth, t: number, f: number, d: number, v: number) {
+  s.tone({ t, type: 'sawtooth', f: [[0, f * 0.5], [d * 0.45, f]], lp: f * 4, q: 3, a: d * 0.4, d: d * 0.08, v: v * 0.25, vib: [30, 20] });
+  sproing(s, t + d * 0.45, f, d * 0.55, v, 0.6, 26);
+}
+
+/** Knocking on a big hollow pumpkin: a soft, deep, boxy thunk. */
+export function gourd(s: Synth, t: number, f: number, v: number) {
+  s.tone({ t, f: [[0, f * 1.5], [0.02, f], [0.14, f * 0.85]], a: 0.0008, d: 0.14, v, to: s.drive(1.5) });
+  s.noise({ t, color: 'pink', filter: 'bandpass', f: f * 2.2, q: 9, a: 0.001, d: 0.12, v: v * 1.1 });
+  s.noise({ t, filter: 'bandpass', f: f * 5, q: 3, a: 0.0004, d: 0.015, v: v * 0.5 });
+  s.tone({ t, f: f * 2.7, a: 0.001, d: 0.05, v: v * 0.15 });
+}
+
+/** A candle flame fluttering: a soft breathy flutter and a tiny crackle of the wick. */
+export function flicker(s: Synth, t: number, d: number, v: number) {
+  const flame = osc(s, 'sine', [[0, s.rand(9, 13)], [d, s.rand(5, 8)]], t, t + d + 0.05);
+  s.noise({ t, color: 'pink', filter: 'lowpass', f: 900, a: d * 0.2, h: d * 0.3, d: d * 0.5, v, to: chopper(s, flame) });
+  s.crackle({ t, density: 40, filter: 'highpass', f: 2500, a: d * 0.2, h: d * 0.3, d: d * 0.5, v: v * 0.8 });
+}
+
+/** Something big and round rolling fast: a rumble, with a lumpy hollow thump every turn. */
+export function tumble(s: Synth, t: number, d: number, v: number, turns = 6) {
+  rumble(s, t, d, v * 0.8, 50);
+  for (let i = 0; i < turns; i++) gourd(s, t + (d * 0.85 * i) / turns, 120 * s.rand(0.9, 1.1), v * 0.35 * (0.6 + 0.4 * Math.sin((Math.PI * (i + 0.5)) / turns)));
+  s.noise({ t, color: 'brown', filter: 'bandpass', f: [[0, 300], [d, 600]], q: 1, a: d * 0.2, h: d * 0.5, d: d * 0.3, v: v * 0.6 });
+}
+
+/** Old wood creaking: a slow stick-slip rasp ringing in the hollow of a trunk. */
+export function creak(s: Synth, t: number, d: number, v: number, f = 60) {
+  const stop = t + d + 0.05;
+  const src = osc(s, 'sawtooth', [[0, f], [d * 0.35, f * 1.8], [d * 0.7, f * 1.1], [d, f * 1.5]], t, stop);
+  const rough = s.ac.createGain();
+  rough.gain.value = 300;
+  s.noise({ t, color: 'brown', filter: 'lowpass', f: 40, a: 0.01, h: d, d: 0.05, v: 1, to: rough });
+  rough.connect(src.detune);
+  const out = shape(s, t, d * 0.2, d * 0.4, d * 0.4, v);
+  for (const [bf, q, lvl] of [
+    [420, 6, 1],
+    [980, 7, 0.7],
+    [2100, 5, 0.3],
+  ]) {
+    const bp = band(s, bf, q);
+    const l = s.ac.createGain();
+    l.gain.value = lvl;
+    src.connect(bp);
+    bp.connect(l);
+    l.connect(out);
+  }
+}
+
+/** A sleepy owl: a soft, breathy "hoo?" that lifts at the end like a question. */
+export function owl(s: Synth, t: number, v: number, p = 1) {
+  const f: Pts = [[0, 410 * p], [0.12, 390 * p], [0.27, 520 * p]];
+  voice(s, { t, f, vow: 'u', size: 1.15, src: 'triangle', a: 0.04, h: 0.12, d: 0.12, v, vib: [5, 15], breath: 0.25 });
+  s.tone({ t, f, a: 0.04, h: 0.12, d: 0.12, v: v * 0.3 });
+}
+
+/** The boxing bell: a hammer striking a brass dome, ringing bright and long (on D6, in tune with the music). */
+export function ringBell(s: Synth, t: number, v: number, d = 1.5, f = 1174.7) {
+  click(s, t, 6500, v * 0.8);
+  s.noise({ t, filter: 'bandpass', f: f * 2, q: 2, a: 0.0003, d: 0.02, v: v * 0.6 });
+  for (const [r, lvl, dd] of [
+    [1, 1, 1],
+    [1.98, 0.5, 0.75],
+    [2.76, 0.4, 0.55],
+    [4.07, 0.22, 0.35],
+    [5.4, 0.12, 0.22],
+  ]) {
+    for (const side of [-1, 1]) s.tone({ t, f: Math.min(16000, f * r + side * s.rand(1, 2.6)), a: 0.0008, d: d * dd, v: (v * lvl) / 2 });
+  }
+  s.bell({ t, f: f * 0.5, ratio: 2.76, index: 1, d: d * 0.35, v: v * 0.18 });
+}
+
+/** A fan's whistle in the stands: two fingers in the mouth, up and down. */
+export function fanWhistle(s: Synth, t: number, v: number, p = 1) {
+  s.tone({ t, f: [[0, 1500 * p], [0.12, 2900 * p], [0.22, 2500 * p], [0.42, 1700 * p]], a: 0.02, h: 0.2, d: 0.2, v, vib: [6, 20] });
+  s.noise({ t, filter: 'bandpass', f: 2600 * p, q: 6, a: 0.02, h: 0.2, d: 0.2, v: v * 0.15 });
+}
+
+/** A whole stadium roaring: a wash of voices swelling, single shouts, clapping and whistles. d: the swell. */
+export function stadium(s: Synth, t: number, d: number, v: number, voices = 14, whistles = 1) {
+  s.noise({ t, color: 'pink', filter: 'bandpass', f: [[0, 500], [d * 0.35, 1150], [d, 750]], q: 0.8, a: d * 0.3, h: d * 0.2, d: d * 0.5, v: v * 0.6 });
+  s.noise({ t, color: 'pink', filter: 'bandpass', f: [[0, 1400], [d * 0.35, 2300], [d, 1600]], q: 1.2, a: d * 0.3, h: d * 0.2, d: d * 0.5, v: v * 0.25 });
+  crowd(s, t, d, v, 'cheer', voices);
+  s.crackle({ t: t + d * 0.1, density: 90, filter: 'bandpass', f: 2000, q: 0.8, a: d * 0.25, h: d * 0.25, d: d * 0.5, v: v * 0.8 });
+  for (let i = 0; i < whistles; i++) fanWhistle(s, t + d * s.rand(0.1, 0.4), v * 0.12, s.rand(0.9, 1.1));
 }

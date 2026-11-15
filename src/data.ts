@@ -181,8 +181,8 @@ export interface PetDef {
  * piece covers one cell per fighter, so POWER per cell doubles too. These numbers are internal and never shown.
  */
 export const PETS: Readonly<Record<PetType, PetDef>> = {
-  sprout:  { hp: 34,    dmg: 2.4,   cd: 0.42, reach: 3,  speed: 96, radius: 13, mass: 0.7, move: 'scurry',  row: 'middle', power: 1.45 },
-  buzzy:   { hp: 70,    dmg: 7.6,   cd: 0.85, reach: 115, speed: 58, radius: 14, mass: 0.8, move: 'scuttle', row: 'back',   power: 1.45 },
+  sprout:  { hp: 41,    dmg: 4.35,  cd: 0.42, reach: 3,  speed: 96, radius: 13, mass: 0.7, move: 'scurry',  row: 'middle', power: 0.95 },
+  buzzy:   { hp: 57,    dmg: 6.25,  cd: 0.85, reach: 95,  speed: 58, radius: 14, mass: 0.8, move: 'scuttle', row: 'back',   power: 1.9 },
   ninja:   { hp: 177,   dmg: 14.6,  cd: 0.45, reach: 3,  speed: 68, radius: 14, mass: 0.8, move: 'dart',    row: 'middle', power: 1.03 },
   snailor: { hp: 413,   dmg: 61,    cd: 1.1,  reach: 4,  speed: 26, radius: 20, mass: 2.4, move: 'glide',   row: 'front',  power: 1.03 },
   roo:     { hp: 862,   dmg: 86.4,  cd: 1.0,  reach: 9,  speed: 40, radius: 24, mass: 2.6, move: 'hop',     row: 'front',  power: 1.15 },
@@ -202,12 +202,12 @@ export const TRAIT = {
   /**
    * scorp: it keeps its distance and lobs a glob of poison from its tail. The glob flies flight + distance / speed s
    * to where its target stood when it threw, and splats there: it hits the foes whose body is within splat px of
-   * that spot (the nearest first, at most its weapon's splash + 1), and each one hit is poisoned for poison x the
+   * that spot (the nearest first, at most its weapon's splash: 1, or 3 with a bat), and each one hit is poisoned for poison x the
    * damage, drained over time s (a poison event at most every tickEvent s). A target that moved far enough is
    * missed. While its throw is not ready it backs off at back x its speed from a foe closer than keep px (body to
-   * body).
+   * body). It never throws faster than once every minCd s, whatever its weapon (a knife quickens it up to that).
    */
-  buzzy: { poison: 0.8, time: 3, tickEvent: 0.5, flight: 0.25, speed: 420, splat: 12, keep: 60, back: 0.75 },
+  buzzy: { poison: 0.8, time: 3, tickEvent: 0.5, flight: 0.25, speed: 420, splat: 12, keep: 60, back: 0.5, minCd: 0.6 },
   /** share of hits that miss it */
   ninja: { dodge: 0.3 },
   /** below this share of health it hides for time s: takes this share of damage, regrows regrow x its health, counts as massMul heavier */
@@ -235,7 +235,7 @@ export const TRAIT = {
  * numbers, speed its walk. power is what squadPower counts it as on top of sqrt(hp x dmg) (its big body is easier
  * to surround), fitted by tools/balance.ts.
  */
-export const BOSS = { radius: 1.8, mass: 3, reach: 1.5, speed: 0.8, hp: 16, dmg: 0.8, power: 1.55 };
+export const BOSS = { radius: 1.8, mass: 3, reach: 1.5, speed: 0.8, hp: 12, dmg: 1.05, power: 1.55 };
 
 // ------------------------------------------------------------------ weapons
 
@@ -324,10 +324,12 @@ export function unitStats(s: SquadSpec): UnitStats {
   const wl = s.weapon ? Math.max(1, s.weaponLevel) - 1 : 0;
   const speedUp = gearPct('sneakers', s.sneakers) / 100;
   const boss = !!s.boss;
+  const cd = (p.cd * w.cd * WEAPON_CLASS.cd ** wl) / (1 + speedUp * SNEAKERS_ATTACK_SHARE);
   return {
     hp: p.hp * w.hp * WEAPON_CLASS.hp ** wl * (1 + gearPct('helmet', s.helmet) / 100) * (boss ? BOSS.hp : 1),
     dmg: p.dmg * w.dmg * WEAPON_CLASS.dmg ** wl * (1 + gearPct('chili', s.chili) / 100) * (boss ? BOSS.dmg : 1),
-    cd: (p.cd * w.cd * WEAPON_CLASS.cd ** wl) / (1 + speedUp * SNEAKERS_ATTACK_SHARE),
+    // a Scorp's throw has a floor (TRAIT.buzzy.minCd)
+    cd: s.pet === 'buzzy' ? Math.max(TRAIT.buzzy.minCd, cd) : cd,
     reach: (p.reach + w.reach) * (boss ? BOSS.reach : 1),
     speed: p.speed * (1 + speedUp) * (boss ? BOSS.speed : 1),
     radius: p.radius * (boss ? BOSS.radius : 1),
@@ -424,11 +426,13 @@ export const friendly = (p: number) => {
 export const MATCH = {
   base: 0.9,
   intro: [0.6, 0.72, 0.82] as readonly number[],
-  slump: 0.08,
+  slump: 0.12,
   slumpMax: 4,
   hot: 0.025,
   hotMax: 4,
   floor: 0.55,
+  /** losses in a row after which the trickiest themes (HARD_THEMES) are left out */
+  easeAfter: 2,
   /** the army's POWER lands within this share of its target */
   tolerance: 0.06,
   maxSquads: 8,
@@ -436,10 +440,14 @@ export const MATCH = {
   maxFighters: 25,
 };
 
-/** Every `every`-th match is a CHAMPION match: a boss (SquadSpec.boss) leads a tougher team (power x the usual), for `rewards` x the rewards. */
+/**
+ * Every `every`-th match is a CHAMPION match: a crowned boss (SquadSpec.boss) leads a tougher team (`power` x the
+ * usual difficulty, easing to 1 over the first MATCH.easeAfter losses in a row), for `rewards` x the cash and XP of
+ * a win and always gems.
+ */
 export const CHAMPION = {
   every: 5,
-  power: 1.1,
+  power: 1.4,
   /** the share of the champion team's POWER that is the boss */
   bossPart: 0.5,
   /** the escort: this share of the player's fighters (the boss comes on top) */
@@ -450,27 +458,31 @@ export const CHAMPION = {
 export const isChampionMatch = (n: number) => n >= CHAMPION.every && n % CHAMPION.every === 0;
 
 /**
- * The opponent themes, so fights stay interesting. fighters: x the player's fighter count; rungs: where its units
- * sit against the player's own (-1 a rung lower ...); kit: the kit it favours. weight: how often it comes up.
+ * The opponent themes, so fights stay interesting (src/logic/match.ts builds them). weight: how often a theme comes up.
  */
 export interface ThemeDef {
   name: string;
   /** one line for the matchmaking card */
   blurb: string;
+  /** x the player's fighter count (the swarm and the heavies; the others match it) */
   fighters: number;
+  /** x the matched POWER, for a theme that fights above (below 1) or below its POWER (fitted by tools/balance.ts themes) */
+  power: number;
   weight: number;
 }
 export const THEMES: Readonly<Record<ThemeId, ThemeDef>> = {
-  mixed: { name: 'Mixed', blurb: 'A bit of everything', fighters: 1, weight: 3 },
-  swarm: { name: 'Swarm', blurb: 'Lots of little fighters', fighters: 1.75, weight: 2 },
-  heavy: { name: 'Heavy Hitters', blurb: 'A few big bruisers', fighters: 0.5, weight: 2 },
-  glass: { name: 'Glass Cannons', blurb: 'Hit hard, fall fast', fighters: 1, weight: 2 },
-  tanks: { name: 'Tanks', blurb: 'Shields up, hard to knock down', fighters: 1, weight: 2 },
-  mirror: { name: 'Mirror', blurb: 'Your own lineup!', fighters: 1, weight: 1.5 },
-  champion: { name: 'Champion', blurb: 'A crowned champion and its crew', fighters: 1, weight: 0 },
+  mixed: { name: 'Mixed', blurb: 'A bit of everything', fighters: 1, power: 1, weight: 3 },
+  swarm: { name: 'Swarm', blurb: 'Lots of little fighters', fighters: 1.75, power: 0.9, weight: 2 },
+  heavy: { name: 'Heavy Hitters', blurb: 'A few big bruisers', fighters: 0.5, power: 1, weight: 2 },
+  glass: { name: 'Glass Cannons', blurb: 'Hit hard, fall fast', fighters: 1, power: 0.92, weight: 2 },
+  tanks: { name: 'Tanks', blurb: 'Shields up, hard to knock down', fighters: 1, power: 0.9, weight: 2 },
+  mirror: { name: 'Mirror', blurb: 'Your own lineup!', fighters: 1, power: 1, weight: 1.5 },
+  champion: { name: 'Champion', blurb: 'A crowned champion and its crew', fighters: 1, power: 1, weight: 0 },
 };
 /** The themes a normal match picks from, in a fixed order. */
 export const MATCH_THEMES: readonly ThemeId[] = ['mixed', 'swarm', 'heavy', 'glass', 'tanks', 'mirror'];
+/** The trickiest themes to face: after MATCH.easeAfter losses in a row matchmaking leaves them out. */
+export const HARD_THEMES: readonly ThemeId[] = ['swarm', 'glass'];
 
 /** Fun bot names (the UI shows a BOT tag next to them: bots must be clearly AI). Champions take CHAMPION_NAMES. */
 export const BOT_NAMES = {
@@ -617,7 +629,7 @@ export const TOP_ODDS: readonly number[] = [0, 0, 0, 0, 88, 10.5, 1.5];
 /** The case after this many in a row without an A-class item or a top unit is guaranteed one. */
 export const PITY = 25;
 
-/** The first cases of a new player are fixed, so the guide can teach fusing (Pea + Pea -> x2). */
+/** The first cases of a new player are fixed, so the guide can teach fusing (Chick + Chick -> x2). */
 export const SCRIPTED_ROLLS: readonly { type: PieceType; level: number }[] = [
   { type: 'sprout', level: 1 },
   { type: 'chili', level: 1 },

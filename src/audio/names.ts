@@ -29,11 +29,11 @@ export type SoundName =
   | 'breakthrough' // it shatters and comes back a class higher. n = the new class
   | 'collect' // the prize flies to the bench
   // ---------------- matchmaking
-  | 'search' // one pulse of "searching for an opponent" (a soft sonar ping, loops about once a second)
-  | 'found' // an opponent is found
+  | 'search' // v5: one tick of the searching moment (a sonar blip and a clock tick; about once a second)
+  | 'found' // v5: the FOUND sting, an opponent is matched
   | 'vsSlam' // the VS badge slams in
   | 'countdown' // 3, 2, 1. n = the number shown
-  | 'fight' // FIGHT! (a gong)
+  | 'fight' // v5: FIGHT! the downbeat after READY: a brass hit and the crowd erupting
   // ---------------- the fight: attacks
   | 'deploy' // a squad pops onto the field
   | 'bite' // a pet's own attack (an ant's nip, a frog's tongue snap)
@@ -63,8 +63,8 @@ export type SoundName =
   | 'enrage' // overtime: everyone hits harder from now on
   | 'cheer' // the crowd around the arena cheers
   // ---------------- the result
-  | 'victory' // the victory fanfare
-  | 'defeat' // the defeat sting (sad but funny, not harsh)
+  | 'victory' // v5: the VICTORY stinger, big and joyful
+  | 'defeat' // v5: the DEFEAT stinger, soft and gentle, never harsh
   | 'trophyUp' // trophies fly in. n = how many (the more, the richer)
   | 'trophyDown' // trophies lost
   | 'leagueUp' // promoted to a new league. n = the league index
@@ -102,7 +102,39 @@ export type SoundName =
   | 'spinLand' // the spin stops on the prize: a soft landing thump
   | 'unitReveal' // the prize pops: a unit. n = its rung 1..12 (bigger every rung, and the unit says hello)
   | 'itemReveal' // the prize pops: a weapon or gear. n = its class 1..7 (E..SSS)
-  | 'evolve'; // x4 + x4 -> the next unit x1. n = the NEW unit's rung 2..12. The most satisfying sound in the game
+  | 'evolve' // x4 + x4 -> the next unit x1. n = the NEW unit's rung 2..12. The most satisfying sound in the game
+  // ================ v5: a boxing night (docs/v5.md). Matched fights, no stages. Redesigned for v5 above:
+  // search, found, fight, victory, defeat (now boxing-night sounds); the stage-flow sounds above are legacy.
+  // ---------------- the bell and the call
+  | 'bellStart' // the boxing bell to start: DING-DING
+  | 'bellEnd' // the bell at the end: one long DING
+  | 'ready' // "READY ...": a held breath, a drum roll rising (play FIGHT right after it)
+  // 'fight' (above) is now FIGHT!: the downbeat, a brass hit, the crowd erupting
+  // ---------------- the hits
+  | 'punch' // a boxing glove landing: a meaty leather thwack with a low thump (any glove hit)
+  | 'crit' // a critical hit: a sharper, bigger, heavier hit (play with the gold CRIT! number)
+  | 'pow' // the comic impact words on big blows: POW! a punchy pop and a snare crack
+  | 'bonk' // BONK! a hollow cartoon bonk with a boing
+  | 'wham' // WHAM! a rush and a heavy slam
+  | 'smash' // SMASH! a crash of bits and a boom
+  | 'ko' // a knock-out: the punchy launch, a slide whistle as it flies off spinning, a twinkle far away
+  | 'doubleKo' // DOUBLE KO! a rising "ba-BAM" call
+  | 'tripleKo' // TRIPLE KO! three chords climbing, a crash, the crowd
+  | 'rampage' // RAMPAGE! (4 or more): a drum roll, four chords climbing, everything at once
+  | 'slowmo' // the last knock-out goes into slow motion: a deep, falling whoosh and a heartbeat
+  | 'coins' // a sprinkle of coins flying up to the cash pill
+  | 'globSplat' // Scorp's poison glob lands: a wet splat that sizzles
+  // ---------------- the crowd
+  | 'roar' // the crowd roars and swells on a big moment. n = 1..3, how big (3: the whole stadium)
+  | 'ooh' // the crowd's "OOOH!" on a big hit
+  // ---------------- matchmaking and the result
+  // 'search' (above) is now one tick of the searching moment (the loop itself is the music state 'search')
+  // 'found' (above) is now the FOUND sting: an opponent is matched
+  | 'champion' // CHAMPION MATCH: the bigger sting (every 5th match)
+  | 'cashCount' // one tick of the cash counting up. n = 0..1, how far the count is (it climbs as it goes)
+  | 'xpCount' // one tick of the XP bar filling. n = 0..1, how full the bar is (it climbs as it fills)
+  | 'levelUp' // LEVEL UP! the player reaches a new level
+  | 'mvp'; // the MVP unit is named: a spotlight and a cheer
 
 /** The three things every character says. */
 export type VoiceKind = 'attack' | 'hurt' | 'death';
@@ -118,23 +150,25 @@ export function petVoice(pet: PetType, kind: VoiceKind): SoundName {
 
 export type MusicState =
   | 'off'
-  | 'prep' // between waves (most of the time): calm, cheerful, low-key. Never tires the ear
-  | 'wave' // a wave is being fought: driving (music.energy adds layers)
-  | 'boss' // the boss wave: bigger and tenser
-  | 'stageClear' // after the stage-clear fanfare: a bright victory loop
-  | 'defeat' // a lost wave: a soft, slow, sparse loop until the retry
+  | 'lobby' // the main screen (the PREP music, most of the time): warm, catchy, never tiring
+  | 'search' // looking for an opponent: light, ticking, a little tense
+  | 'fight' // a fight: driving (music.energy adds layers)
+  | 'champion' // a champion match: bigger and tenser
+  | 'victory' // after the victory stinger: a bright, bouncy loop
+  | 'defeat' // after the defeat stinger: a soft, slow, sparse loop
   | LegacyMusicState;
 
-/** The v3 state names. They keep working: each one plays its v4 state (see MUSIC_ALIAS). */
-export type LegacyMusicState = 'lobby' | 'search' | 'battle' | 'overtime' | 'victory';
+/** The older state names. They keep working: each one plays its v5 state (see MUSIC_ALIAS). */
+export type LegacyMusicState = 'prep' | 'wave' | 'boss' | 'stageClear' | 'battle' | 'overtime';
 
-/** What each v3 state name plays now. */
+/** What each older state name plays now. */
 export const MUSIC_ALIAS: Record<LegacyMusicState, Exclude<MusicState, LegacyMusicState>> = {
-  lobby: 'prep',
-  search: 'prep',
-  battle: 'wave',
-  overtime: 'boss',
-  victory: 'stageClear',
+  prep: 'lobby', // v4 between waves
+  wave: 'fight', // v4 a wave
+  boss: 'champion', // v4 the boss wave
+  stageClear: 'victory', // v4 stage clear
+  battle: 'fight', // v3
+  overtime: 'champion', // v3
 };
 
 /** One sound effect's recipe and how it sits in the mix. */

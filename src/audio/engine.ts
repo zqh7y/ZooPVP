@@ -1,6 +1,8 @@
 import { frand } from '../rng';
 import { music } from './music';
 import { MUSIC_ALIAS, petVoice, type MusicState, type PlayAt, type SoundName, type VoiceKind } from './names';
+import { CAST_SOUNDS, TRAIT_SOUNDS } from './cast';
+import { FIGHT_SOUNDS } from './fight';
 import { SOUNDS } from './sounds';
 import { SAMPLE_RATE, renderRecipe } from './synth';
 
@@ -16,10 +18,30 @@ export { MUSIC_ALIAS, music, petVoice };
  * finger lifts (phones only allow it then).
  */
 
-/** Rendered first, so the sounds heard in the first seconds are ready soonest. */
-const FIRST: SoundName[] = ['click', 'pick', 'drop', 'denied', 'link', 'unlink', 'merge', 'stack', 'hint', 'whoosh', 'waveStart', 'spinTick', 'spinLand', 'collect', 'cellUnlock', 'sell', 'cashKill', 'unitReveal', 'itemReveal'];
-/** The v3 sounds the stage flow no longer needs: rendered last. */
-const LAST: SoundName[] = ['search', 'found', 'vsSlam', 'countdown', 'fight', 'rollStart', 'tick', 'tock', 'reveal', 'crack', 'breakthrough', 'meter', 'rollEarned', 'enrage', 'victory', 'defeat', 'trophyUp', 'trophyDown', 'leagueUp'];
+/**
+ * Rendered first, so a phone is never silent in the first seconds: the interface, the bell and the call, the hits,
+ * the matchmaking stings and the roll's ticks (the lobby music's instruments render first too, in music.ts). The
+ * long multi-level stings (merge, stack, the reveals) come right after them.
+ */
+const FIRST: SoundName[] = [
+  'click', 'pick', 'drop', 'denied', 'link', 'unlink', 'whoosh', 'hint', 'count',
+  'bellStart', 'ready', 'fight', 'punch', 'crit', 'ko', 'bite', 'knifeHit', 'batHit', 'spearHit', 'block',
+  'search', 'found', 'spinTick', 'spinLand', 'collect', 'cellUnlock', 'sell', 'cashKill', 'coins', 'cashCount', 'xpCount', 'bellEnd',
+  'stack', 'merge', 'unitReveal', 'itemReveal',
+];
+/** Then the whole fight: every character's voices, the traits, the deaths, the boxing night's juice and stingers. */
+const SECOND: SoundName[] = [
+  ...(Object.keys(CAST_SOUNDS) as SoundName[]),
+  'victory', 'defeat', 'doubleKo', 'tripleKo', 'pow', 'bonk', 'wham', 'smash', 'ooh', 'slowmo', 'roar',
+  ...(Object.keys(FIGHT_SOUNDS) as SoundName[]),
+  ...(Object.keys(TRAIT_SOUNDS) as SoundName[]),
+  'deploy', 'hop', 'stun', 'pop', 'squish', 'launch', 'slice', 'spin', 'deflate', 'shatter', 'petals', 'combo', 'lastKill', 'cheer',
+];
+/** The v3 and v4 sounds the boxing-night flow no longer needs: rendered last. */
+const LAST: SoundName[] = [
+  'waveStart', 'waveClear', 'stageClear', 'star', 'bossArrives', 'waveLost',
+  'vsSlam', 'countdown', 'rollStart', 'tick', 'tock', 'reveal', 'crack', 'breakthrough', 'meter', 'rollEarned', 'enrage', 'trophyUp', 'trophyDown', 'leagueUp',
+];
 
 const SCREEN_W = 540;
 const MAX_VOICES = 40;
@@ -52,7 +74,7 @@ class Sfx {
 
   private async renderAll() {
     const all = Object.keys(SOUNDS) as SoundName[];
-    const names = [...new Set([...FIRST, ...all.filter((n) => !LAST.includes(n)), ...LAST])];
+    const names = [...new Set([...FIRST, ...SECOND, ...all.filter((n) => !LAST.includes(n)), ...LAST])];
     for (const name of names) {
       const def = SOUNDS[name];
       for (const level of def.levels ?? [0]) {

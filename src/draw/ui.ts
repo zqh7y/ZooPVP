@@ -1,13 +1,14 @@
-import { CLASS_FX, H, S, TEAM, TYPE, UI, W } from '../theme';
+import { CLASS_FX, H, RARITY, S, TEAM, TYPE, UI, W } from '../theme';
 import { CLASSES } from '../data';
 import { clamp, label, poly, rr, textWidth, type Ctx, type FontWeight, type Rect } from '../util';
 import { bolt, iconTint } from './icons';
 
 /*
- * The interface kit: calm and easy on the eyes. Soft greige and warm white surfaces, slate text, one muted sage
- * teal for the main action. Things that can be touched are soft rounded blocks lit from the upper left (a top face with a
- * light top edge, a deeper side face below it, a short warm shadow falling to the lower right); the rest are
- * warm white plates with a soft shadow. Every screen draws its interface with these.
+ * The interface kit: a deep, inviting base. Deep indigo behind everything, plum-indigo panels with chunky depth and
+ * light text; things that can be touched are saturated, soft-edged rounded blocks lit from the upper left (a top
+ * face with a light top edge, a deeper side face below it, a short deep shadow) with bold white words that carry a
+ * small drop. Warm white is kept for what is held or read up close: the piece tiles and the guide's bubbles. Every
+ * screen draws its interface with these.
  */
 
 /** An icon drawer: centre x, y and a box size. */
@@ -26,7 +27,7 @@ function hair(ctx: Ctx, x: number, y: number, w: number, h: number, rad: number)
  */
 function softShadow(ctx: Ctx, x: number, y: number, w: number, h: number, rad: number, spread: number, alpha: number) {
   const n = 3;
-  ctx.fillStyle = `rgba(60, 54, 44, ${(alpha / n).toFixed(3)})`;
+  ctx.fillStyle = `rgba(12, 8, 34, ${(alpha / n).toFixed(3)})`;
   for (let i = 0; i < n; i++) {
     const g = (spread * (i + 1)) / n;
     rr(ctx, x - g * 0.6 + g * 0.35, y - g * 0.3, w + g * 1.2, h + g * 0.9, rad + g);
@@ -131,8 +132,8 @@ export function tickTo(key: string, value: number, speed = 9): number {
 // ------------------------------------------------------------------ buttons and pills
 
 /**
- * primary: the screen's one main action, in the calm accent. secondary / roll / quiet are warm white or greige;
- * case and elite are the two soft case tones (wheat for cash, lilac for gems); danger is the soft red "drop here" state.
+ * primary: the screen's main action, a juicy green (BATTLE, CONTINUE). case a warm orange, elite a purple.
+ * secondary / roll / quiet are plum blocks on the deep base; danger is the soft red "drop here" state.
  */
 export type ButtonVariant = 'primary' | 'roll' | 'secondary' | 'quiet' | 'danger' | 'case' | 'elite';
 interface Look {
@@ -141,17 +142,37 @@ interface Look {
   side: string;
   rim: string;
   text: string;
+  /** the small drop under the word (chunky game lettering); '' for none */
+  drop: string;
 }
 const VARIANT: Record<ButtonVariant, Look> = {
-  primary: { top: '#67a294', low: '#5a9686', side: '#3f6c60', rim: '', text: UI.accentText },
-  roll: { top: '#fbfaf7', low: '#f1eee8', side: '#cbc4b7', rim: '#e1dcd2', text: UI.text },
-  secondary: { top: '#fbfaf7', low: '#f1eee8', side: '#cbc4b7', rim: '#e1dcd2', text: UI.text },
-  quiet: { top: '#efece6', low: '#e7e3dc', side: '#cbc4b8', rim: '#ddd8ce', text: UI.textDim },
-  danger: { top: '#d98179', low: '#cb6a62', side: '#9e4d47', rim: '', text: '#ffffff' },
-  case: { top: '#eddcb2', low: '#e2cb95', side: '#ad9157', rim: '', text: '#3d321f' },
-  elite: { top: '#cfc8ea', low: '#bdb3e0', side: '#8075b1', rim: '', text: '#2c2647' },
+  primary: { top: '#82dc5f', low: '#4fbb45', side: '#2b7d2f', rim: '', text: '#ffffff', drop: 'rgba(22, 84, 28, 0.85)' },
+  roll: { top: '#5c4fa6', low: '#4c4091', side: '#2a2158', rim: '#6d5fba', text: '#f6f2ff', drop: 'rgba(20, 14, 52, 0.7)' },
+  secondary: { top: '#5c4fa6', low: '#4c4091', side: '#2a2158', rim: '#6d5fba', text: '#f6f2ff', drop: 'rgba(20, 14, 52, 0.7)' },
+  quiet: { top: '#463b84', low: '#3d3375', side: '#241d4b', rim: '#56499c', text: '#cbbff1', drop: '' },
+  danger: { top: '#f58a7f', low: '#e0574f', side: '#99302c', rim: '', text: '#ffffff', drop: 'rgba(110, 28, 24, 0.8)' },
+  case: { top: '#ffbb52', low: '#f58b25', side: '#b05514', rim: '', text: '#ffffff', drop: 'rgba(130, 60, 10, 0.85)' },
+  elite: { top: '#bd92ff', low: '#9364ef', side: '#5c35ad', rim: '', text: '#ffffff', drop: 'rgba(62, 30, 130, 0.85)' },
 };
-const DISABLED: Look = { top: '#ebe8e2', low: '#e5e1da', side: '#cfc9be', rim: '#dfdad1', text: '#a9a49b' };
+const DISABLED: Look = { top: '#3f3670', low: '#383063', side: '#241e48', rim: '#4b4182', text: '#8a7fb8', drop: '' };
+
+/** The look of a button variant (for a caller that draws its own words on one). */
+export const buttonLook = (v: ButtonVariant): Readonly<Look> => VARIANT[v];
+
+/** Bold words with a small drop under them (the chunky lettering of the buttons and banners). */
+export function dropLabel(
+  ctx: Ctx,
+  s: string,
+  x: number,
+  y: number,
+  size: number,
+  maxW: number,
+  o: { color?: string; drop?: string; align?: CanvasTextAlign; track?: number; weight?: FontWeight } = {},
+) {
+  const weight = o.weight ?? 700;
+  if (o.drop) fitLabel(ctx, s, x, y + Math.max(1.5, size * 0.07), size, maxW, { align: o.align, color: o.drop, weight, track: o.track });
+  fitLabel(ctx, s, x, y, size, maxW, { align: o.align, color: o.color ?? '#ffffff', weight, track: o.track });
+}
 
 /** How deep a button's side face is: the top face travels this far when pressed. */
 export const BUTTON_DEPTH = 6;
@@ -213,15 +234,15 @@ export function button(ctx: Ctx, r: Rect, o: ButtonOpts = {}) {
     ctx.save();
     ctx.lineWidth = 3;
     ctx.globalAlpha *= 1 - p;
-    ctx.strokeStyle = UI.accentDim;
+    ctx.strokeStyle = UI.accentLight;
     ctx.stroke();
     ctx.restore();
   }
   // the shadow tightens as the block is pressed into the ground
-  softShadow(ctx, r.x, r.y + 4, r.w, r.h - 2, rad, 7 - 4 * clamp(k, 0, 1), o.disabled ? 0.12 : 0.32);
+  softShadow(ctx, r.x, r.y + 4, r.w, r.h - 2, rad, 7 - 4 * clamp(k, 0, 1), o.disabled ? 0.2 : 0.45);
   if (o.breathe !== undefined && !o.disabled) {
     ctx.save();
-    ctx.shadowColor = `rgba(90, 150, 134, ${(0.22 + 0.14 * Math.sin(o.breathe * 2.2)).toFixed(3)})`;
+    ctx.shadowColor = `rgba(120, 220, 110, ${(0.3 + 0.16 * Math.sin(o.breathe * 2.2)).toFixed(3)})`;
     ctx.shadowBlur = 24;
     rr(ctx, r.x, r.y + 2, r.w, r.h - 2, rad);
     ctx.fillStyle = v.side;
@@ -247,9 +268,9 @@ export function button(ctx: Ctx, r: Rect, o: ButtonOpts = {}) {
     const tw = Math.min(textWidth(ctx, text, size, weight, track), r.w - pad * 2 - iconSize - gap);
     const x0 = r.x + (r.w - (iconSize + gap + tw)) / 2;
     o.icon(ctx, x0 + iconSize / 2, cy, iconSize);
-    fitLabel(ctx, text, x0 + iconSize + gap, ty + 1, size, tw, { align: 'left', color: v.text, weight, track });
+    dropLabel(ctx, text, x0 + iconSize + gap, ty + 1, size, tw, { align: 'left', color: v.text, drop: v.drop, weight, track });
   } else if (o.icon) o.icon(ctx, r.x + r.w / 2, cy, iconSize * 1.15);
-  else if (text) fitLabel(ctx, text, r.x + r.w / 2, ty + 1, size, r.w - pad * 2, { color: v.text, weight, track });
+  else if (text) dropLabel(ctx, text, r.x + r.w / 2, ty + 1, size, r.w - pad * 2, { color: v.text, drop: v.drop, weight, track });
   iconTint(null);
   if (o.sub) {
     ctx.save();
@@ -269,7 +290,7 @@ export function button(ctx: Ctx, r: Rect, o: ButtonOpts = {}) {
     ctx.fillStyle = '#ffffff';
     ctx.fill();
     rr(ctx, bx, by, bw, bh, bh / 2);
-    ctx.fillStyle = o.disabled ? UI.borderStrong : onGold ? UI.text : UI.danger;
+    ctx.fillStyle = o.disabled ? UI.borderStrong : onGold ? UI.surfaceAlt : UI.danger;
     ctx.fill();
     label(ctx, s, bx + bw / 2, by + bh / 2 + 1, TYPE.body, { color: '#ffffff', weight: 700, track: 0 });
   }
@@ -285,15 +306,15 @@ export interface PillOpts {
   tick?: boolean;
 }
 
-/** A warm white plate with a soft shadow and a hairline edge. */
-function plate(ctx: Ctx, r: Rect, fill: string, rad: number = S.radius.m, shadow = 0.22) {
+/** A plate with a soft shadow and a hairline edge (plum on the deep base). */
+function plate(ctx: Ctx, r: Rect, fill: string, rad: number = S.radius.m, shadow = 0.3, edge: string = UI.border) {
   if (shadow > 0) softShadow(ctx, r.x, r.y + 2, r.w, r.h, rad, 5, shadow);
   rr(ctx, r.x, r.y, r.w, r.h, rad);
   ctx.fillStyle = fill;
   ctx.fill();
   hair(ctx, r.x, r.y, r.w, r.h, rad);
   ctx.lineWidth = 1;
-  ctx.strokeStyle = UI.border;
+  ctx.strokeStyle = edge;
   ctx.stroke();
 }
 
@@ -326,7 +347,7 @@ export function pill(ctx: Ctx, r: Rect, o: PillOpts) {
   const cy = r.y + r.h / 2;
   const pad = Math.min(18, r.h * 0.36);
   const size = Math.min(TYPE.h3, r.h * 0.5);
-  const color = UI.text;
+  const color = UI.hi;
   const parts = /^([A-Za-z ]+) ([\d.,]+[KMB]?)$/.exec(text);
   const iconSize = o.icon ? Math.min(r.h - 18, 26) : 0;
   let x0 = r.x + pad;
@@ -342,7 +363,7 @@ export function pill(ctx: Ctx, r: Rect, o: PillOpts) {
     const total = cw + 8 + vw;
     const k = Math.min(1, room / total);
     const sx = o.icon ? x0 : r.x + (r.w - total * k) / 2;
-    label(ctx, parts[1].toUpperCase(), sx, cy + 1, cs * k, { align: 'left', color: UI.textDim, weight: 700, track: 1.5 * k });
+    label(ctx, parts[1].toUpperCase(), sx, cy + 1, cs * k, { align: 'left', color: UI.hiDim, weight: 700, track: 1.5 * k });
     label(ctx, parts[2], sx + (cw + 8) * k, cy + 1, size * k, { align: 'left', color, weight: 700 });
   } else if (o.icon) fitLabel(ctx, text, x0, cy + 1, size, room, { align: 'left', color, weight: 700 });
   else fitLabel(ctx, text, r.x + r.w / 2, cy + 1, size, r.w - pad * 2, { color, weight: 700 });
@@ -350,7 +371,7 @@ export function pill(ctx: Ctx, r: Rect, o: PillOpts) {
 
 /** POWER and its number on a compact chip (each side in match): a gold bolt, the caption, the bold number. */
 export function powerChip(ctx: Ctx, r: Rect, power: number) {
-  pill(ctx, r, { icon: (c, x, y, s) => bolt(c, x, y, s * 0.9, UI.accentDark), text: `POWER ${Math.round(power)}` });
+  pill(ctx, r, { icon: (c, x, y, s) => bolt(c, x, y, s * 0.9, UI.reward), text: `POWER ${Math.round(power)}` });
 }
 
 const powers = new Map<string, { goal: number; shown: number; at: number; popAt: number; from: number; delta: number }>();
@@ -450,21 +471,65 @@ function pillText(ctx: Ctx, s: string, x: number, y: number, fill: string) {
 
 // ------------------------------------------------------------------ panels and cells
 
-/** A warm white panel with a soft shadow; 'dark' is the see-through one for panels over the pitch. A title sits on a tab on the top edge. */
+/**
+ * A panel: a chunky plum block on the deep base (a lit top face, a lighter rim, a deep side face under it and a soft
+ * shadow); 'dark' is the deeper see-through one for panels over the pitch. A title sits on a tab on the top edge.
+ */
 export function panel(ctx: Ctx, r: Rect, o: { title?: string; tone?: 'paper' | 'dark' } = {}) {
-  plate(ctx, r, o.tone === 'dark' ? UI.glass : UI.surface, S.radius.l, 0.26);
+  const rad = S.radius.l + 4;
+  const D = 8;
+  softShadow(ctx, r.x, r.y + 8, r.w, r.h, rad, 14, 0.5);
+  rr(ctx, r.x, r.y + D, r.w, r.h, rad);
+  ctx.fillStyle = '#1c1640';
+  ctx.fill();
+  const g = ctx.createLinearGradient(0, r.y, 0, r.y + r.h);
+  if (o.tone === 'dark') {
+    g.addColorStop(0, 'rgba(52, 42, 104, 0.97)');
+    g.addColorStop(1, 'rgba(38, 30, 80, 0.97)');
+  } else {
+    g.addColorStop(0, UI.surfaceHi);
+    g.addColorStop(1, UI.surface);
+  }
+  rr(ctx, r.x, r.y, r.w, r.h, rad);
+  ctx.fillStyle = g;
+  ctx.fill();
+  rr(ctx, r.x + 1.5, r.y + 1.5, r.w - 3, r.h - 3, rad - 1.5);
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = 'rgba(150, 130, 230, 0.45)';
+  ctx.stroke();
+  // the key light along the top edge
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
+  ctx.fillRect(r.x + rad, r.y + 4, r.w - rad * 2, 2);
   if (o.title) {
     const s = o.title.toUpperCase();
     const w = Math.min(r.w - 40, textWidth(ctx, s, TYPE.small, 700, 2) + 36);
     const tr = { x: Math.round(r.x + r.w / 2 - w / 2), y: Math.round(r.y - 14), w: Math.round(w), h: 28 };
-    block(ctx, tr.x, tr.y, tr.w, tr.h, 14, 3, '#fbfaf7', '#f1eee8', '#d2ccc0', UI.border);
-    fitLabel(ctx, s, r.x + r.w / 2, tr.y + 13, TYPE.small, w - 20, { color: UI.textDim, weight: 700, track: 2 });
+    block(ctx, tr.x, tr.y, tr.w, tr.h, 14, 3, '#6a5bb8', '#5a4ca6', '#2c2360');
+    fitLabel(ctx, s, r.x + r.w / 2, tr.y + 13, TYPE.small, w - 20, { color: UI.hi, weight: 700, track: 2 });
   }
 }
 
+/** A sunken well inside a panel (a row of rewards, a stat): darker than the panel, with a soft inner shadow. */
+export function well(ctx: Ctx, r: Rect, rad: number = S.radius.m, fill: string = UI.surfaceAlt) {
+  rr(ctx, r.x, r.y, r.w, r.h, rad);
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.save();
+  rr(ctx, r.x, r.y, r.w, r.h, rad);
+  ctx.clip();
+  const g = ctx.createLinearGradient(0, r.y, 0, r.y + 8);
+  g.addColorStop(0, 'rgba(8, 4, 24, 0.35)');
+  g.addColorStop(1, 'rgba(8, 4, 24, 0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(r.x, r.y, r.w, 8);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.07)';
+  ctx.fillRect(r.x + rad, r.y + r.h - 1.5, r.w - rad * 2, 1.5);
+  ctx.restore();
+}
+
 /**
- * The tray the grid and the bench sit in: a sand-coloured block with thickness, its inner floor recessed (the
- * top and left inner edges fall into soft shadow, the lower lip catches the sun).
+ * The tray the grid and the bench sit in: a deep plum block with thickness, its inner floor recessed (the top and
+ * left inner edges fall into shadow, the lower lip catches a little light).
  */
 export function gridFrame(ctx: Ctx, r: Rect) {
   const m = 8;
@@ -474,8 +539,8 @@ export function gridFrame(ctx: Ctx, r: Rect) {
   const h = r.h + m * 2;
   const rad = S.radius.l + 4;
   const D = 7;
-  softShadow(ctx, x, y + 6, w, h + D, rad, 10, 0.26);
-  block(ctx, x, y, w, h + D, rad, D, '#e3dfd7', '#dbd6cd', '#bdb6a9');
+  softShadow(ctx, x, y + 6, w, h + D, rad, 10, 0.45);
+  block(ctx, x, y, w, h + D, rad, D, '#4a3e8c', '#3e3379', '#211a45');
   // the recessed floor
   const fx = r.x - 2;
   const fy = r.y - 2;
@@ -483,29 +548,29 @@ export function gridFrame(ctx: Ctx, r: Rect) {
   const fh = r.h + 4;
   const frad = S.radius.l - 2;
   rr(ctx, fx, fy, fw, fh, frad);
-  ctx.fillStyle = '#d4cfc5';
+  ctx.fillStyle = '#2a2254';
   ctx.fill();
   ctx.save();
   rr(ctx, fx, fy, fw, fh, frad);
   ctx.clip();
   const top = ctx.createLinearGradient(0, fy, 0, fy + 12);
-  top.addColorStop(0, 'rgba(60, 54, 44, 0.2)');
-  top.addColorStop(1, 'rgba(60, 54, 44, 0)');
+  top.addColorStop(0, 'rgba(8, 4, 24, 0.4)');
+  top.addColorStop(1, 'rgba(8, 4, 24, 0)');
   ctx.fillStyle = top;
   ctx.fillRect(fx, fy, fw, 12);
   const left = ctx.createLinearGradient(fx, 0, fx + 9, 0);
-  left.addColorStop(0, 'rgba(60, 54, 44, 0.14)');
-  left.addColorStop(1, 'rgba(60, 54, 44, 0)');
+  left.addColorStop(0, 'rgba(8, 4, 24, 0.25)');
+  left.addColorStop(1, 'rgba(8, 4, 24, 0)');
   ctx.fillStyle = left;
   ctx.fillRect(fx, fy, 9, fh);
   ctx.restore();
   hair(ctx, fx, fy + 1, fw, fh, frad);
   ctx.lineWidth = 1;
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+  ctx.strokeStyle = 'rgba(190, 175, 255, 0.22)';
   ctx.stroke();
 }
 
-/** One slot in the tray: a softly sunken cream square. ok / bad / fuse tint it green / red / gold for a drop. */
+/** One slot in the tray: a softly sunken plum square. ok / bad / fuse tint it green / red / gold for a drop. */
 export function cell(ctx: Ctx, r: Rect, state: 'empty' | 'ok' | 'bad' | 'fuse' = 'empty') {
   const x = Math.round(r.x + 3);
   const y = Math.round(r.y + 3);
@@ -513,35 +578,35 @@ export function cell(ctx: Ctx, r: Rect, state: 'empty' | 'ok' | 'bad' | 'fuse' =
   const h = Math.round(r.h - 6);
   const rad = S.radius.m;
   rr(ctx, x, y, w, h, rad);
-  ctx.fillStyle = '#e6e2da';
+  ctx.fillStyle = '#382e6c';
   ctx.fill();
   ctx.save();
   rr(ctx, x, y, w, h, rad);
   ctx.clip();
-  const g = ctx.createLinearGradient(0, y, 0, y + 7);
-  g.addColorStop(0, 'rgba(60, 54, 44, 0.12)');
-  g.addColorStop(1, 'rgba(60, 54, 44, 0)');
+  const g = ctx.createLinearGradient(0, y, 0, y + 8);
+  g.addColorStop(0, 'rgba(8, 4, 24, 0.32)');
+  g.addColorStop(1, 'rgba(8, 4, 24, 0)');
   ctx.fillStyle = g;
-  ctx.fillRect(x, y, w, 7);
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
+  ctx.fillRect(x, y, w, 8);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
   ctx.fillRect(x + rad, y + h - 1.5, w - rad * 2, 1.5);
   ctx.restore();
   if (state === 'empty') return;
-  const c = state === 'ok' ? UI.ok : state === 'bad' ? UI.danger : UI.accent;
+  const c = state === 'ok' ? UI.ok : state === 'bad' ? UI.danger : UI.reward;
   ctx.save();
   rr(ctx, x, y, w, h, rad);
-  ctx.globalAlpha *= state === 'fuse' ? 0.35 : 0.22;
+  ctx.globalAlpha *= state === 'fuse' ? 0.4 : 0.3;
   ctx.fillStyle = c;
   ctx.fill();
   ctx.globalAlpha = 1;
   rr(ctx, x + 1, y + 1, w - 2, h - 2, rad - 1);
   ctx.lineWidth = 2.5;
-  ctx.strokeStyle = state === 'fuse' ? UI.accentDark : c;
+  ctx.strokeStyle = c;
   ctx.stroke();
   ctx.restore();
 }
 
-/** A light wash over the whole screen behind a panel. */
+/** A deep wash over the whole screen behind a panel. */
 export function veil(ctx: Ctx, alpha = 1) {
   ctx.save();
   ctx.globalAlpha *= clamp(alpha, 0, 1);
@@ -570,6 +635,12 @@ export function rainbow(ctx: Ctx, x0: number, y0: number, x1: number, y1: number
 export function classColor(level: number, t: number) {
   const i = clamp(Math.round(level) - 1, 0, 6);
   return i === 6 ? mix('#9b7a2c', '#c9a35a', 0.5 + 0.5 * Math.sin(t * 1.4)) : UI.tierText[i];
+}
+
+/** Text colour for a class (level 1..7) on the dark base: the rarity ramp's light tones; SSS shimmers. */
+export function classColorOnDark(level: number, t: number) {
+  const i = clamp(Math.round(level) - 1, 0, 6);
+  return i === 6 ? mix(RARITY.light[6], RARITY.light[4], 0.5 + 0.5 * Math.sin(t * 1.6)) : RARITY.light[i];
 }
 
 /** How deep a tile's side face is, for a tile h px tall. */
@@ -788,7 +859,7 @@ export const SCORE_BUG = { h: 44 };
  */
 export function scoreBug(ctx: Ctx, r: Rect, o: { home: ScoreSide; away: ScoreSide; clock: string; flash?: number; hot?: boolean }) {
   const rad = r.h / 2;
-  plate(ctx, r, UI.surface, rad, 0.3);
+  plate(ctx, r, UI.glass, rad, 0.4, 'rgba(150, 130, 230, 0.5)');
   const clockW = 80;
   const scoreW = 52;
   const cx = r.x + r.w / 2;
@@ -807,15 +878,15 @@ export function scoreBug(ctx: Ctx, r: Rect, o: { home: ScoreSide; away: ScoreSid
   const f = clamp(o.flash ?? 0, 0, 1);
   const hot = o.hot || f > 0.4;
   rr(ctx, cx - clockW / 2, r.y + 4, clockW, r.h - 8, (r.h - 8) / 2);
-  ctx.fillStyle = hot ? UI.accent : UI.text;
+  ctx.fillStyle = hot ? UI.accent : '#17122f';
   ctx.fill();
   label(ctx, o.clock, cx, cy + 1, TYPE.lead, { color: hot ? UI.accentText : '#ffffff', weight: 700, track: 1 });
   const size = TYPE.h2;
-  label(ctx, String(o.home.score), cx - clockW / 2 - scoreW / 2, cy + 1, size, { weight: 700, color: TEAM[0].dark });
-  label(ctx, String(o.away.score), cx + clockW / 2 + scoreW / 2, cy + 1, size, { weight: 700, color: TEAM[1].dark });
+  label(ctx, String(o.home.score), cx - clockW / 2 - scoreW / 2, cy + 1, size, { weight: 700, color: TEAM[0].light });
+  label(ctx, String(o.away.score), cx + clockW / 2 + scoreW / 2, cy + 1, size, { weight: 700, color: TEAM[1].light });
   const room = r.w / 2 - clockW / 2 - scoreW - 24;
-  fitLabel(ctx, o.home.name.toUpperCase(), r.x + 18, cy + 1, TYPE.body, room, { align: 'left', weight: 700, track: 1, color: UI.text });
-  fitLabel(ctx, o.away.name.toUpperCase(), r.x + r.w - 18, cy + 1, TYPE.body, room, { align: 'right', weight: 700, track: 1, color: UI.text });
+  fitLabel(ctx, o.home.name.toUpperCase(), r.x + 18, cy + 1, TYPE.body, room, { align: 'left', weight: 700, track: 1, color: UI.hi });
+  fitLabel(ctx, o.away.name.toUpperCase(), r.x + r.w - 18, cy + 1, TYPE.body, room, { align: 'right', weight: 700, track: 1, color: UI.hi });
 }
 
 /** A rounded fill bar, 0..1, in a sunken cream track, with a light line along the fill's top and a slow sheen. */
@@ -905,10 +976,10 @@ export type RibbonTone = 'accent' | 'plain' | 'muted' | 'reward';
 type OldRibbonTone = 'red' | 'gold' | 'indigo' | 'jade';
 const RIBBON_TONE: Record<RibbonTone | OldRibbonTone, RibbonTone> = { accent: 'accent', plain: 'plain', muted: 'muted', reward: 'reward', gold: 'reward', jade: 'accent', red: 'plain', indigo: 'muted' };
 const RIBBON_LOOK: Record<RibbonTone, Look> = {
-  accent: { top: '#67a294', low: '#5a9686', side: '#3f6c60', rim: '', text: UI.accentText },
-  plain: { top: '#fbfaf7', low: '#f1eee8', side: '#cbc4b7', rim: '', text: UI.text },
-  muted: { top: '#76808c', low: '#67707c', side: '#474f59', rim: '', text: '#ffffff' },
-  reward: { top: '#eddcb2', low: '#e2cb95', side: '#ad9157', rim: '', text: '#3d321f' },
+  accent: VARIANT.primary,
+  plain: { top: '#fbfaf7', low: '#f1eee8', side: '#cbc4b7', rim: '', text: UI.text, drop: '' },
+  muted: { top: '#7d73ad', low: '#685e98', side: '#3a3266', rim: '', text: '#ffffff', drop: 'rgba(30, 22, 64, 0.8)' },
+  reward: { top: '#ffd96a', low: '#f4b532', side: '#a8700f', rim: '', text: '#ffffff', drop: 'rgba(130, 78, 0, 0.85)' },
 };
 
 /**
@@ -928,9 +999,9 @@ export function ribbon(ctx: Ctx, cx: number, cy: number, w: number, text: string
   const rad = Math.min(S.radius.l + 6, titleH * 0.35);
   softShadow(ctx, x0, y0 + 6, w, h, rad, 10, 0.3);
   block(ctx, x0, y0, w, h, rad, D, v.top, v.low, v.side);
-  fitLabel(ctx, text.toUpperCase(), cx, cy + 2, size, w - 36, { color: v.text, weight: 700, track: size * 0.05 });
+  dropLabel(ctx, text.toUpperCase(), cx, cy + 2, size, w - 36, { color: v.text, drop: v.drop, track: size * 0.05 });
   if (o.sub) {
-    ctx.fillStyle = tone === 'muted' ? 'rgba(255, 255, 255, 0.18)' : 'rgba(120, 80, 20, 0.14)';
+    ctx.fillStyle = tone === 'plain' ? 'rgba(120, 80, 20, 0.14)' : 'rgba(255, 255, 255, 0.22)';
     ctx.fillRect(Math.round(x0 + 24), Math.round(y0 + titleH), Math.round(w - 48), 1);
     ctx.save();
     ctx.globalAlpha *= 0.8;
@@ -952,10 +1023,13 @@ export function toast(ctx: Ctx, text: string, x: number, y: number, age: number)
   const yy = y - age * 24;
   ctx.translate(x, yy);
   ctx.scale(k, k);
-  softShadow(ctx, -w / 2, -h / 2 + 3, w, h, h / 2, 6, 0.3);
+  softShadow(ctx, -w / 2, -h / 2 + 3, w, h, h / 2, 6, 0.45);
   rr(ctx, -w / 2, -h / 2, w, h, h / 2);
-  ctx.fillStyle = UI.text;
+  ctx.fillStyle = '#17122f';
   ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = 'rgba(170, 150, 240, 0.55)';
+  ctx.stroke();
   fitLabel(ctx, text, 0, 1, size, w - 28, { color: '#ffffff', weight: 700 });
   ctx.restore();
 }
@@ -988,7 +1062,7 @@ function calloutPath(ctx: Ctx, x: number, y: number, w: number, h: number, rad: 
 
 /**
  * A callout inside rect r that points at (pointAt.x, pointAt.y) one way only: with a small tail when the target
- * is just past its edge, else with a gold arrow bobbing over the target. A white bubble with a gold edge.
+ * is just past its edge, else with a green arrow bobbing over the target. A white bubble with a green edge.
  */
 export function hint(ctx: Ctx, r: Rect, text: string, pointAt: { x: number; y: number }, t = 0) {
   const below = pointAt.y > r.y + r.h / 2;
@@ -1017,10 +1091,10 @@ export function hint(ctx: Ctx, r: Rect, text: string, pointAt: { x: number; y: n
   const lh = size + 4;
   lines.forEach((l, i) => fitLabel(ctx, l, r.x + r.w / 2, r.y + r.h / 2 + 1 + (i - (lines.length - 1) / 2) * lh, size, r.w - 24, { color: UI.text, weight: 700 }));
   if (near) return;
-  // the target is further off: a gold arrow bobs over it, pointing at it from the callout's side
+  // the target is further off: a green arrow bobs over it, pointing at it from the callout's side
   const bob = Math.sin(t * 5) * 4;
   const my = pointAt.y - dir * (34 - bob);
-  ctx.fillStyle = UI.text;
+  ctx.fillStyle = '#ffffff';
   poly(ctx, [pointAt.x - 15, my - dir * 12, pointAt.x + 15, my - dir * 12, pointAt.x, my + dir * 12]);
   ctx.fill();
   ctx.fillStyle = UI.accent;

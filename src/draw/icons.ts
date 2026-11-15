@@ -265,3 +265,51 @@ export function fight(ctx: Ctx, x: number, y: number, size: number, color?: stri
     }
   });
 }
+
+/** A crown: a CHAMPION match and its boss. Filled, three points with round jewels. */
+export function crown(ctx: Ctx, x: number, y: number, size: number, color?: string) {
+  glyph(ctx, x, y, size, ink(color ?? UI.reward), () => {
+    poly(ctx, [-40, 26, -44, -20, -20, 2, 0, -34, 20, 2, 44, -20, 40, 26]);
+    ctx.fill();
+    ctx.stroke();
+    for (const [px, py] of [[-44, -24], [0, -38], [44, -24]]) {
+      circle(ctx, px, py, 8);
+      ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+    rr(ctx, -36, 12, 72, 9, 4);
+    ctx.fill();
+  });
+}
+
+/** A flame: a win streak. Filled, with a lighter heart. */
+export function flame(ctx: Ctx, x: number, y: number, size: number, color?: string) {
+  glyph(ctx, x, y, size, ink(color ?? '#ff8a3d'), () => {
+    ctx.beginPath();
+    ctx.moveTo(0, 42);
+    ctx.bezierCurveTo(-34, 42, -40, 10, -26, -8);
+    ctx.bezierCurveTo(-20, 4, -12, 6, -10, 4);
+    ctx.bezierCurveTo(-16, -18, -2, -34, 6, -44);
+    ctx.bezierCurveTo(8, -24, 36, -14, 34, 12);
+    ctx.bezierCurveTo(34, 32, 18, 42, 0, 42);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255, 236, 160, 0.9)';
+    ctx.beginPath();
+    ctx.moveTo(0, 38);
+    ctx.bezierCurveTo(-16, 38, -18, 20, -10, 10);
+    ctx.bezierCurveTo(-4, 16, 2, 14, 2, 4);
+    ctx.bezierCurveTo(12, 12, 18, 22, 14, 30);
+    ctx.bezierCurveTo(10, 36, 6, 38, 0, 38);
+    ctx.fill();
+  });
+}
+
+/** A 2 x 2 grid: grid cells (a new cell opened). */
+export function cells(ctx: Ctx, x: number, y: number, size: number, color?: string) {
+  glyph(ctx, x, y, size, ink(color), () => {
+    for (const [px, py] of [[-36, -36], [4, -36], [-36, 4], [4, 4]]) {
+      rr(ctx, px, py, 32, 32, 7);
+      ctx.fill();
+    }
+  });
+}

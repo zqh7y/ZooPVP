@@ -14,7 +14,7 @@ const tierOf = (rung: number) => clamp(Math.round(1 + ((rung - 1) * 6) / 11), 1,
 
 /** G major notes from a degree (0 = G4). */
 const G_MAJOR = [0, 2, 4, 5, 7, 9, 11];
-const gm = (d: number) => 67 + 12 * Math.floor(d / 7) + G_MAJOR[((d % 7) + 7) % 7];
+export const gm = (d: number) => 67 + 12 * Math.floor(d / 7) + G_MAJOR[((d % 7) + 7) % 7];
 
 /** A soft pop: the prize pops out of the spin. */
 function pop(s: Synth, t: number, v: number) {
@@ -24,7 +24,7 @@ function pop(s: Synth, t: number, v: number) {
 }
 
 /** Fireworks over the stadium: a thump up, a crackling burst. */
-function firework(s: Synth, t: number, v: number) {
+export function firework(s: Synth, t: number, v: number) {
   s.tone({ t, f: [[0, 400], [0.25, 1400]], a: 0.02, d: 0.22, v: v * 0.12 });
   const b = t + 0.26;
   thump(s, b, 90, 0.18, v * 0.8);
@@ -33,7 +33,7 @@ function firework(s: Synth, t: number, v: number) {
 }
 
 /** The big finish of rare things: brass on the home chord, a marimba run, the crowd, sparkle. rank 0..2. */
-function party(s: Synth, t: number, rank: number, hold: number) {
+export function party(s: Synth, t: number, rank: number, hold: number) {
   drum(s, t, 46, 0.9 + rank * 0.2, 1, 2.4);
   s.tone({ t, f: [[0, 72], [1.2, 30]], a: 0.004, d: 0.9 + rank * 0.4, v: 0.5 });
   s.brass({ t, notes: [HOME - 12, HOME - 5, HOME, HOME + 4, HOME + 7], cut: [[0, 450], [0.1, 3000 + rank * 300], [hold + 1, 850]], a: 0.03, h: hold, d: 1.1, v: 0.45 });

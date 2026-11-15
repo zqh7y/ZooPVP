@@ -19,9 +19,9 @@ const CLASSES = ['E', 'D', 'C', 'B', 'A', 'S', 'SSS'];
 const WEAPONS: WeaponType[] = ['knife', 'bat', 'shield', 'spear'];
 const GEAR: GearType[] = ['helmet', 'sneakers', 'chili'];
 const UNITS: PetType[] = ['sprout', 'buzzy', 'ninja', 'snailor', 'roo', 'cacto', 'pogo', 'briar', 'angler', 'sumo', 'rhino', 'boulder'];
-const NAMES = ['Sprout', 'Buzzy', 'Ninja', 'Snailor', 'Roo', 'Cacto', 'Pogo', 'Briar', 'Angler', 'Sumo', 'Rhino', 'Boulder'];
-/** the fight's body radius of each rung (px) */
-const FIGHT_R = [16, 13, 14, 20, 24, 23, 21, 25, 25, 28, 30, 34];
+const NAMES = ['Chick', 'Scorp', 'Shroom', 'Tulip', 'Roo', 'Cacto', 'Dandy', 'Spike', 'Snapper', 'Pumpkin', 'Bamboo', 'Oak'];
+/** the fight's body radius of each rung (px): the simulator's radius x 1.12, as the battle draws it */
+const FIGHT_R = [13, 14, 14, 20, 24, 23, 21, 25, 25, 28, 30, 34].map((r) => Math.round(r * 1.12));
 const SLATE = '#e9e4da';
 /** a soft, muted pitch: two mowing stripes */
 const PITCH = ['#8fb27a', '#87ab72'];
@@ -69,26 +69,43 @@ function pitch(ctx: Ctx, x: number, y: number, w: number, h: number) {
   }
 }
 
+/** what each fighter's own move looks like, for the lineup's fourth pose */
+const SPECIAL: Partial<Record<PetType, [string, Partial<PetPose>]>> = {
+  buzzy: ['throw', { wind: 1 }],
+  ninja: ['boing', { walk: 22, moving: 1 }],
+  snailor: ['bud', { shell: 1, squashX: 1.14, squashY: 0.66, mood: 'scared' }],
+  roo: ['hop', { hop: 0.7, moving: 1 }],
+  cacto: ['jab 2', { strike: 0.3 }],
+  pogo: ['leap', { hop: 0.9 }],
+  briar: ['bristle', { hurt: 0.35, mood: 'angry' }],
+  angler: ['snap', { wind: 1 }],
+  sumo: ['roll', { spin: -1.15, mood: 'angry', walk: 40, squashX: 1.12, squashY: 0.9 }],
+  rhino: ['charge', { mood: 'angry', moving: 1, walk: 9 }],
+  boulder: ['pound', { wind: 1 }],
+};
+
 function lineup(ctx: Ctx, t: number) {
-  // big: idle (yours), attack (theirs), hurt (yours)
+  // big: idle (blue corner), attack (red), hurt (blue), and its own move (red)
   UNITS.forEach((pet, i) => {
-    const cx = (i % 4) * 300;
-    const cy = Math.floor(i / 4) * 200;
-    label(ctx, `${i + 1}  ${NAMES[i]}`, cx + 150, cy + 18, 17, { color: UI.text });
+    const cx = (i % 4) * 350;
+    const cy = Math.floor(i / 4) * 215;
+    label(ctx, `${i + 1}  ${NAMES[i]}`, cx + 175, cy + 18, 17, { color: UI.text });
     const r = 30;
-    put(ctx, cx + 62, cy + 160, mk(pet, 0), ps(t), r, 'idle');
-    put(ctx, cx + 160, cy + 160, mk(pet, 1), ps(t, { face: -1, strike: 0.85 }), r, 'attack');
-    put(ctx, cx + 250, cy + 160, mk(pet, 0), ps(t, { hurt: 0.7 }), r, 'hurt');
+    const [cap, sp] = SPECIAL[pet] ?? ['walk', { walk: 9, moving: 1 }];
+    put(ctx, cx + 58, cy + 178, mk(pet, 0), ps(t), r, 'idle');
+    put(ctx, cx + 140, cy + 178, mk(pet, 1), ps(t, { face: -1, strike: 0.85 }), r, 'attack');
+    put(ctx, cx + 218, cy + 178, mk(pet, 0), ps(t, { hurt: 0.7 }), r, 'hurt');
+    put(ctx, cx + 296, cy + 178, mk(pet, 1), ps(t, { face: -1, ...sp }), r, cap);
   });
   // at fight size on the grass
-  const y0 = 610;
-  pitch(ctx, 0, y0, 1200, 330);
+  const y0 = 660;
+  pitch(ctx, 0, y0, 1400, 330);
   UNITS.forEach((pet, i) => {
-    const x = 50 + i * 100;
+    const x = 58 + i * 117;
     const r = fightR(pet);
     label(ctx, NAMES[i], x, y0 + 14, 12, { color: '#ffffff' });
-    put(ctx, x - 12, y0 + 105, mk(pet, 0), ps(t, { walk: 6 + i }), r);
-    put(ctx, x + 12, y0 + 200, mk(pet, 1), ps(t, { face: -1, strike: 0.85 }), r);
+    put(ctx, x - 14, y0 + 105, mk(pet, 0), ps(t, { walk: 6 + i }), r);
+    put(ctx, x + 14, y0 + 200, mk(pet, 1), ps(t, { face: -1, strike: 0.85 }), r);
     put(ctx, x - 6, y0 + 300, mk(pet, 0, { weapon: WEAPONS[i % 4], weaponLevel: 1 + (i % 7), helmet: i % 3 === 0 ? 3 : 0 }), ps(t, { hurt: i % 2 ? 0.7 : 0, aimY: -0.4 }), r);
   });
 }
@@ -259,7 +276,7 @@ function live(ctx: Ctx, t: number) {
 
 const sheet = param('sheet', 'lineup');
 const SIZE: Record<string, [number, number, string]> = {
-  lineup: [1200, 940, SLATE],
+  lineup: [1400, 990, SLATE],
   boss: [1200, 640, SLATE],
   gear: [1200, param('pet') ? 180 : 1540, SLATE],
   poses: [1200, 640, SLATE],

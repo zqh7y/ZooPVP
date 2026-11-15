@@ -1,18 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
-  BENCH_SLOTS, CELL_LOCKS, CELL_PRICE, ECON, ENEMY, GRID, MAX_COUNT, PETS, PET_INFO, PET_TYPES, PITY, PIECE_NAME, SCRIPTED_ROLLS, START_OPEN, STARTER_KIT,
-  WAVES, armyPower, cellBit, classOdds, clearCash, footprint, homeRung, isPet, koCash, nextPet, petOdds, recommendedPower, rungOf, sellValue, squadPower,
-  stageGems, tierOf,
+  BENCH_SLOTS, CELL_LOCKS, CELL_PRICE, CHAMPION, ECON, GRID, LEVEL, MATCH, MAX_COUNT, PETS, PET_INFO, PET_TYPES, PITY, PIECE_NAME, REWARD,
+  SCRIPTED_ROLLS, START_OPEN, STARTER_KIT, THEMES, armyPower, cellBit, champGems, classOdds, footprint, homeRung, isChampionMatch, isPet, koCash,
+  levelForStage, lossCash, nextPet, petOdds, rungOf, sellValue, squadPower, streakCash, tierOf, winCash, xpForLevel, xpToNext,
 } from '../../src/data';
 import { makeRng } from '../../src/rng';
-import type { PetType, Piece, PieceType, SaveState, SquadSpec, WaveOutcome } from '../../src/types';
+import type { ArmySpec, MatchOutcome, PetType, Piece, PieceType, SaveState, SquadSpec, ThemeId } from '../../src/types';
 import type { SimSummary } from '../../src/sim/types';
 import { Inventory, LOCKED, TOP_OF_LADDER, cellsOf, isOpen, isOwned, ownedRungs } from '../../src/logic/inventory';
 import { caseBlock, caseOdds, casePrice, openCase } from '../../src/logic/rolls';
-import { applyWave, cellLock, cellPrice, cellProgress, openEarned, outcomeOf, unlockCell } from '../../src/logic/progress';
-import { enemyArmy, fightSeed, nextWave, waveFighters, waveInfo } from '../../src/logic/waves';
-import { SAVE_VERSION, load, newSave, repair, replacedOldSave, save } from '../../src/logic/save';
+import { addXp, applyMatch, cellLock, cellPrice, cellProgress, levelProgress, mvpOf, openEarned, outcomeOf, unlockCell } from '../../src/logic/progress';
+import { championFactor, difficulty, fightSeed, findOpponent, matchSeed, matchesToChampion, nextIsChampion } from '../../src/logic/match';
+import { MIGRATES_FROM, SAVE_VERSION, load, migratedOldSave, newSave, repair, replacedOldSave, save } from '../../src/logic/save';
 import { autoArrange } from '../../src/logic/auto';
+import { buildArmy } from '../../src/logic/match';
 import { runBattle } from '../../src/sim/battle';
 
 const ALL_OPEN = (1 << (GRID.cols * GRID.rows)) - 1;
@@ -57,6 +58,12 @@ describe('the cast', () => {
       expect(PET_INFO[p].trait.length).toBeGreaterThan(8);
       expect(PET_INFO[p].row).toBe(PETS[p].row);
     });
+    expect(PET_TYPES.map((p) => PET_INFO[p].name)).toEqual(['Chick', 'Scorp', 'Shroom', 'Tulip', 'Roo', 'Cacto', 'Dandy', 'Spike', 'Snapper', 'Pumpkin', 'Bamboo', 'Oak']);
+    // the chick is the small fast one; the scorp throws from a distance
+    expect(PETS.sprout.speed).toBeGreaterThan(Math.max(...PET_TYPES.filter((p) => p !== 'sprout').map((p) => PETS[p].speed)));
+    expect(PETS.sprout.hp).toBeLessThan(PETS.buzzy.hp);
+    expect(PETS.sprout.dmg).toBeLessThan(PETS.buzzy.dmg);
+    expect(PETS.buzzy.reach).toBeGreaterThanOrEqual(80);
     expect(nextPet('sprout')).toBe('buzzy');
     expect(nextPet('boulder')).toBeNull();
     expect(PET_TYPES.map((p) => tierOf(rungOf(p)))).toEqual([1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7]);
@@ -297,7 +304,7 @@ describe('cells', () => {
     valid(inv);
     expect(inv.spotFor(inv.add('helmet', 1) ?? s.pieces[0])).not.toBeNull();
   });
-  it('cash cells cost more each time; stage and knock-out cells open when earned', () => {
+  it('cash cells cost more each time; level and knock-out cells open when earned', () => {
     const s = newSave();
     s.cash = 0;
     expect(unlockCell(s, 0, 1)).toMatchObject({ ok: false, reason: 'Not enough cash' });
@@ -308,13 +315,22 @@ describe('cells', () => {
     expect(isOpen(s, 0, 1)).toBe(true);
     expect(unlockCell(s, 0, 1).ok).toBe(false);
     expect(s.cash).toBe(1000 - CELL_PRICE.cost);
-    expect(unlockCell(s, 1, 0)).toMatchObject({ ok: false, reason: 'Opens at stage 2' });
+    const lv = CELL_LOCKS['1,0'];
+    expect(lv.kind).toBe('level');
+    const need = lv.kind === 'level' ? lv.level : 0;
+    expect(unlockCell(s, 1, 0)).toMatchObject({ ok: false, reason: `Opens at level ${need}` });
+    expect(cellProgress(s, 1, 0)).toMatchObject({ lock: { kind: 'level' }, have: 1, need });
     expect(cellProgress(s, 1, 4)).toMatchObject({ lock: { kind: 'ko', count: 30 }, have: 0, need: 30 });
-    s.stage = 3;
+    s.level = need;
     s.kos = 30;
     const opened = openEarned(s).map((c) => `${c.col},${c.row}`).sort();
-    expect(opened).toEqual(['1,0', '1,4', '2,0']);
+    expect(opened).toEqual(['1,0', '1,4']);
     expect(openEarned(s)).toEqual([]);
+    // every level cell opens by the level it names, in order across the top row
+    const levels = Object.values(CELL_LOCKS).flatMap((l) => (l.kind === 'level' ? [l.level] : []));
+    expect(levels.length).toBe(5);
+    s.level = Math.max(...levels);
+    expect(openEarned(s).length).toBe(4);
   });
 });
 
@@ -352,7 +368,7 @@ describe('trash and auto-place', () => {
 });
 
 describe('cases', () => {
-  it('the first CASEs are the scripted ones and teach Sprout + Sprout -> x2', () => {
+  it('the first CASEs are the scripted ones and teach Chick + Chick -> x2', () => {
     const s = newSave();
     expect(s.cash).toBe(ECON.startCash);
     // the guide first puts the starter kit on the grid, so the tray has room for the cases
@@ -418,15 +434,16 @@ describe('cases', () => {
     }
     expect(fresh).toBe(ownedRungs(t).length - 1);
   });
-  it('the odds improve with the stage; an ELITE is never E-class and never a Sprout', () => {
+  it('the odds improve with the level; an ELITE is never E-class and never a Chick', () => {
     const mean = (o: number[]) => o.reduce((a, p, i) => a + p * (i + 1), 0) / 100;
     expect(mean(petOdds(homeRung(1)))).toBeLessThan(mean(petOdds(homeRung(5))));
     expect(mean(petOdds(homeRung(5)))).toBeLessThan(mean(petOdds(homeRung(12))));
     expect(classOdds(1)[0]).toBeGreaterThan(classOdds(10)[0]);
     expect(classOdds(4, true)[0]).toBe(0);
     expect(classOdds(4, true).reduce((a, b) => a + b, 0)).toBeCloseTo(100, 6);
-    expect(caseOdds({ stage: 3 }, 'elite').rungs[0]).toBe(0);
-    expect(mean(caseOdds({ stage: 3 }, 'elite').rungs)).toBeGreaterThan(mean(caseOdds({ stage: 3 }, 'case').rungs));
+    expect(caseOdds({ level: 5 }, 'elite').rungs[0]).toBe(0);
+    expect(mean(caseOdds({ level: 5 }, 'elite').rungs)).toBeGreaterThan(mean(caseOdds({ level: 5 }, 'case').rungs));
+    expect(mean(caseOdds({ level: 30 }, 'case').rungs)).toBeGreaterThan(mean(caseOdds({ level: 1 }, 'case').rungs));
     const s = empty({ cash: 0, gems: 1e9 });
     for (let i = 0; i < 300; i++) {
       const r = openCase(s, 'elite', makeRng(i))!;
@@ -449,153 +466,285 @@ describe('cases', () => {
   });
 });
 
-describe('waves', () => {
-  it('recommended power rises through a stage, peaks at the boss, and keeps rising stage by stage', () => {
-    for (let stage = 1; stage <= 15; stage++) {
-      for (let w = 2; w <= WAVES; w++) expect(recommendedPower(stage, w)).toBeGreaterThanOrEqual(recommendedPower(stage, w - 1));
-      expect(recommendedPower(stage + 1, 1)).toBeGreaterThan(recommendedPower(stage, 1));
-      // a new stage opens below the boss it follows (stage 1 is the starter's ramp: its boss is gentler)
-      if (stage >= 2) expect(recommendedPower(stage + 1, 1)).toBeLessThan(recommendedPower(stage, WAVES));
-    }
-    expect(recommendedPower(1, 1)).toBeLessThan(20);
+/** a player's army of about this POWER over about this many fighters, from the cast */
+const playerArmy = (seed: number, power: number, fighters: number): ArmySpec => {
+  const r = makeRng(seed);
+  return { squads: buildArmy(power, fighters, r, 8).map((q, i) => ({ ...q, key: i + 1 })) };
+};
+const fighters = (a: ArmySpec) => a.squads.reduce((n, q) => n + q.count, 0);
+const meanRung = (a: ArmySpec) => a.squads.reduce((n, q) => n + rungOf(q.pet) * q.count, 0) / Math.max(1, fighters(a));
+/** a save in the middle of the game: past the first fights, no streak */
+const mid = (extra: Partial<SaveState> = {}): SaveState => ({ ...newSave(), matches: 11, ...extra });
+
+describe('matchmaking', () => {
+  it('difficulty: gentle for the first fights, eases after losses, a little harder on a win streak, never below the floor', () => {
+    expect(difficulty({ matches: 0, streak: 0, slump: 0 })).toBe(MATCH.intro[0]);
+    for (let n = 1; n < MATCH.intro.length; n++) expect(MATCH.intro[n]).toBeGreaterThan(MATCH.intro[n - 1]);
+    const base = difficulty({ matches: 20, streak: 0, slump: 0 });
+    expect(base).toBe(MATCH.base);
+    expect(base).toBeLessThan(1);
+    expect(difficulty({ matches: 20, streak: 0, slump: 2 })).toBeCloseTo(base - 2 * MATCH.slump, 9);
+    expect(difficulty({ matches: 20, streak: 0, slump: 99 })).toBeGreaterThanOrEqual(MATCH.floor);
+    expect(difficulty({ matches: 20, streak: 1, slump: 0 })).toBe(base);
+    expect(difficulty({ matches: 20, streak: 3, slump: 0 })).toBeCloseTo(base + 2 * MATCH.hot, 9);
+    expect(difficulty({ matches: 20, streak: 99, slump: 0 })).toBeCloseTo(base + MATCH.hotMax * MATCH.hot, 9);
+    expect(difficulty({ matches: 20, streak: 99, slump: 0 })).toBeLessThanOrEqual(1);
   });
-  it('the enemy army: about share x recommended POWER, more fighters and higher rungs later, the same for the same seed', () => {
-    let lastTop = 0;
-    for (let stage = 1; stage <= 12; stage++) {
-      const w = enemyArmy(stage, 5, 77);
-      expect(w).toEqual(enemyArmy(stage, 5, 77));
-      const p = armyPower(w.squads);
-      expect(Math.abs(p / (recommendedPower(stage, 5) * ENEMY.share) - 1)).toBeLessThan(ENEMY.tolerance + 0.02);
-      expect(w.squads.every((q) => !q.boss && [1, 2, 4].includes(q.count))).toBe(true);
-      expect(w.squads.length).toBeLessThanOrEqual(ENEMY.maxSquads);
-      const top = Math.max(...w.squads.map((q) => rungOf(q.pet)));
-      expect(top).toBeGreaterThanOrEqual(lastTop - 1);
-      lastTop = Math.max(lastTop, top);
+
+  it('the opponent: a BOT with a name, about your POWER x difficulty, a similar count, units near your rungs; the same for the same seed', () => {
+    const r = makeRng(5);
+    for (let i = 0; i < 40; i++) {
+      const n = r.int(1, 14);
+      const mine = playerArmy(100 + i, 30 * 2 ** r.range(0, 10), n);
+      const s = mid({ matches: 10 + r.int(1, 3) * 1 + (i % 4), seed: 1000 + i });
+      if (isChampionMatch(s.matches + 1)) s.matches++;
+      const o = findOpponent(s, 77 + i, mine);
+      expect(o.bot).toBe(true);
+      expect(o.name.length).toBeGreaterThan(3);
+      expect(o.champion).toBe(false);
+      expect(o.match).toBe(s.matches + 1);
+      expect(o).toEqual(findOpponent(s, 77 + i, mine));
+      expect(o.power).toBe(armyPower(o.army.squads));
+      expect(o.fighters).toBe(fighters(o.army));
+      expect(o.difficulty).toBe(difficulty(s));
+      const target = armyPower(mine.squads) * o.difficulty;
+      expect(Math.abs(o.power / target - 1), `${o.theme.id} ${o.power} vs ${target}`).toBeLessThan(MATCH.tolerance * 2 + 0.02);
+      expect(o.fighters).toBeLessThanOrEqual(MATCH.maxFighters);
+      expect(o.fighters).toBeGreaterThanOrEqual(Math.max(1, Math.floor(fighters(mine) * 0.4)));
+      expect(o.fighters).toBeLessThanOrEqual(Math.max(fighters(mine) * 2 + 1, 2));
+      expect(Math.abs(meanRung(o.army) - meanRung(mine)), o.theme.id).toBeLessThan(2.6);
+      expect(o.army.squads.every((q) => !q.boss && [1, 2, 4].includes(q.count) && q.key === 0)).toBe(true);
+      expect(o.army.squads.length).toBeLessThanOrEqual(MATCH.maxSquads);
+      expect(o.theme.name).toBe(THEMES[o.theme.id].name);
     }
-    expect(lastTop).toBeGreaterThanOrEqual(5);
-    expect(waveFighters(1, 1)).toBe(1);
-    expect(waveFighters(8, 9)).toBeGreaterThan(waveFighters(2, 9));
-    // armies differ from seed to seed
-    const kinds = new Set<string>();
-    for (let seed = 0; seed < 20; seed++) kinds.add(enemyArmy(6, 4, seed).squads.map((q) => q.pet + q.count + q.weapon).join());
-    expect(kinds.size).toBeGreaterThan(10);
+    // the seed changes who you meet
+    const mine = playerArmy(3, 400, 6);
+    const names = new Set<string>();
+    const armies = new Set<string>();
+    for (let k = 0; k < 20; k++) {
+      const o = findOpponent(mid(), k, mine);
+      names.add(o.name);
+      armies.add(JSON.stringify(o.army));
+    }
+    expect(names.size).toBeGreaterThan(12);
+    expect(armies.size).toBeGreaterThan(15);
+    // by default it reads the save's own grid and its own seed
+    const s = mid();
+    const inv = new Inventory(s);
+    autoArrange(inv);
+    expect(findOpponent(s)).toEqual(findOpponent(s, matchSeed(s), inv.army()));
+    expect(fightSeed(s)).not.toBe(fightSeed({ ...s, matches: s.matches + 1 }));
   });
-  it('wave 10 has one boss, a rung above its escort, worth its share of the POWER', () => {
-    for (let stage = 1; stage <= 12; stage++) {
-      const info = waveInfo(stage, WAVES, 5);
-      expect(info.boss).toBe(true);
-      const bosses = info.army.squads.filter((q) => q.boss);
+
+  it('themes: all of them come up; a mirror is your lineup; glass cannons wear no helmet; tanks carry shields; a swarm is more, heavies fewer', () => {
+    const seen = new Map<ThemeId, number>();
+    for (let k = 0; k < 400; k++) {
+      const mine = playerArmy(k, 200 + 37 * k, 2 + (k % 9));
+      const o = findOpponent(mid({ seed: k + 9 }), k, mine);
+      seen.set(o.theme.id, (seen.get(o.theme.id) ?? 0) + 1);
+      const q = o.army.squads;
+      if (o.theme.id === 'mirror') {
+        expect(q.map((x) => [x.pet, x.count])).toEqual(mine.squads.map((x) => [x.pet, x.count]));
+      } else if (o.theme.id === 'glass') {
+        expect(q.every((x) => x.helmet === 0 && x.weapon !== 'shield' && x.weapon !== null)).toBe(true);
+      } else if (o.theme.id === 'tanks') {
+        expect(q.every((x) => x.chili === 0 && x.weapon === 'shield')).toBe(true);
+        expect(q.some((x) => x.weapon === 'shield')).toBe(true);
+      } else if (o.theme.id === 'swarm') {
+        expect(o.fighters).toBeGreaterThan(fighters(mine));
+      } else if (o.theme.id === 'heavy') {
+        expect(o.fighters).toBeLessThan(fighters(mine));
+      }
+    }
+    for (const t of ['mixed', 'swarm', 'heavy', 'glass', 'tanks', 'mirror'] as ThemeId[]) expect(seen.get(t) ?? 0, t).toBeGreaterThan(15);
+    expect(seen.get('champion') ?? 0).toBe(0);
+  });
+
+  it('every 5th match is a CHAMPION match: one crowned boss a rung above its crew, a tougher team, a champion name', () => {
+    expect([1, 2, 3, 4, 5, 6, 9, 10, 15].map(isChampionMatch)).toEqual([false, false, false, false, true, false, false, true, true]);
+    expect(nextIsChampion({ matches: 4 })).toBe(true);
+    expect(nextIsChampion({ matches: 5 })).toBe(false);
+    expect([0, 1, 3, 4, 5].map((m) => matchesToChampion({ matches: m }))).toEqual([4, 3, 1, 0, 4]);
+    for (let i = 0; i < 30; i++) {
+      const mine = playerArmy(50 + i, 150 * 2 ** (i / 3), 1 + (i % 12));
+      const s = mid({ matches: 4 + 5 * (i % 6), seed: 300 + i });
+      const o = findOpponent(s, i, mine);
+      expect(o.champion).toBe(true);
+      expect(o.theme.id).toBe('champion');
+      const bosses = o.army.squads.filter((q) => q.boss);
       expect(bosses).toHaveLength(1);
       expect(bosses[0].count).toBe(1);
-      const escort = info.army.squads.filter((q) => !q.boss);
-      if (escort.length) expect(rungOf(bosses[0].pet)).toBeGreaterThan(Math.max(...escort.map((q) => rungOf(q.pet))));
-      expect(rungOf(bosses[0].pet)).toBeGreaterThanOrEqual(2);
-      expect(Math.abs(info.power / (info.recommended * ENEMY.bossShare) - 1)).toBeLessThan(0.15);
-      expect(info.fighters).toBe(info.army.squads.reduce((a, q) => a + q.count, 0));
-      // the boss is the same unit whatever the seed and tries
-      expect(enemyArmy(stage, WAVES, 99, 3).squads.find((q) => q.boss)!.pet).toBe(bosses[0].pet);
+      const crew = o.army.squads.filter((q) => !q.boss);
+      if (crew.length) expect(rungOf(bosses[0].pet)).toBeGreaterThan(Math.max(...crew.map((q) => rungOf(q.pet))));
+      expect(o.difficulty).toBeCloseTo(difficulty(s) * CHAMPION.power, 9);
+      expect(championFactor(s)).toBe(CHAMPION.power);
+      expect(Math.abs(o.power / (armyPower(mine.squads) * o.difficulty) - 1)).toBeLessThan(0.2);
+      expect(o.fighters).toBeLessThanOrEqual(Math.max(fighters(mine) + 2, 2 * fighters(mine)));
     }
+    // a slump softens the champion too
+    expect(championFactor({ slump: 1 })).toBeLessThan(CHAMPION.power);
+    expect(championFactor({ slump: MATCH.easeAfter })).toBe(1);
+    // a tiny army meets a lone crowned Chick at worst
+    const tiny = findOpponent(mid({ matches: 4 }), 1, playerArmy(1, 40, 2));
+    expect(tiny.army.squads.filter((q) => q.boss)).toHaveLength(1);
+    expect(tiny.power).toBeLessThan(squadPower(spec('sprout', 1, { boss: true })) * 1.05);
   });
-  it('a retry rolls a new, softer army (mercy) of the same wave', () => {
-    const p0 = armyPower(enemyArmy(4, 6, 3, 0).squads);
-    const p3 = armyPower(enemyArmy(4, 6, 3, 3).squads);
-    expect(p3 / p0).toBeLessThan(1 - ENEMY.mercy * 2);
-    const s = newSave();
-    s.stage = 4;
-    s.wave = 6;
-    expect(nextWave(s).army).toEqual(enemyArmy(4, 6, s.seed, 0));
-    s.tries = 2;
-    expect(nextWave(s).army).toEqual(enemyArmy(4, 6, s.seed, 2));
-    expect(fightSeed(s)).not.toBe(fightSeed({ ...s, fights: 1 }));
-  });
-  it('the first waves are easy for the starter army (Sprout, knife, helmet), and with the guide\'s first cases', () => {
-    for (const seed of [1, 2, 3, 4]) {
+
+  it('the first fights are easy for the starter army (Chick, knife, helmet), and with the guide\'s first cases', () => {
+    for (const seed of [1, 2, 3, 4, 5, 6]) {
       const s = newSave(seed);
       const inv = new Inventory(s);
       autoArrange(inv);
       expect(inv.squads()).toHaveLength(1);
       expect(inv.squads()[0]).toMatchObject({ pet: 'sprout', weapon: 'knife', helmet: 1 });
-      const wins = (wave: number) => {
-        const enemy = enemyArmy(1, wave, s.seed);
-        expect(enemy.squads.every((q) => q.weapon === null || q.weapon === 'knife')).toBe(true);
+      const wins = (o: ReturnType<typeof findOpponent>) => {
+        expect(o.army.squads.every((q) => q.weapon === null || q.weapon === 'knife')).toBe(true);
         let n = 0;
-        for (let k = 0; k < 12; k++) if (runBattle([inv.army(), enemy], k).winner === 0) n++;
+        for (let k = 0; k < 12; k++) if (runBattle([inv.army(), o.army], k).winner === 0) n++;
         return n;
       };
-      for (const wave of [1, 2]) {
-        expect(inv.power()).toBeGreaterThan(armyPower(enemyArmy(1, wave, s.seed).squads) * 1.25);
-        expect(wins(wave)).toBeGreaterThanOrEqual(11);
-      }
-      // the three scripted cases (Sprout, chili, Sprout), AUTO: waves 1 to 3 are easy
+      const first = findOpponent(s);
+      expect(first.theme.id).toBe('mixed');
+      expect(inv.power()).toBeGreaterThan(first.power * 1.25);
+      expect(wins(first)).toBeGreaterThanOrEqual(11);
+      // the three scripted cases (Chick, chili, Chick), AUTO: the next fights are easy too
       for (let i = 0; i < 3; i++) openCase(s, 'case');
       autoArrange(inv);
-      for (const wave of [1, 2, 3]) expect(wins(wave)).toBe(12);
+      for (const m of [1, 2]) expect(wins(findOpponent({ ...s, matches: m }))).toBeGreaterThanOrEqual(11);
     }
   });
 });
 
-const sum = (winner: 0 | 1 | -1, alive0: number, size0: number, dead1: number, size1: number, bossKo = 0): SimSummary => ({
+const sum = (winner: 0 | 1 | -1, alive0: number, size0: number, dead1: number, size1: number, bossKo = 0, kos: number[] = [], dealt: number[] = []): SimSummary => ({
   winner, byTime: false, time: 20, kills: [dead1, size0 - alive0], size: [size0, size1], alive: [alive0, size1 - dead1], hpLeft: [0.5, 0], bossKos: [bossKo, 0],
+  kos, dealt, crits: [0, 0],
 });
+const outcome = (won: boolean, kos: number, o: Partial<MatchOutcome> = {}): MatchOutcome => ({ won, kos, boss: false, survived: won ? 1 : 0, ...o });
 
-describe('progress', () => {
-  it('outcomeOf reads a fight', () => {
+describe('rewards and the level', () => {
+  it('outcomeOf reads a fight, and with your army what each squad did; the MVP has the most knock-outs', () => {
     expect(outcomeOf(sum(0, 3, 4, 5, 5, 1))).toEqual({ won: true, kos: 5, boss: true, survived: 0.75 });
     expect(outcomeOf(sum(1, 0, 4, 2, 5))).toEqual({ won: false, kos: 2, boss: false, survived: 0 });
+    const mine: ArmySpec = { squads: [spec('roo', 1, { key: 7 }), spec('sprout', 2, { key: 3 }), spec('buzzy', 1, { key: 9 })] };
+    const o = outcomeOf(sum(0, 4, 4, 5, 5, 0, [1, 0, 2, 2, 0, 0, 0, 0, 0], [50, 10, 20, 30, 5]), mine);
+    expect(o.squads).toEqual([
+      { key: 7, pet: 'roo', kos: 1, dmg: 50 },
+      { key: 3, pet: 'sprout', kos: 2, dmg: 30 },
+      { key: 9, pet: 'buzzy', kos: 2, dmg: 30 },
+    ]);
+    expect(mvpOf(o.squads)).toEqual({ key: 3, pet: 'sprout', kos: 2, dmg: 30 });
+    expect(mvpOf([{ key: 1, pet: 'roo', kos: 0, dmg: 0 }])).toBeNull();
+    expect(mvpOf(undefined)).toBeNull();
+    // a real fight: the KOs of your squads add up to the enemy fighters knocked out
+    const army: ArmySpec = { squads: [spec('roo', 2, { key: 1 }), spec('buzzy', 2, { key: 2 })] };
+    const s = runBattle([army, { squads: [spec('sprout', 4), spec('ninja', 1)] }], 3);
+    const real = outcomeOf(s, army);
+    expect(real.squads!.reduce((a, q) => a + q.kos, 0)).toBe(s.kills[0]);
   });
-  it('a win pays knock-outs and the clear bonus and moves on; a loss pays knock-outs and keeps the wave', () => {
+
+  it('a win pays its base, the knock-outs and the streak bonus, XP and sometimes gems; a loss a little cash and XP, nothing taken', () => {
     const s = newSave();
     s.cash = 0;
-    const r = applyWave(s, { won: true, kos: 3, boss: false, survived: 1 });
-    expect(r).toMatchObject({ won: true, stage: 1, wave: 1, koCash: 3 * koCash(1), clearCash: clearCash(1, 1), stageClear: false, stars: 0, gems: 0, next: { stage: 1, wave: 2 } });
-    expect(s.cash).toBe(r.cash);
-    expect(s.wave).toBe(2);
-    const before = { ...s, pieces: [...s.pieces] };
-    const l = applyWave(s, { won: false, kos: 1, boss: false, survived: 0 });
-    expect(l).toMatchObject({ won: false, clearCash: 0, koCash: koCash(1), next: { stage: 1, wave: 2 } });
-    expect(s.wave).toBe(2);
-    expect(s.tries).toBe(1);
-    expect(s.pieces).toEqual(before.pieces);
-    expect(s.kos).toBe(4);
-    expect(s.fights).toBe(2);
-    expect(s.wins).toBe(1);
-    applyWave(s, { won: true, kos: 0, boss: false, survived: 1 });
-    expect(s.tries).toBe(0);
-  });
-  it('winning wave 10 clears the stage: stars by survivors, gems, the next stage, earned cells open', () => {
-    const s = newSave();
-    s.wave = WAVES;
     s.gems = 0;
-    const r = applyWave(s, { won: true, kos: 4, boss: true, survived: 0.5 });
-    expect(r).toMatchObject({ stageClear: true, stars: 2, gems: stageGems(1, 2), next: { stage: 2, wave: 1 } });
-    expect(r.koCash).toBe(koCash(1) * (4 - 1 + ECON.bossKo));
-    expect(s.gems).toBe(stageGems(1, 2));
-    expect(s.stars).toEqual([2]);
-    expect(r.cells).toEqual([{ col: 1, row: 0 }]);
-    expect(isOpen(s, 1, 0)).toBe(true);
-    // replaying a stage never lowers its stars
-    s.stage = 1;
-    s.wave = WAVES;
-    applyWave(s, { won: true, kos: 4, boss: true, survived: 0.1 });
-    expect(s.stars).toEqual([2]);
-    s.wave = WAVES;
-    expect(applyWave(s, { won: true, kos: 4, boss: true, survived: 1 }).stars).toBe(3);
-    expect(s.stars[1]).toBe(3);
+    const pieces = JSON.stringify(s.pieces);
+    const r = applyMatch(s, outcome(true, 3));
+    expect(r).toMatchObject({ won: true, champion: false, match: 1, baseCash: winCash(1), koCash: 3 * koCash(1), streakCash: 0, streak: 1, levelUp: null, mvp: null });
+    expect(r.cash).toBe(winCash(1) + 3 * koCash(1));
+    expect(r.xp).toBe(REWARD.xpWin + 3 * REWARD.xpKo);
+    expect(s).toMatchObject({ cash: r.cash, gems: r.gems, matches: 1, wins: 1, streak: 1, slump: 0, kos: 3, xp: r.xp, level: 1 });
+    const r2 = applyMatch(s, outcome(true, 0));
+    expect(r2.streak).toBe(2);
+    expect(r2.streakCash).toBe(streakCash(1, 2));
+    expect(r2.streakCash).toBeGreaterThan(0);
+    const cash = s.cash;
+    const lv = s.level;
+    const l = applyMatch(s, outcome(false, 1));
+    expect(l).toMatchObject({ won: false, baseCash: lossCash(lv), koCash: koCash(lv), streakCash: 0, gems: 0, streak: 0 });
+    expect(l.xp).toBe(REWARD.xpLoss + REWARD.xpKo);
+    expect(lossCash(1)).toBeLessThan(winCash(1));
+    expect(s.cash).toBe(cash + l.cash);
+    expect(s).toMatchObject({ matches: 3, wins: 2, streak: 0, slump: 1, bestStreak: 2 });
+    expect(JSON.stringify(s.pieces)).toBe(pieces);
+    // gems now and then on a win, never on a loss; the same save and match always give the same
+    let gemWins = 0;
+    for (let seed = 0; seed < 200; seed++) {
+      const t = { ...newSave(), seed: seed + 1, matches: 10 };
+      const g = applyMatch(t, outcome(true, 2)).gems;
+      expect(g).toBe(applyMatch({ ...newSave(), seed: seed + 1, matches: 10 }, outcome(true, 2)).gems);
+      if (g > 0) gemWins++;
+      expect(g === 0 || (g >= REWARD.gems[0] && g <= REWARD.gems[1])).toBe(true);
+      expect(applyMatch({ ...newSave(), seed: seed + 1, matches: 10 }, outcome(false, 2)).gems).toBe(0);
+    }
+    expect(gemWins / 200).toBeGreaterThan(REWARD.gemChance - 0.1);
+    expect(gemWins / 200).toBeLessThan(REWARD.gemChance + 0.1);
+    // rewards grow with the level
+    expect(winCash(10)).toBeGreaterThan(winCash(1));
+    expect(koCash(10)).toBeGreaterThan(koCash(1));
   });
-  it('a lost boss wave keeps the stage and wave', () => {
+
+  it('a champion win pays double and always gems; a champion loss pays like any loss', () => {
+    const s = { ...newSave(), matches: 4, level: 6, gems: 0 };
+    const r = applyMatch(s, outcome(true, 4, { boss: true }));
+    expect(r.champion).toBe(true);
+    expect(r.gems).toBe(champGems(6));
+    expect(r.cash).toBe(CHAMPION.rewards * (winCash(6) + koCash(6) * (4 - 1 + REWARD.bossKo)));
+    expect(r.xp).toBe(CHAMPION.rewards * (REWARD.xpWin + 4 * REWARD.xpKo));
+    expect(s.champs).toBe(1);
+    const t = { ...newSave(), matches: 9, level: 6 };
+    const l = applyMatch(t, outcome(false, 2));
+    expect(l).toMatchObject({ champion: true, won: false, gems: 0, cash: lossCash(6) + 2 * koCash(6) });
+    expect(t.champs).toBe(0);
+    expect(applyMatch({ ...newSave(), matches: 1 }, outcome(true, 0, { champion: true })).champion).toBe(true);
+  });
+
+  it('the level: a gentle XP curve, level-ups (more than one at once), cells that open by level, the XP bar', () => {
+    for (let l = 2; l < 40; l++) {
+      expect(xpToNext(l)).toBeGreaterThan(xpToNext(l - 1));
+      expect(xpToNext(l) / xpToNext(l - 1)).toBeLessThan(1.6);
+      expect(xpForLevel(l + 1) - xpForLevel(l)).toBe(xpToNext(l));
+    }
+    // a win or two for level 2; level 10 after a few dozen matches
+    expect(xpToNext(1)).toBeLessThanOrEqual(2 * REWARD.xpWin + 10);
+    const winsTo10 = xpForLevel(10) / (REWARD.xpWin + 4 * REWARD.xpKo);
+    expect(winsTo10).toBeGreaterThan(20);
+    expect(winsTo10).toBeLessThan(80);
     const s = newSave();
-    s.wave = WAVES;
-    const r = applyWave(s, { won: false, kos: 2, boss: false, survived: 0 } satisfies WaveOutcome);
-    expect(r).toMatchObject({ stageClear: false, gems: 0, next: { stage: 1, wave: WAVES } });
+    const lv = CELL_LOCKS['1,0'].kind === 'level' ? (CELL_LOCKS['1,0'] as { level: number }).level : 3;
+    s.xp = xpToNext(1) - 1;
+    expect(levelProgress(s)).toEqual({ level: 1, xp: xpToNext(1) - 1, need: xpToNext(1), share: (xpToNext(1) - 1) / xpToNext(1) });
+    const before = s.xp;
+    const r = applyMatch(s, outcome(true, 0));
+    expect(r.from).toEqual({ level: 1, xp: before, need: xpToNext(1) });
+    expect(r.levelUp).toBe(2);
+    expect(r.to).toEqual({ level: 2, xp: before + r.xp - xpToNext(1), need: xpToNext(2) });
+    expect(s.level).toBe(2);
+    // a big pile of XP climbs several levels, and the level cells open on the way
+    expect(addXp(s, xpForLevel(lv) - xpForLevel(2))).toBe(lv - 2);
+    expect(s.level).toBe(lv);
+    expect(applyMatch(s, outcome(false, 0)).cells).toContainEqual({ col: 1, row: 0 });
+    expect(isOpen(s, 1, 0)).toBe(true);
+    const top = { ...newSave(), level: LEVEL.max };
+    addXp(top, 1e9);
+    expect(top.level).toBe(LEVEL.max);
+    expect(levelProgress(top).share).toBe(1);
+  });
+
+  it('knock-outs add up and open the knock-out cells', () => {
+    const s = newSave();
+    let opened: { col: number; row: number }[] = [];
+    for (let i = 0; i < 6; i++) opened = opened.concat(applyMatch(s, outcome(true, 5)).cells);
+    expect(s.kos).toBe(30);
+    expect(opened).toContainEqual({ col: 1, row: 4 });
   });
 });
 
 describe('save', () => {
-  it('new save: version 4, stage 1 wave 1, the starter kit on the tray, cash for the first cases', () => {
+  it('new save: version 5, level 1, no matches, the starter kit on the tray, cash for the first cases', () => {
     const s = newSave();
-    expect(s.version).toBe(4);
-    expect(SAVE_VERSION).toBe(4);
-    expect(s).toMatchObject({ stage: 1, wave: 1, tries: 0, stars: [], cases: 0, elites: 0, kos: 0, cellBuys: 0, open: START_OPEN, auto: false, tutorial: 0 });
+    expect(s.version).toBe(5);
+    expect(SAVE_VERSION).toBe(5);
+    expect(s).toMatchObject({ level: 1, xp: 0, streak: 0, slump: 0, bestStreak: 0, matches: 0, wins: 0, champs: 0, cases: 0, elites: 0, kos: 0, cellBuys: 0, open: START_OPEN, auto: false, tutorial: 0 });
+    for (const gone of ['stage', 'wave', 'tries', 'stars', 'fights']) expect(gone in s).toBe(false);
     expect(s.pieces.map((p) => ({ type: p.type, level: p.level }))).toEqual(STARTER_KIT);
     expect(s.pieces.every((p) => p.slot >= 0 && p.slot < BENCH_SLOTS)).toBe(true);
     expect(isOwned(s, 'sprout')).toBe(true);
@@ -608,24 +757,62 @@ describe('save', () => {
     expect(load().pieces.length).toBe(3);
     expect(save(newSave())).toBe(false);
   });
-  it('any older version (the trophy saves) is replaced by a fresh start', () => {
+  it('a version 1 to 3 save is replaced by a fresh start', () => {
     for (const v of [1, 2, 3]) {
       const old = { version: v, trophies: 640, rolls: 9, pieces: [{ id: 1, type: 'ant', level: 5, count: 4, col: 0, row: 0, slot: -1 }] };
       expect(repair(JSON.parse(JSON.stringify(old)))).toEqual(newSave());
       expect(replacedOldSave(old)).toBe(true);
+      expect(migratedOldSave(old)).toBe(false);
     }
     expect(replacedOldSave(newSave())).toBe(false);
+    expect(replacedOldSave({ version: MIGRATES_FROM })).toBe(false);
     expect(replacedOldSave(null)).toBe(false);
   });
-  it('round trips and repairs a damaged version 4 save', () => {
+  it('a version 4 save is migrated: pieces, cash, gems, cells, units, knock-outs, cases and the guide kept; its stage gives the level', () => {
+    const v4 = {
+      version: 4, cash: 345, gems: 21, stage: 4, wave: 7, tries: 2, stars: [3, 2, 1], cases: 31, elites: 4, pity: 9, rolled: 35,
+      open: START_OPEN | cellBit(1, 0) | cellBit(0, 1), cellBuys: 1, kos: 140, owned: 0b10111, evolves: 2, auto: true, tutorial: 99, tips: 6,
+      fights: 40, wins: 33, seed: 4242,
+      pieces: [
+        { id: 4, type: 'roo', level: 1, count: 2, col: 1, row: 1, slot: -1 },
+        { id: 9, type: 'knife', level: 3, count: 1, col: 1, row: 2, slot: -1 },
+        { id: 12, type: 'buzzy', level: 1, count: 1, col: -1, row: -1, slot: 2 },
+      ],
+      nextId: 13,
+    };
+    expect(migratedOldSave(v4)).toBe(true);
+    const s = repair(JSON.parse(JSON.stringify(v4)));
+    expect(s.version).toBe(5);
+    expect(s).toMatchObject({
+      cash: 345, gems: 21, cases: 31, elites: 4, pity: 9, rolled: 35, open: v4.open, cellBuys: 1, kos: 140, evolves: 2, auto: true, tutorial: 99,
+      tips: 6, seed: 4242, nextId: 13, level: levelForStage(4), xp: 0, matches: 40, wins: 33, streak: 0, slump: 0, champs: 0,
+    });
+    expect(s.pieces).toEqual(v4.pieces);
+    expect(isOwned(s, 'roo') && isOwned(s, 'buzzy') && isOwned(s, 'ninja')).toBe(true);
+    expect(isOwned(s, 'snailor')).toBe(false);
+    for (const gone of ['stage', 'wave', 'tries', 'stars', 'fights']) expect(gone in s).toBe(false);
+    // the stage maps to a level that keeps climbing, from level 1 at stage 1
+    expect(levelForStage(1)).toBe(1);
+    for (let st = 2; st < 20; st++) expect(levelForStage(st)).toBeGreaterThan(levelForStage(st - 1));
+    // a migrated save plays on: its next opponent is found and its match books
+    const o = findOpponent(s);
+    expect(o.power).toBeGreaterThan(0);
+    applyMatch(s, outcome(true, 2));
+    expect(repair(JSON.parse(JSON.stringify(s)))).toEqual(s);
+  });
+  it('round trips and repairs a damaged version 5 save', () => {
     const mem: Record<string, string> = {};
     (globalThis as Record<string, unknown>).localStorage = { getItem: (k: string) => mem[k] ?? null, setItem: (k: string, v: string) => (mem[k] = v) };
     try {
       const s = newSave();
       s.cash = 123;
-      s.stage = 3;
-      s.wave = 4;
-      s.stars = [3, 1];
+      s.level = 7;
+      s.xp = 30;
+      s.matches = 20;
+      s.wins = 14;
+      s.streak = 3;
+      s.bestStreak = 5;
+      s.champs = 2;
       s.auto = true;
       s.open |= cellBit(0, 1);
       new Inventory(s).place(s.pieces[0], { col: 1, row: 1 });
@@ -636,7 +823,7 @@ describe('save', () => {
       mem['zoopvp-save'] = '{not json';
       expect(load().pieces.length).toBe(3);
       mem['zoopvp-save'] = JSON.stringify({
-        version: 4, cash: -5, gems: 'x', stage: 2, wave: 99, stars: [5, 2, 2], open: 0, owned: 0,
+        version: 5, cash: -5, gems: 'x', level: 0, xp: 1e9, matches: 3, wins: 9, streak: 7, slump: 2, open: 0, owned: 0,
         pieces: [
           { id: 1, type: 'sprout', level: 99, count: 3, col: 1, row: 1, slot: -1 }, // a pair at (1,1)-(2,1)
           { id: 1, type: 'nope' },
@@ -647,7 +834,7 @@ describe('save', () => {
         ],
       });
       const r = load();
-      expect(r).toMatchObject({ cash: 0, gems: 0, stage: 2, wave: WAVES, stars: [3], open: START_OPEN });
+      expect(r).toMatchObject({ cash: 0, gems: 0, level: 1, xp: xpToNext(1), matches: 3, wins: 3, streak: 3, slump: 0, open: START_OPEN });
       expect(r.pieces.length).toBe(3);
       expect(r.pieces[0]).toMatchObject({ type: 'sprout', level: 1, count: 2, col: 1, row: 1 });
       expect(r.pieces[1].slot).toBeGreaterThanOrEqual(0);
@@ -660,7 +847,7 @@ describe('save', () => {
     }
   });
   it('repair handles junk', () => {
-    for (const j of [null, 5, 'x', [], {}, { pieces: 'x' }, { version: 4, pieces: 'x' }]) expect(repair(j).version).toBe(4);
+    for (const j of [null, 5, 'x', [], {}, { pieces: 'x' }, { version: 5, pieces: 'x' }, { version: 4, pieces: 'x' }]) expect(repair(j).version).toBe(5);
   });
 });
 

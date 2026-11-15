@@ -15,12 +15,17 @@ import type { SoundDef, SoundName } from './names';
  * v4 (docs/v4.md): the building blocks now live in kit.ts; the twelve characters' voices and the trait sounds
  * are in cast.ts, the stage / wave / roll / evolve sounds in flow.ts, and all of them join this table. The v3
  * sounds below stay (some are legacy: matchmaking, trophies, leagues).
+ *
+ * v5 (docs/v5.md): the cast's voices are the new weird cast (cast.ts), and fight.ts adds the boxing night:
+ * the bell, READY / FIGHT, punches and crits, the comic impact words, knock-outs and combo calls, the crowd,
+ * the matchmaking stings and the result's count-ups. search, found, fight, victory and defeat now live there.
  */
 
 import { YO_SCALE, crash, m, pad, semi, sparkle, whoosh, type Synth } from './synth';
 import { HOME, along, band, boing, chopper, clack, clamp, click, clink, drip, furin, glory, gong, koto, osc, run, shami, shape, shards, shime, shower, squeak, stab, taiko, thud, thump, wood, yo } from './kit';
 import { CAST_SOUNDS, TRAIT_SOUNDS } from './cast';
 import { FLOW_SOUNDS } from './flow';
+import { FIGHT_SOUNDS } from './fight';
 
 // ------------------------------------------------------------------ the sounds that grow with their number
 
@@ -387,40 +392,7 @@ export const SOUNDS: Record<SoundName, SoundDef> = {
     },
   },
 
-  // ---------------- matchmaking
-  search: {
-    // a drop falling in a water jar, and its echoes
-    dur: 0.95, vol: 0.2, cat: 'ui', verb: 0.6, gap: 0.3, max: 2,
-    make: (s) => {
-      const f = m(yo(8));
-      drip(s, 0, 300, 0.2);
-      for (const [t, v] of [
-        [0, 1],
-        [0.24, 0.35],
-        [0.48, 0.13],
-      ]) {
-        s.tone({ t, f: [[0, f * 1.02], [0.05, f]], a: 0.004, d: 0.4, v: 0.6 * v });
-        s.tone({ t, f: f * 2.005, a: 0.003, d: 0.2, v: 0.18 * v });
-        s.bell({ t, f: f * 3.01, ratio: 1.4, index: 0.4, d: 0.12, v: 0.06 * v });
-      }
-    },
-  },
-  found: {
-    // there you are: two raps on the little drum and a bright rise on the koto
-    dur: 1.1, vol: 0.45, cat: 'ui', verb: 0.4, gap: 0.3,
-    make: (s) => {
-      shime(s, 0, 0.6);
-      shime(s, 0.09, 0.8);
-      const steps = [5, 7, 8, 10];
-      for (const [i, step] of steps.entries()) {
-        koto(s, 0.17 + i * 0.07, yo(step), 0.45, 0.5 + i * 0.07);
-        s.bell({ t: 0.17 + i * 0.07, f: m(yo(step) + 12), ratio: 2, index: 0.8, d: 0.3, v: 0.2 });
-      }
-      taiko(s, 0.38, 100, 0.2, 0.5);
-      furin(s, 0.38, m(yo(15)), 0.6, 0.3);
-      sparkle(s, 0.4, 0.4, 0.3, 4);
-    },
-  },
+  // ---------------- matchmaking (v3; search and found are redesigned for v5 in fight.ts)
   vsSlam: {
     // it flies in and slams: sticks, a great drum, iron ringing, dust
     dur: 1.6, vol: 0.62, cat: 'ui', verb: 0.4, gap: 0.3, duck: 0.45,
@@ -456,18 +428,6 @@ export const SOUNDS: Record<SoundName, SoundDef> = {
       }
     },
   },
-  fight: {
-    // FIGHT! The gong
-    dur: 3.6, vol: 0.62, cat: 'ui', verb: 0.5, gap: 0.5, duck: 0.45,
-    make: (s) => {
-      gong(s, 0, m(HOME - 12), 3.2, 1);
-      taiko(s, 0, 55, 0.6, 0.7);
-      clack(s, 0, 0.5);
-      s.brass({ notes: [HOME - 12, HOME - 5, HOME], cut: [[0, 400], [0.05, 2600], [0.4, 600]], a: 0.01, h: 0.1, d: 0.35, v: 0.3 });
-      crash(s, 0, 1.2, 0.18);
-    },
-  },
-
   // ---------------- the fight: attacks
   deploy: {
     // a squad pops onto the field: bloop, a puff, a little spring
@@ -853,62 +813,7 @@ export const SOUNDS: Record<SoundName, SoundDef> = {
     },
   },
 
-  // ---------------- the result
-  victory: {
-    // a festival fanfare: a yo-scale tune on brass and koto over I, IV, V, then home with everything
-    dur: 4.4, vol: 0.6, cat: 'ui', verb: 0.5, gap: 2, duck: 0.5,
-    make: (s) => {
-      const beat = 0.15;
-      // the tune: D D E G . E G A B | D (held)
-      const tune: [number, number, number][] = [
-        [0, 5, 1],
-        [1, 5, 1],
-        [2, 6, 1],
-        [3, 7, 2],
-        [5, 6, 1],
-        [6, 7, 1],
-        [7, 8, 1],
-        [8, 9, 1],
-      ];
-      for (const [at, step, len] of tune) {
-        const t = at * beat;
-        s.brass({ t, notes: [yo(step)], cut: [[0, 600], [0.04, 3400], [len * beat, 1200]], a: 0.012, h: len * beat * 0.5, d: 0.08, v: 0.4 });
-        koto(s, t, yo(step) + 12, 0.3, 0.3);
-      }
-      // the chords under it, and the drums: don, don, don, ka-don
-      for (const [at, root, len] of [
-        [0, HOME - 12, 3],
-        [3, HOME - 7, 4],
-        [7, HOME - 5, 2],
-      ]) s.brass({ t: at * beat, notes: [root, root + 7, root + 12, root + 16], cut: [[0, 400], [0.06, 1800], [len * beat, 600]], a: 0.02, h: len * beat * 0.7, d: 0.1, v: 0.3 });
-      for (const at of [0, 1, 2, 3, 5, 7]) taiko(s, at * beat, at === 3 ? 62 : 80, 0.22, at === 3 ? 0.8 : 0.55);
-      for (const at of [6, 8, 8.5]) clack(s, at * beat, 0.45);
-      for (let i = 0; i < 4; i++) shime(s, (8 + i * 0.25) * beat, 0.4 + i * 0.12);
-      // home
-      const t = 9 * beat;
-      glory(s, t, 1, 1.1);
-      s.brass({ t, notes: [yo(10)], cut: [[0, 700], [0.06, 3600], [1.4, 1200]], a: 0.015, h: 0.9, d: 0.6, v: 0.36, vib: [5.5, 14] });
-      gong(s, t, m(HOME - 12), 2.4, 0.35);
-      taiko(s, t + 1.2, 52, 0.7, 0.8);
-      clack(s, t + 1.2, 0.5);
-    },
-  },
-  defeat: {
-    // sad but funny: three sagging "wah"s and a long one, a slide whistle sliding off, a last hollow "pok"
-    dur: 3, vol: 0.52, cat: 'ui', verb: 0.35, gap: 2, duck: 0.5,
-    make: (s) => {
-      for (const [i, n] of [HOME + 3, HOME + 2, HOME + 1].entries()) {
-        s.brass({ t: i * 0.36, notes: [n], cut: [[0, 300], [0.08, 1400], [0.3, 450]], a: 0.03, h: 0.17, d: 0.12, v: 0.7 });
-        shami(s, i * 0.36, n - 12, 0.2, 0.4);
-      }
-      const t = 1.08;
-      s.brass({ t, notes: [HOME], cut: [[0, 300], [0.1, 1300], [1.4, 320]], a: 0.04, h: 0.6, d: 0.9, v: 0.7, vib: [5.5, 40] });
-      shami(s, t, HOME - 12, 0.4, 0.4);
-      s.tone({ t: t + 0.25, f: [[0, 1250], [0.9, 260]], a: 0.04, h: 0.5, d: 0.4, v: 0.16, vib: [6, 30] });
-      wood(s, t + 1.3, 330, 0.5, 0.09, 0.8);
-      thud(s, t + 1.3, 110, 0.5);
-    },
-  },
+  // ---------------- the result (v3; victory and defeat are redesigned for v5 in fight.ts)
   trophyUp: {
     dur: (n) => (n >= 32 ? 1.6 : n >= 19 ? 1.3 : 1),
     levels: [10, 28, 34],
@@ -936,4 +841,7 @@ export const SOUNDS: Record<SoundName, SoundDef> = {
   ...CAST_SOUNDS, // the twelve characters' attack, hurt and death voices (cast.ts)
   ...TRAIT_SOUNDS, // the traits (cast.ts)
   ...FLOW_SOUNDS, // stages and waves, cash, cells, the roll, the evolve (flow.ts)
+
+  // ================ v5
+  ...FIGHT_SOUNDS, // the boxing night: bell, READY / FIGHT, punches, crits, impact words, KOs, combo calls, the crowd, matchmaking, the result (fight.ts)
 };

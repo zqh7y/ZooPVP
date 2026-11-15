@@ -1,4 +1,4 @@
-import { ARENA, FIGHT, PETS, TRAIT, unitStats, type LineRow, type UnitStats } from '../data';
+import { ARENA, CRIT, FIGHT, PETS, TRAIT, unitStats, type LineRow, type UnitStats } from '../data';
 import { hashSeed, makeRng, type Rng } from '../rng';
 import type { ArmySpec, PetType, Team, WeaponType } from '../types';
 import type { Battle, Blow, DeathCause, HitEvent, SimEvent, SimSummary, SimUnit } from './types';
@@ -9,19 +9,23 @@ import type { Battle, Blow, DeathCause, HitEvent, SimEvent, SimSummary, SimUnit 
  * are summed before they are applied, and every trait that could depend on the order units are looked at is
  * collected first and applied in one fixed order (see applyHits), so the order never favours a team.
  *
- * The twelve units' traits (docs/pets.md section 3, rung for rung; numbers in TRAIT):
- * - sprout: +10% per other friendly Sprout within 100 px when it strikes (up to +30%)
- * - buzzy: a landed sting poisons for 80% of its damage over 3 s; it flies over its own side (no collisions there)
- * - ninja: 30% of hits aimed at it miss (a seeded hash per attacker, victim, step and hit number)
- * - snailor: once per life below half health it hides for 2.5 s: 85% less damage, no push or stun, regrows 15%
+ * The twelve fighters' traits (ids kept from v4, names from docs/v5.md section 1; numbers in TRAIT):
+ * - sprout (Chick): tiny, quick and fragile; +8% per other friendly Chick within 90 px when it pecks (up to +24%)
+ * - buzzy (Scorp): ranged. It keeps its distance and lobs a glob of poison at its target's spot; the glob flies for
+ *   a while (a target that moved away is missed), splats on the foes there and poisons them for 80% over 3 s
+ * - ninja (Shroom): 30% of hits aimed at it miss (a seeded hash per attacker, victim, step and hit number)
+ * - snailor (Tulip): once per life below half health it closes into its bud for 2.5 s: 85% less damage, no push
+ *   or stun, regrows 15%
  * - roo: +30 knock on every punch, and its punches interrupt the wind-up of lighter foes
  * - cacto: every attack lands as two jabs of 55%
- * - pogo: at the whistle it leaps onto the enemy back line; the landing hits and stuns round it
- * - briar: whoever hits it takes 30% of that damage back (thorns)
- * - angler: reach 52; its hook pulls light foes in instead of pushing them
- * - sumo: belly-slides at 3x speed toward a far target and slams the first foe it touches
- * - rhino: after walking 90 px its next strike is a charge: 2.5x damage, a big shove and a stun
- * - boulder: armour cuts 35% of everything; its attack is a stomp all round it, shared among up to 4 foes
+ * - pogo (Dandy): at the bell it floats onto the enemy back line; the landing hits and stuns round it
+ * - briar (Spike): whoever hits it up close takes 30% of that damage back (thorns)
+ * - angler (Snapper): reach 52; its vine pulls light foes in instead of pushing them
+ * - sumo (Pumpkin): rolls at 3x speed toward a far target and bowls over the first foe it touches
+ * - rhino (Bamboo): after walking 90 px its next strike is a dash: 2.5x damage, a big shove and a stun
+ * - boulder (Oak): bark armour cuts 35% of everything; its attack is a root stomp all round it, shared among up to 4
+ * Every hit that lands (not thorns or poison) is a critical hit with CRIT.chance for CRIT.mul x, decided by a seeded
+ * hash of the fight, the step, the attacker, the victim and the hit number, so it never depends on the think order.
  * A boss (SquadSpec.boss) is a giant of its unit (unitStats); it fights by the same rules.
  */
 
@@ -46,8 +50,25 @@ interface Pool {
   rate: number;
   /** seconds left */
   left: number;
-  /** the buzzy that stung */
+  /** the Scorp whose glob it was */
   by: number;
+}
+
+/** A Scorp's glob of poison in flight. */
+interface Glob {
+  /** the thrower (it may be knocked out before the glob lands; the glob still lands) */
+  from: number;
+  target: number;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  dur: number;
+  /** seconds in flight so far */
+  t: number;
+  dmg: number;
+  /** foes it can hit at most */
+  most: number;
 }
 
 interface Brain {
@@ -86,7 +107,7 @@ interface Brain {
   stunIn: number;
   intIn: boolean;
   // ---- traits
-  /** Buzzy poison it carries */
+  /** Scorp poison it carries */
   poison: Pool[];
   /** poison damage since its last poison event, and when that event was */
   poisonAcc: number;
@@ -123,6 +144,10 @@ interface Hit {
   pinch: 0 | 1 | 2;
   blow: Blow;
   slap: boolean;
+  /** a Scorp's glob: no thorns back; a shield blocks it by where it came from (ox, oy) */
+  glob: boolean;
+  ox: number;
+  oy: number;
 }
 
 interface Spike {
@@ -253,7 +278,7 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
           aim: team === 0 ? -Math.PI / 2 : Math.PI / 2,
           hp: st.hp, maxHp: st.hp, alive: true,
           phase: 'wait', phaseT: 0, phaseDur: 0, target: -1, rung: st.rung, boss: st.boss, hop: 0, poison: 0, charged: false,
-          walked: 0, sinceHit: 99, hitDir: 0,
+          walked: 0, sinceHit: 99, hitDir: 0, kos: 0, dealt: 0,
         });
         const rng = makeRng(hashSeed(seed, team, si, k));
         brains.push({
@@ -315,6 +340,10 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
   const living: [SimUnit[], SimUnit[]] = [[], []];
   let hits: Hit[] = [];
   let shoves: Shove[] = [];
+  /** Scorp globs in flight, in the order they were thrown (by thrower id within a step: see landGlobs) */
+  let globs: Glob[] = [];
+  /** critical hits each team landed */
+  const crits: [number, number] = [0, 0];
   let events: SimEvent[] = [];
   /** how many units go for each unit, counted once at the start of every step (so the order never matters) */
   const crowd = new Int32Array(Math.max(1, units.length));
@@ -380,7 +409,63 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
     hits.push({
       from: u.id, to: v.id, dmg, dir, heavy, interrupt: heavy || slap, stun: o.stun ?? b.st.stun, knock, pull,
       weapon: o.weapon !== undefined ? o.weapon : u.weapon, pack: o.pack ?? 0, pinch: o.pinch ?? 0, blow: o.blow ?? null, slap,
+      glob: o.glob ?? false, ox: o.ox ?? u.x, oy: o.oy ?? u.y,
     });
+  };
+
+  /**
+   * scorp: lobs a glob at where its target stands now (if it is still in range, with a little slack), landing
+   * after flight + distance / speed s. The damage (with the enrage) is fixed now; the crit is rolled on landing.
+   */
+  const throwGlob = (u: SimUnit, b: Brain, tg: SimUnit | null) => {
+    const T = TRAIT.buzzy;
+    const st = b.st;
+    const d = tg ? hyp(tg.x - u.x, tg.y - u.y) : Infinity;
+    if (!tg || d > (u.r + tg.r + st.reach) * 1.15 + 4) {
+      events.push({ type: 'swing', unit: u.id, weapon: u.weapon, hit: false });
+      return;
+    }
+    const dur = T.flight + d / T.speed;
+    // the glob leaves from its tail, which curls up over its back (a little behind it, toward its own side)
+    const x0 = u.x;
+    const y0 = u.y + (u.team === 0 ? 1 : -1) * u.r * 0.3;
+    const g: Glob = { from: u.id, target: tg.id, x0, y0, x1: tg.x, y1: tg.y, dur, t: 0, dmg: st.dmg * b.rng.range(0.9, 1.1) * mulNow(), most: st.splash };
+    globs.push(g);
+    events.push({ type: 'throw', unit: u.id, target: tg.id, x0, y0, x1: g.x1, y1: g.y1, dur });
+  };
+
+  /**
+   * The globs that land this step, before anyone thinks (so the think order never matters): in thrower-id order,
+   * each splats on the foes whose body is within TRAIT.buzzy.splat px of its spot (nearest first, at most its
+   * weapon's splash: 1, a bat's 3),
+   * with a small shove away from where it came from. A target that walked off is missed.
+   */
+  const landGlobs = () => {
+    if (globs.length === 0) return;
+    const T = TRAIT.buzzy;
+    const landing: Glob[] = [];
+    const flying: Glob[] = [];
+    for (const g of globs) {
+      g.t += DT;
+      (g.t >= g.dur - 1e-9 ? landing : flying).push(g);
+    }
+    globs = flying;
+    landing.sort((a, c) => a.from - c.from || a.dur - c.dur || a.target - c.target);
+    for (const g of landing) {
+      const u = units[g.from];
+      const b = brains[g.from];
+      const found: [number, SimUnit][] = [];
+      near(g.x1, g.y1, T.splat + maxR, (f) => {
+        if (f.team === u.team || airborne(f)) return;
+        const d = hyp(f.x - g.x1, f.y - g.y1);
+        if (d <= f.r + T.splat) found.push([d, f]);
+      });
+      found.sort((a, c) => a[0] - c[0] || a[1].id - c[1].id);
+      const hit = found.slice(0, g.most).map(([, f]) => f);
+      const dir = Math.atan2(g.y1 - g.y0, g.x1 - g.x0);
+      for (const v of hit) pushHit(u, b, v, g.dmg, dir, { glob: true, ox: g.x0, oy: g.y0, knock: b.st.knock * 0.5 });
+      events.push({ type: 'splat', unit: u.id, x: g.x1, y: g.y1, hit: hit.map((v) => v.id) });
+    }
   };
 
   const strike = (u: SimUnit, b: Brain) => {
@@ -388,6 +473,10 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
     const tg = u.target >= 0 ? units[u.target] : null;
     const tgOk = !!tg && tg.alive && !airborne(tg);
     if (tgOk) u.aim = Math.atan2(tg!.y - u.y, tg!.x - u.x);
+    if (u.pet === 'buzzy') {
+      throwGlob(u, b, tgOk ? tg : null);
+      return;
+    }
     const victims: SimUnit[] = [];
     const ax = Math.cos(u.aim);
     const ay = Math.sin(u.aim);
@@ -425,7 +514,7 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
     }
     events.push({ type: 'swing', unit: u.id, weapon: u.weapon, hit: victims.length > 0 });
     let mul = mulNow();
-    // sprout teamwork: the other living Sprouts of its team close by, from the step's start positions
+    // chick flock: the other living Chicks of its team close by, from the step's start positions
     let pack = 0;
     if (u.pet === 'sprout') {
       const R = TRAIT.sprout.range;
@@ -677,6 +766,11 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
             setPhase(u, 'windup', Math.max(0.1, st.cd / 3));
             b.cd = st.cd;
             events.push({ type: 'windup', unit: u.id });
+          } else if (u.pet === 'buzzy' && d < u.r + tg.r + TRAIT.buzzy.keep && d > 1e-6) {
+            // a Scorp keeps its distance while its next glob is not ready: it backs off, still facing the foe
+            want = true;
+            dirX = (-dx / d) * TRAIT.buzzy.back;
+            dirY = (-dy / d) * TRAIT.buzzy.back;
           }
         } else {
           want = true;
@@ -748,8 +842,6 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
 
   const pair = (u: SimUnit, o: SimUnit) => {
     if (u.phase === 'air' || o.phase === 'air') return;
-    // bees fly over their own side
-    if (u.team === o.team && (u.pet === 'buzzy' || o.pet === 'buzzy')) return;
     const dx = o.x - u.x;
     const dy = o.y - u.y;
     const rr = u.r + o.r;
@@ -827,7 +919,7 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
 
   /**
    * The end of a step, in one fixed order: the main hits (a ninja's dodge, then a shield's block and the cuts,
-   * then the damage, the shove, a Buzzy's poison pool and a briar's thorns to come), the strongest stun or an
+   * then the damage, the shove, a Scorp's poison pool and a Spike's thorns to come), the strongest stun or an
    * interrupt per unit, the sumo shove waves, the thorns, the poison ticks, the snailor hide check, then deaths.
    */
   const applyHits = () => {
@@ -836,36 +928,38 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
     // one fixed order whatever the think order: by attacker, then victim (a strike's own hits keep their order),
     // so who scores a knock-out (the last hit on it) never depends on the order units were looked at
     hits.sort((a, b) => a.from - b.from || a.to - b.to);
-    /** hits so far from one attacker to one ninja this step (the dodge hash's hit number) */
-    let dodgeN: Map<number, number> | null = null;
+    /** hits so far from one attacker to one victim this step (the hit number of the dodge and crit hashes) */
+    const nth = new Map<number, number>();
     for (const h of hits) {
       const v = units[h.to];
       const a = units[h.from];
       const b = brains[h.to];
-      if (v.pet === 'ninja') {
-        dodgeN ??= new Map();
-        const key = h.from * units.length + h.to;
-        const k = dodgeN.get(key) ?? 0;
-        dodgeN.set(key, k + 1);
-        if (hashSeed(seed, tickN, h.from, h.to, k) / 4294967296 < TRAIT.ninja.dodge) {
-          events.push({ type: 'dodge', unit: v.id, from: h.from, x: v.x, y: v.y });
-          continue;
-        }
+      const key = h.from * units.length + h.to;
+      const k = nth.get(key) ?? 0;
+      nth.set(key, k + 1);
+      if (v.pet === 'ninja' && hashSeed(seed, tickN, h.from, h.to, k) / 4294967296 < TRAIT.ninja.dodge) {
+        events.push({ type: 'dodge', unit: v.id, from: h.from, x: v.x, y: v.y });
+        continue;
       }
-      let dmg = h.dmg;
+      const crit = hashSeed(seed, tickN, h.from, h.to, k, 0xc217) / 4294967296 < CRIT.chance;
+      let dmg = h.dmg * (crit ? CRIT.mul : 1);
+      if (crit) crits[a.team]++;
       let blocked = false;
-      // a shield takes part of a hit from its front half (checked after everyone has turned this step)
-      if (b.st.block > 0 && angDiff(Math.atan2(a.y - v.y, a.x - v.x), v.aim) < Math.PI / 2) {
+      // a shield takes part of a hit from its front half (checked after everyone has turned this step); a glob by
+      // where it was thrown from
+      if (b.st.block > 0 && angDiff(Math.atan2(h.oy - v.y, h.ox - v.x), v.aim) < Math.PI / 2) {
         dmg *= 1 - b.st.block;
         blocked = true;
       }
-      // buzzy: the sting leaves a pool of poison (80% of what got past the shield), drained over 3 s
+      // scorp: the glob leaves a pool of poison (80% of what got past the shield), drained over 3 s
       if (a.pet === 'buzzy' && dmg > 0) b.poison.push({ rate: (dmg * TRAIT.buzzy.poison) / TRAIT.buzzy.time, left: TRAIT.buzzy.time, by: a.id });
       const armour = v.pet === 'boulder';
       const shell = v.phase === 'shell';
       dmg *= cutOf(v);
       v.hp -= dmg;
-      if (v.pet === 'briar' && dmg > 0) spikes.push({ from: v.id, to: a.id, dmg: dmg * TRAIT.briar.thorns });
+      a.dealt += dmg;
+      // thorns bite back up close only (a glob thrown from afar does not)
+      if (v.pet === 'briar' && dmg > 0 && !h.glob && a.alive) spikes.push({ from: v.id, to: a.id, dmg: dmg * TRAIT.briar.thorns });
       let dir = h.dir;
       let dist = 0;
       if (h.knock !== 0 && !shell) {
@@ -890,7 +984,7 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
       events.push({
         type: 'hit', from: h.from, to: h.to, weapon: h.weapon, dmg, x: v.x, y: v.y, dir,
         heavy: h.heavy, blocked, stun, pack: h.pack, pinch: h.pinch, spike: false, pull: h.pull, armour, shell,
-        blow: h.blow, slap: h.slap, interrupt,
+        blow: h.blow, slap: h.slap, interrupt, crit, knock: dist, glob: h.glob,
       });
     }
     hits = [];
@@ -928,6 +1022,7 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
       const dmg = s.dmg * cutOf(v);
       const before = v.hp;
       v.hp -= dmg;
+      hh.dealt += dmg;
       v.sinceHit = 0;
       const dir = Math.atan2(v.y - hh.y, v.x - hh.x);
       if (before > 0 && v.hp <= 0) {
@@ -941,10 +1036,10 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
       events.push({
         type: 'hit', from: s.from, to: s.to, weapon: null, dmg, x: v.x, y: v.y, dir,
         heavy: false, blocked: false, stun: false, pack: 0, pinch: 0, spike: true, pull: false, armour: v.pet === 'boulder',
-        shell: v.phase === 'shell', blow: null, slap: false, interrupt: false,
+        shell: v.phase === 'shell', blow: null, slap: false, interrupt: false, crit: false, knock: 0, glob: false,
       } satisfies HitEvent);
     }
-    // buzzy poison: every pool drains evenly; ticks are not hits (no push, flinch, dodge or thorns)
+    // scorp poison: every pool drains evenly; ticks are not hits (no push, flinch, dodge, crit or thorns)
     for (const u of units) {
       const b = brains[u.id];
       if (!u.alive || b.poison.length === 0) continue;
@@ -961,6 +1056,7 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
       dmg *= cutOf(u);
       const before = u.hp;
       u.hp -= dmg;
+      units[by].dealt += dmg;
       u.poison = left * cutOf(u);
       if (before > 0 && u.hp <= 0) {
         b.lastBy = by;
@@ -996,6 +1092,7 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
       const b = brains[u.id];
       if (b.lastBy >= 0) {
         kills[units[b.lastBy].team]++;
+        units[b.lastBy].kos++;
         brains[b.lastBy].cheer = FIGHT.cheer;
       }
       if (u.boss) bossKos[1 - u.team]++;
@@ -1033,6 +1130,7 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
     summary = {
       winner, byTime, time: Math.max(0, time), kills: [kills[0], kills[1]], size: [size[0], size[1]],
       alive: [alive[0], alive[1]], hpLeft: [hpShare[0], hpShare[1]], bossKos: [bossKos[0], bossKos[1]],
+      kos: units.map((u) => u.kos), dealt: units.map((u) => u.dealt), crits: [crits[0], crits[1]],
     };
   };
 
@@ -1052,6 +1150,7 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
     buildGrid();
     countCrowd();
     snapAir();
+    landGlobs();
     for (const id of thinkOrder()) if (units[id].alive) think(units[id]);
     collide();
     integrate();

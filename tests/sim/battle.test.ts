@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { ARENA, BOSS, PETS, PET_TYPES, TRAIT, tierOf, rungOf, unitStats } from '../../src/data';
+import { ARENA, BOSS, CRIT, PETS, PET_TYPES, TRAIT, tierOf, rungOf, unitStats } from '../../src/data';
 import { makeRng } from '../../src/rng';
 import { LINE_ORDER, createBattle, runBattle } from '../../src/sim/battle';
 import type { Battle, HitEvent, SimEvent } from '../../src/sim/types';
 import type { ArmySpec, PetType, SquadSpec, WeaponType } from '../../src/types';
-import { buildArmy } from '../../src/logic/waves';
+import { buildArmy } from '../../src/logic/match';
 
 const WEAPONS: (WeaponType | null)[] = [null, 'knife', 'bat', 'shield', 'spear'];
 const sq = (pet: PetType, count = 1, o: Partial<SquadSpec> = {}): SquadSpec => ({ key: 0, pet, count, weapon: null, weaponLevel: 0, helmet: 0, sneakers: 0, chili: 0, ...o });
@@ -187,22 +187,72 @@ describe('battle', () => {
 });
 
 describe('traits', () => {
-  it('sprout: bites harder in a pack', () => {
+  it('sprout (Chick): pecks harder in a flock, and is the quickest on its feet', () => {
     const { b, all } = collect([army(sq('sprout', 4)), army(sq('sprout', 4))], 1);
     const bites = hitsOf(all).filter((h) => petOf(b, h.from) === 'sprout');
     expect(bites.some((h) => h.pack >= 2)).toBe(true);
     expect(bites.every((h) => h.pack >= 0 && h.pack <= TRAIT.sprout.max)).toBe(true);
   });
-  it('buzzy: stings poison (events with the buzzy and a position), and poison can knock out', () => {
+  it('buzzy (Scorp): throws globs from a distance that land later on the spot, poison, and miss a target that ran off', () => {
     let poisonKo = 0;
+    let misses = 0;
+    let splats = 0;
     for (let seed = 0; seed < 6; seed++) {
-      const { b, all } = collect([army(sq('buzzy', 4)), army(sq('sprout', 4, { helmet: 2 }))], seed);
+      const { b, all } = collect([army(sq('buzzy', 4)), army(sq('roo', 1), sq('sprout', 4, { helmet: 2 }))], seed);
+      const throws = all.filter((e) => e.type === 'throw');
+      expect(throws.length).toBeGreaterThan(0);
+      for (const t of throws) {
+        if (t.type !== 'throw') continue;
+        expect(petOf(b, t.unit)).toBe('buzzy');
+        // thrown from a distance (body to body well beyond melee), with a travel time
+        const d = Math.hypot(t.x1 - t.x0, t.y1 - t.y0);
+        expect(d).toBeLessThanOrEqual((b.units[t.unit].r + b.units[t.target].r + PETS.buzzy.reach) * 1.15 + 8);
+        expect(t.dur).toBeCloseTo(TRAIT.buzzy.flight + d / TRAIT.buzzy.speed, 1);
+      }
+      expect(throws.some((t) => t.type === 'throw' && Math.hypot(t.x1 - t.x0, t.y1 - t.y0) > 60)).toBe(true);
+      // every splat lands where its throw aimed, and its hits are glob hits from that Scorp on the listed foes
+      const open: SimEvent[] = [];
+      all.forEach((e, i) => {
+        if (e.type === 'throw') open.push(e);
+        if (e.type !== 'splat') return;
+        splats++;
+        const k = open.findIndex((t) => t.type === 'throw' && t.unit === e.unit && t.x1 === e.x && t.y1 === e.y);
+        expect(k).toBeGreaterThanOrEqual(0);
+        open.splice(k, 1);
+        if (e.hit.length === 0) misses++;
+        const after = all.slice(i).filter((h): h is HitEvent => h.type === 'hit' && h.glob && h.from === e.unit);
+        for (const id of e.hit) {
+          expect(b.units[id].team).not.toBe(b.units[e.unit].team);
+          expect(after.some((h) => h.to === id) || all.slice(i).some((x) => x.type === 'dodge' && x.unit === id)).toBe(true);
+        }
+      });
+      const globs = hitsOf(all).filter((h) => h.glob);
+      expect(globs.every((h) => petOf(b, h.from) === 'buzzy')).toBe(true);
+      expect(hitsOf(all).filter((h) => petOf(b, h.from) === 'buzzy').every((h) => h.glob)).toBe(true);
       const ev = all.filter((e) => e.type === 'poison');
       expect(ev.length).toBeGreaterThan(0);
       for (const e of ev) if (e.type === 'poison') expect(petOf(b, e.by)).toBe('buzzy');
       poisonKo += all.filter((e) => e.type === 'death' && e.cause === 'poison').length;
     }
+    expect(splats).toBeGreaterThan(20);
+    expect(misses).toBeGreaterThan(0); // the quick Chicks run out from under some globs
     expect(poisonKo).toBeGreaterThan(0);
+  });
+  it('buzzy (Scorp): keeps its distance, backing off a foe that comes close while its throw is not ready', () => {
+    const b = createBattle([army(sq('buzzy', 1)), army(sq('snailor', 1))], 2);
+    let backed = 0;
+    let prev = b.units.map((u) => ({ x: u.x, y: u.y }));
+    while (!b.over && b.time < 20) {
+      b.step(1 / 60);
+      const [z, foe] = b.units;
+      if (z.alive && foe.alive && z.phase === 'move') {
+        const before = Math.hypot(prev[0].x - prev[1].x, prev[0].y - prev[1].y);
+        const moved = Math.hypot(z.x - prev[0].x, z.y - prev[0].y);
+        if (moved > 0.2 && Math.hypot(z.x - foe.x, z.y - foe.y) > before - 0.05 && before < z.r + foe.r + TRAIT.buzzy.keep) backed++;
+      }
+      prev = b.units.map((u) => ({ x: u.x, y: u.y }));
+    }
+    expect(backed).toBeGreaterThan(10);
   });
   it('ninja: about 30% of hits aimed at it miss, with a dodge event', () => {
     let dodged = 0;
@@ -252,11 +302,15 @@ describe('traits', () => {
     expect(all.some((e) => e.type === 'land' && e.big)).toBe(true);
     expect(hitsOf(all).some((h) => h.blow === 'landing' && h.stun)).toBe(true);
   });
-  it('briar: thorns return part of every hit to the attacker', () => {
+  it('briar (Spike): thorns return part of every close hit to the attacker, never to a Scorp throwing from afar', () => {
     const { b, all } = collect([army(sq('briar', 1)), army(sq('briar', 1))], 6);
     const thorns = hitsOf(all).filter((h) => h.spike);
     expect(thorns.length).toBeGreaterThan(0);
     for (const t of thorns) expect(petOf(b, t.from)).toBe('briar');
+    const far = collect([army(sq('briar', 1)), army(sq('buzzy', 4))], 2);
+    expect(hitsOf(far.all).some((h) => h.glob && petOf(far.b, h.to) === 'briar')).toBe(true);
+    expect(hitsOf(far.all).filter((h) => h.spike).every((h) => !hitsOf(far.all).some((g) => g.glob && g.from === h.to && g.to === h.from) || petOf(far.b, h.to) !== 'buzzy')).toBe(true);
+    expect(hitsOf(far.all).some((h) => h.spike && petOf(far.b, h.to) === 'buzzy')).toBe(false);
   });
   it('angler: the hook pulls light foes in', () => {
     const { b, all } = collect([army(sq('angler', 1)), army(kit('briar', 2))], 7);
@@ -296,6 +350,58 @@ describe('traits', () => {
   });
 });
 
+describe('juice: crits, knock-backs and knock-outs per unit', () => {
+  it('about CRIT.chance of landed hits are crits for CRIT.mul x, the same in every replay, and both teams crit alike', () => {
+    const r = makeRng(17);
+    let crits = 0;
+    let landed = 0;
+    const per: [number, number] = [0, 0];
+    for (let i = 0; i < 10; i++) {
+      const pair: [ArmySpec, ArmySpec] = [randomArmy(r.int(1, 1e6), 4, 4), randomArmy(r.int(1, 1e6), 4, 4)];
+      const one = collect(pair, i);
+      expect(hashEvents(collect(pair, i).all)).toBe(hashEvents(one.all));
+      const h = hitsOf(one.all).filter((x) => !x.spike);
+      landed += h.length;
+      crits += h.filter((x) => x.crit).length;
+      for (const x of h) if (x.crit) per[one.b.units[x.from].team]++;
+      expect(hitsOf(one.all).filter((x) => x.spike).every((x) => !x.crit)).toBe(true);
+      expect(one.b.summary!.crits).toEqual([0, 1].map((t) => h.filter((x) => x.crit && one.b.units[x.from].team === t).length));
+    }
+    expect(crits / landed).toBeGreaterThan(CRIT.chance - 0.02);
+    expect(crits / landed).toBeLessThan(CRIT.chance + 0.02);
+    // a crit hits CRIT.mul x as hard: bare Roos (no shield, no armour) deal 0.9..1.1 x, or CRIT.mul x that
+    const { all } = collect([army(sq('roo', 2)), army(sq('roo', 2))], 4);
+    const d = PETS.roo.dmg;
+    for (const h of hitsOf(all)) {
+      const lo = d * 0.9 * (h.crit ? CRIT.mul : 1) - 1e-6;
+      const hi = d * 1.1 * (h.crit ? CRIT.mul : 1) + 1e-6;
+      expect(h.dmg >= lo && h.dmg <= hi).toBe(true);
+    }
+    expect(hitsOf(all).some((h) => h.crit)).toBe(true);
+  });
+  it('hits carry their knock-back; the summary counts every unit\'s knock-outs and damage', () => {
+    const { b, all } = collect([army(kit('roo', 2, 'bat'), sq('buzzy', 2)), army(sq('sprout', 4), sq('ninja', 2))], 5);
+    const h = hitsOf(all);
+    expect(h.some((x) => x.knock > 20)).toBe(true);
+    expect(h.every((x) => Number.isFinite(x.knock) && x.knock >= 0)).toBe(true);
+    expect(h.filter((x) => x.spike).every((x) => x.knock === 0)).toBe(true);
+    const s = b.summary!;
+    expect(s.kos).toHaveLength(b.units.length);
+    expect(s.dealt).toHaveLength(b.units.length);
+    for (const team of [0, 1] as const) {
+      const mine = b.units.filter((u) => u.team === team).reduce((a, u) => a + s.kos[u.id], 0);
+      expect(mine).toBe(s.kills[team]);
+    }
+    for (const u of b.units) {
+      expect(s.kos[u.id]).toBe(u.kos);
+      expect(s.kos[u.id]).toBe(all.filter((e) => e.type === 'death' && e.by === u.id).length);
+      expect(s.dealt[u.id]).toBeCloseTo(u.dealt, 6);
+      const dealt = h.filter((x) => x.from === u.id).reduce((a, x) => a + x.dmg, 0);
+      expect(u.dealt).toBeGreaterThanOrEqual(dealt - 1e-6);
+    }
+  });
+});
+
 describe('bosses', () => {
   it('a boss is a giant of its unit: bigger, much tougher, harder hitting, flagged for the crown', () => {
     const base = unitStats(sq('roo'));
@@ -314,7 +420,7 @@ describe('bosses', () => {
     expect(s.bossKos).toEqual([1, 0]);
     expect(s.alive[1]).toBe(0);
   });
-  it('a boss wave stands its boss in a row of its own, ahead of its kind', () => {
+  it('a champion team stands its boss in a row of its own, ahead of its kind', () => {
     const b = createBattle([army(sq('sprout', 1)), army(sq('roo', 2), sq('roo', 1, { boss: true }))], 3);
     const boss = b.units.find((u) => u.boss)!;
     for (const u of b.units.filter((x) => x.team === 1 && !x.boss)) expect(boss.y).toBeGreaterThan(u.y);

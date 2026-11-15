@@ -7,30 +7,34 @@ export type { MusicState };
 export { MUSIC_ALIAS };
 
 /*
- * The soundtrack: an adaptive loop that follows the stage. Its instruments are synthesized and rendered once (like
+ * The soundtrack: an adaptive loop that follows the game. Its instruments are synthesized and rendered once (like
  * the sound effects); a small sequencer then plays the composed parts on a 16th-note grid, a little ahead of time
  * on the audio clock, so the beat never drifts.
  *
- *   prep        between waves, most of the time: 84 BPM, G major, 16 bars. Soft keys, a marimba tune that leaves
- *               room, a round bass, brushed shaker and finger snaps. Warm and low-key, no bright highs to tire on
- *   wave        a wave is fought: 124 BPM, E minor, four on the floor; energy adds offbeat brass stabs, the marimba
- *               hook, a horn, the crowd chanting "oh", crashes and fills
- *   boss        the boss wave: 132 BPM, E phrygian, big drums and a low ostinato; energy adds stabs, a horn line,
- *               a choir and a ticking marimba
- *   stageClear  a bright, bouncy G major victory loop, starting 2.2 s after it is set (after the fanfare)
- *   defeat      a soft, slow, sparse loop (no drums), 1.4 s after it is set (after the crowd's "aww")
+ *   lobby     the main screen, most of the time (v4's prep music): 90 BPM, G major, 16 bars. Soft keys, a catchy
+ *             marimba tune that leaves room, a round bass, brushed shaker and finger snaps. Warm, never tiring
+ *   search    looking for an opponent: 112 BPM, E minor, 4 bars. A clock ticking on the 8ths, a pulsing bass,
+ *             a nervous little marimba figure and a sonar chime: light, a little tense
+ *   fight     a fight: 124 BPM, E minor, four on the floor; energy adds offbeat brass stabs, the marimba hook,
+ *             a horn, the crowd chanting "oh", crashes and fills
+ *   champion  a champion match: 132 BPM, E phrygian, big drums and a low ostinato, the crowd chanting, a choir
+ *             and brass on every bar; it always plays at least at energy 0.6 (bigger than fight)
+ *   victory   a bright, bouncy G major loop, starting 2.4 s after it is set (after the VICTORY stinger)
+ *   defeat    a soft, slow, sparse loop (no drums), 1.4 s after it is set (after the DEFEAT stinger)
  *
- * The v3 names still work (MUSIC_ALIAS): lobby and search play prep, battle plays wave, overtime plays boss,
- * victory plays stageClear.
- * Changes: prep fades in fresh after 1.2 s (straight away when nothing plays), wave after 0.35 s, boss 0.9 s,
- * stageClear 2.2 s, defeat 1.4 s; off stops at once.
+ * The older names still work (MUSIC_ALIAS): prep plays lobby, wave and battle play fight, boss and overtime play
+ * champion, stageClear plays victory.
+ * Changes: lobby fades in fresh after 1.2 s (straight away when nothing plays), search after 0.15 s, fight after
+ * 0.35 s, champion 0.6 s, victory 2.4 s, defeat 1.4 s; off stops at once.
+ * The lobby's instruments are rendered first, and a song starts as soon as its own instruments are ready, so the
+ * main screen has music within moments of the first tap.
  * Melodies are written as degrees of a seven-note scale, so a note can never leave its scale (see scaleCheck).
  */
 
 /** The soundtrack's level: under the effects, so every hit cuts through. */
 const LEVEL = 0.3;
 
-type Inst = 'keys' | 'mallet' | 'flute' | 'chime' | 'pad' | 'bass' | 'kick' | 'snap' | 'clap' | 'hat' | 'tom' | 'don' | 'stab' | 'horn' | 'chant' | 'choir' | 'shaker' | 'crash' | 'shimmer';
+type Inst = 'keys' | 'mallet' | 'flute' | 'chime' | 'pad' | 'bass' | 'kick' | 'snap' | 'clap' | 'hat' | 'tom' | 'don' | 'stab' | 'horn' | 'chant' | 'choir' | 'shaker' | 'crash' | 'shimmer' | 'block';
 
 interface InstDef {
   bases: number[]; // MIDI notes the instrument is rendered at (the nearest is pitched to each note)
@@ -164,6 +168,16 @@ const INSTRUMENTS: Record<Inst, InstDef> = {
     bases: [0], dur: 2.4, vol: 0.26, verb: 0.6,
     make: (s) => sparkle(s, 0, 2, 0.8, 8, 2400, 5600),
   },
+  block: {
+    // a woodblock: the searching clock's tick-tock
+    bases: [76, 88], dur: 0.12, vol: 0.2, verb: 0.2, pan: 0.15,
+    make: (s, base) => {
+      const f = m(base);
+      s.tone({ f: [[0, f * 1.06], [0.03, f]], a: 0.0005, d: 0.04, v: 0.7 });
+      s.tone({ f: f * 2.71, a: 0.0005, d: 0.015, v: 0.2 });
+      s.noise({ filter: 'bandpass', f: f * 1.6, q: 3, a: 0.0003, d: 0.01, v: 0.6 });
+    },
+  },
 };
 
 // ------------------------------------------------------------------ the composition
@@ -183,6 +197,8 @@ interface Song {
   bars: Ev[][];
   sc: Scale;
   swing?: number;
+  /** the energy it never drops below (champion is always big) */
+  floor?: number;
 }
 /** A seven-note scale on a root: a degree (0 = the root, 7 = an octave up, -7 = an octave down) becomes a MIDI note. */
 interface Scale {
@@ -413,26 +429,75 @@ function defeatBar(bar: number): Ev[] {
   ];
 }
 
+// ---- search (E minor), 4 bars: Em C Am Bm. A clock, a pulse, a nervous figure: light, a little tense
+const SEARCH_CH: Record<string, Chord> = {
+  Em: { b: -7, t: [4, 7, 9] },
+  C: { b: -2, t: [5, 7, 9] },
+  Am: { b: -4, t: [3, 5, 7] },
+  Bm: { b: -3, t: [4, 6, 8] },
+};
+const SEARCH_CHORDS = ['Em', 'C', 'Am', 'Bm'];
+
+function searchBar(bar: number): Ev[] {
+  const sc = E_MINOR;
+  const ch = SEARCH_CH[SEARCH_CHORDS[bar]];
+  const ev: Ev[] = [];
+  // the clock: tick (B5) - tock (E5) on the 8ths, a whisper of shaker between
+  for (let k = 0; k < 8; k++) ev.push({ s: k * 2, i: 'block', n: note(sc, k % 2 ? 14 : 18), v: k % 2 ? 0.55 : 0.75 });
+  ev.push(...hit('shaker', [3, 7, 11, 15], 0.35));
+  ev.push(...hit('kick', [0], 0.38), ...hit('kick', [8], 0.26));
+  // the pulse: the bass on every 8th, leaning on the downbeats
+  for (let k = 0; k < 8; k++) ev.push({ s: k * 2, i: 'bass', n: note(sc, ch.b), d: 1, v: k % 4 === 0 ? 0.5 : 0.3 });
+  ev.push(...chordEv(sc, 'pad', ch, 0, 16, 0.4));
+  // a nervous little figure: chord tones on dotted 8ths, an octave up
+  [0, 3, 6, 10, 13].forEach((s, k) => ev.push({ s, i: 'mallet', n: note(sc, ch.t[[0, 1, 2, 1, 0][k]] + 7), d: 2, v: k === 0 ? 0.42 : 0.32, p: k % 2 ? 0.25 : -0.25 }));
+  // the sonar ping, every other bar
+  if (bar % 2 === 0) ev.push({ s: 0, i: 'chime', n: note(sc, ch.t[2] + 14), d: 8, v: 0.35 });
+  return ev;
+}
+
+// ---- champion (E phrygian): the boss music, bigger. The crowd chants, a choir and brass on every bar, a crash
+// on every bar, and a second big drum
+function championBar(bar: number): Ev[] {
+  const sc = E_PHRYGIAN;
+  const ch = BOSS_CH[BOSS_CHORDS[bar]];
+  const ev = bossBar(bar).filter((e) => !(e.i === 'choir' || (e.i === 'crash' && e.s === 0)));
+  ev.push(...chordEv(sc, 'choir', ch, 0, 16, 0.85));
+  ev.push({ s: 0, i: 'crash', v: 0.75 }, { s: 12, i: 'don', v: 0.75 });
+  if (bar % 4 < 2) ev.push(...mel(sc, 'chant', CHANT[bar % 2], 0.95));
+  if (bar === 0) ev.push({ s: 0, i: 'shimmer', v: 0.6 });
+  return ev;
+}
+
 const bars = (n: number, f: (b: number) => Ev[]) => Array.from({ length: n }, (_, b) => f(b));
 
 type Playable = Exclude<MusicState, 'off' | LegacyMusicState>;
 
+/** The songs, in the order their instruments are rendered (the lobby first). */
 const SONGS: Record<Playable, Song> = {
-  prep: { bpm: 84, bars: bars(16, prepBar), sc: G_MAJOR, swing: 0.12 },
-  wave: { bpm: 124, bars: bars(8, waveBar), sc: E_MINOR },
-  boss: { bpm: 132, bars: bars(8, bossBar), sc: E_PHRYGIAN },
-  stageClear: { bpm: 128, bars: bars(8, clearBar), sc: G_MAJOR },
+  lobby: { bpm: 90, bars: bars(16, prepBar), sc: G_MAJOR, swing: 0.12 },
+  search: { bpm: 112, bars: bars(4, searchBar), sc: E_MINOR },
+  fight: { bpm: 124, bars: bars(8, waveBar), sc: E_MINOR },
+  champion: { bpm: 132, bars: bars(8, championBar), sc: E_PHRYGIAN, floor: 0.6 },
+  victory: { bpm: 128, bars: bars(8, clearBar), sc: G_MAJOR },
   defeat: { bpm: 70, bars: bars(4, defeatBar), sc: G_MAJOR },
 };
 
 /** Seconds before each state's song starts, and how fast the one before it fades. */
 const ENTRY: Record<Playable, [number, number]> = {
-  prep: [1.2, 0.8],
-  wave: [0.35, 0.2],
-  boss: [0.9, 0.3],
-  stageClear: [2.2, 0.5],
+  lobby: [1.2, 0.8],
+  search: [0.15, 0.4],
+  fight: [0.35, 0.2],
+  champion: [0.6, 0.3],
+  victory: [2.4, 0.5],
   defeat: [1.4, 0.6],
 };
+
+/** The instruments a song uses. */
+const instsOf = (song: Song) => new Set(song.bars.flatMap((b) => b.map((e) => e.i)));
+const SONG_INSTS = Object.fromEntries(Object.entries(SONGS).map(([k, song]) => [k, [...instsOf(song)]])) as Record<Playable, Inst[]>;
+/** Every instrument, the lobby's first, then the order the songs are listed in. */
+const RENDER_ORDER: Inst[] = [...new Set([...Object.values(SONG_INSTS).flat(), ...(Object.keys(INSTRUMENTS) as Inst[])])];
 
 const MELODIC: Inst[] = ['keys', 'mallet', 'flute', 'chime', 'pad', 'bass', 'stab', 'horn', 'chant', 'choir'];
 
@@ -515,10 +580,11 @@ export async function renderSong(state: MusicState, seconds: number, energy = 0.
   level.gain.value = LEVEL;
   level.connect(ac.destination);
   const stepLen = 60 / song.bpm / 4;
+  const heat = Math.max(energy, song.floor ?? 0);
   for (let k = 0, t = 0.02; t < seconds; k++, t += stepLen) {
     const step = k % 16;
     const swing = song.swing && step % 2 ? song.swing * stepLen : 0;
-    for (const e of song.bars[Math.floor(k / 16) % song.bars.length]) if (e.s === step && (e.e ?? 0) <= energy) playNote(ac, samples, e, t + swing, stepLen, level, null);
+    for (const e of song.bars[Math.floor(k / 16) % song.bars.length]) if (e.s === step && (e.e ?? 0) <= heat) playNote(ac, samples, e, t + swing, stepLen, level, null);
   }
   return ac.startRendering();
 }
@@ -529,7 +595,7 @@ interface Voice {
   src: AudioBufferSourceNode;
   end: number;
 }
-/** A v3 state name becomes the v4 state it plays. */
+/** An older state name becomes the v5 state it plays. */
 const resolve = (st: MusicState): Exclude<MusicState, LegacyMusicState> => (st in MUSIC_ALIAS ? MUSIC_ALIAS[st as LegacyMusicState] : (st as Exclude<MusicState, LegacyMusicState>));
 
 class Music implements MusicApi {
@@ -553,13 +619,15 @@ class Music implements MusicApi {
   private target = 0.3; // energy asked for
   private heat = 0.3; // energy heard, eased on the beat
   private rendered = false;
+  private tried = new Set<Inst>(); // instruments rendered so far (or failed)
 
   constructor() {
     if (typeof OfflineAudioContext !== 'undefined') setTimeout(() => void this.renderAll(), 60);
   }
 
   private async renderAll() {
-    for (const [name, def] of Object.entries(INSTRUMENTS) as [Inst, InstDef][]) {
+    for (const name of RENDER_ORDER) {
+      const def = INSTRUMENTS[name];
       const list: { base: number; buf: AudioBuffer }[] = [];
       for (const base of def.bases) {
         try {
@@ -569,8 +637,14 @@ class Music implements MusicApi {
         }
       }
       if (list.length) this.samples.set(name, list);
+      this.tried.add(name);
     }
     this.rendered = true;
+  }
+
+  /** True once every instrument a song uses has been rendered (or has failed and stays silent). */
+  private songReady(song: Playable) {
+    return this.rendered || SONG_INSTS[song].every((i) => this.tried.has(i));
   }
 
   /** True once every instrument is rendered. */
@@ -695,8 +769,9 @@ class Music implements MusicApi {
         this.out.gain.cancelScheduledValues(ac.currentTime);
         this.out.gain.setTargetAtTime(quiet ? 0 : 1, ac.currentTime, 0.08);
       }
-      if (quiet || !this.rendered) {
-        this.nextT = 0; // pick up again when it comes back
+      const want = this.pending ?? this.playing;
+      if (quiet || (want && !this.songReady(want))) {
+        this.nextT = 0; // pick up again when it comes back (or when its instruments are ready)
         return;
       }
       const now = ac.currentTime;
@@ -737,8 +812,9 @@ class Music implements MusicApi {
     if (this.bar >= song.bars.length) this.bar = 0;
     const stepLen = 60 / song.bpm / 4;
     const swing = song.swing && this.step % 2 ? song.swing * stepLen : 0;
+    const heat = Math.max(this.heat, song.floor ?? 0);
     for (const e of song.bars[this.bar]) {
-      if (e.s !== this.step || (e.e ?? 0) > this.heat) continue;
+      if (e.s !== this.step || (e.e ?? 0) > heat) continue;
       this.note(e, t + swing + frand(-0.002, 0.002), stepLen);
     }
   }

@@ -7,19 +7,38 @@ import type { PetType } from '../src/types';
 /* The page to listen on: a button per sound (a button per level where it has levels) and per music state. */
 
 const CAST: PetType[] = ['sprout', 'buzzy', 'ninja', 'snailor', 'roo', 'cacto', 'pogo', 'briar', 'angler', 'sumo', 'rhino', 'boulder'];
+/** The v5 display names (the ids stay). */
+const NAME: Record<PetType, string> = {
+  sprout: 'Chick',
+  buzzy: 'Scorp',
+  ninja: 'Shroom',
+  snailor: 'Tulip',
+  roo: 'Roo',
+  cacto: 'Cacto',
+  pogo: 'Dandy',
+  briar: 'Spike',
+  angler: 'Snapper',
+  sumo: 'Pumpkin',
+  rhino: 'Bamboo',
+  boulder: 'Oak',
+};
 
-// v4 first, then the v3 sounds (some of them legacy now)
+// v5 first, then v4, then the v3 sounds (some of them legacy now)
 const GROUPS: [string, SoundName[]][] = [
-  ['Traits', ['poison', 'dodge', 'shellClose', 'shellOpen', 'thorns', 'hookPull', 'bellySlide', 'chargeImpact', 'leapLaunch', 'leapLand', 'doubleJab', 'armourClank', 'bossStomp']],
-  ['Stage flow', ['waveStart', 'waveClear', 'stageClear', 'star', 'gems', 'bossArrives', 'waveLost', 'cashKill', 'cashWave', 'cellUnlock', 'sell']],
+  ['v5: the bell and the call', ['bellStart', 'ready', 'fight', 'bellEnd']],
+  ['v5: hits, knock-outs, combo calls', ['punch', 'crit', 'pow', 'bonk', 'wham', 'smash', 'ko', 'doubleKo', 'tripleKo', 'rampage', 'slowmo', 'coins', 'globSplat']],
+  ['v5: the crowd', ['roar', 'ooh', 'cheer']],
+  ['v5: matchmaking and the result', ['search', 'found', 'champion', 'victory', 'defeat', 'mvp', 'cashCount', 'xpCount', 'levelUp']],
+  ['Traits (the v5 cast)', ['poison', 'globSplat', 'dodge', 'shellClose', 'shellOpen', 'thorns', 'hookPull', 'bellySlide', 'chargeImpact', 'leapLaunch', 'leapLand', 'doubleJab', 'armourClank', 'bossStomp']],
   ['Roll and evolve', ['spinTick', 'spinLand', 'unitReveal', 'itemReveal', 'evolve']],
-  ['Interface', ['click', 'pick', 'drop', 'denied', 'link', 'unlink', 'merge', 'stack', 'whoosh', 'hint', 'count', 'collect']],
-  ['Fight', ['deploy', 'bite', 'knife', 'knifeHit', 'bat', 'batHit', 'spear', 'spearHit', 'shieldBash', 'block', 'hop', 'stun', 'combo', 'lastKill', 'cheer']],
+  ['Interface', ['click', 'pick', 'drop', 'denied', 'link', 'unlink', 'merge', 'stack', 'whoosh', 'hint', 'count', 'collect', 'cashKill', 'gems', 'cellUnlock', 'sell']],
+  ['Fight (v3 / v4)', ['deploy', 'bite', 'knife', 'knifeHit', 'bat', 'batHit', 'spear', 'spearHit', 'shieldBash', 'block', 'hop', 'stun', 'combo', 'lastKill']],
   ['Fight: deaths', ['pop', 'squish', 'launch', 'slice', 'spin', 'deflate', 'shatter', 'petals']],
-  ['v3 (legacy)', ['rollStart', 'tick', 'tock', 'reveal', 'crack', 'breakthrough', 'search', 'found', 'vsSlam', 'countdown', 'fight', 'meter', 'rollEarned', 'enrage', 'victory', 'defeat', 'trophyUp', 'trophyDown', 'leagueUp']],
+  ['v4 stage flow (legacy)', ['waveStart', 'waveClear', 'stageClear', 'star', 'bossArrives', 'waveLost', 'cashWave']],
+  ['v3 (legacy)', ['rollStart', 'tick', 'tock', 'reveal', 'crack', 'breakthrough', 'vsSlam', 'countdown', 'meter', 'rollEarned', 'enrage', 'trophyUp', 'trophyDown', 'leagueUp']],
 ];
-const STATES: MusicState[] = ['prep', 'wave', 'boss', 'stageClear', 'defeat', 'off'];
-const LEGACY: MusicState[] = ['lobby', 'search', 'battle', 'overtime', 'victory'];
+const STATES: MusicState[] = ['lobby', 'search', 'fight', 'champion', 'victory', 'defeat', 'off'];
+const LEGACY: MusicState[] = ['prep', 'wave', 'boss', 'stageClear', 'battle', 'overtime'];
 
 const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -63,7 +82,7 @@ const at = () => ({ x: frand(60, 480), enemy });
 const root = el('sfx');
 
 // ---- the cast
-root.append(heading('The cast: attack, hurt, death'));
+root.append(heading('The cast: attack, hurt, death (and hello)'));
 const side = button('team: yours (blue)', '', () => {
   enemy = !enemy;
   side.textContent = enemy ? 'team: enemy (red, deeper)' : 'team: yours (blue)';
@@ -73,10 +92,11 @@ root.append(row(null, side));
 for (const pet of CAST) {
   root.append(
     row(
-      pet,
+      `${NAME[pet]} (${pet})`,
       button('attack', 'lv', () => sfx.play(petVoice(pet, 'attack'), 0, at())),
       button('hurt', 'lv', () => sfx.play(petVoice(pet, 'hurt'), 0, at())),
       button('death', 'lv', () => sfx.play(petVoice(pet, 'death'), 0, at())),
+      button('reveal (hello)', 'lv', () => sfx.play('unitReveal', CAST.indexOf(pet) + 1)),
       button('x20 brawl', 'lv', () => {
         // twenty calls in a second: the gaps and caps must keep it clean
         for (let i = 0; i < 20; i++) setTimeout(() => sfx.play(petVoice(pet, i % 5 === 4 ? 'hurt' : 'attack'), 0, at()), i * 50);
@@ -101,40 +121,99 @@ root.append(
     null,
     button('spin: unit (random rung)', '', () => spin(() => sfx.play('unitReveal', Math.floor(frand(1, 13))))),
     button('spin: item (random class)', '', () => spin(() => sfx.play('itemReveal', Math.floor(frand(1, 8))))),
-    button('a wave: start, brawl, clear', '', () => {
-      sfx.play('waveStart');
-      music.set('wave');
-      for (let i = 0; i < 60; i++) {
-        const pet = CAST[Math.floor(frand(0, 6))];
-        const kind = frand(0, 1) < 0.7 ? 'attack' : frand(0, 1) < 0.7 ? 'hurt' : 'death';
-        setTimeout(() => {
-          sfx.play(petVoice(pet, kind), 0, { x: frand(60, 480), enemy: frand(0, 1) < 0.5 });
-          if (kind === 'death') sfx.play('cashKill', 0, { delay: 0.2 });
-        }, 800 + i * 70);
-      }
-      setTimeout(() => {
-        sfx.play('waveClear');
-        sfx.play('cashWave', 0, { delay: 0.9 });
-        music.set('prep');
-      }, 800 + 60 * 70 + 400);
-    }),
-    button('stage clear: fanfare, 3 stars, gems', '', () => {
-      sfx.play('stageClear');
-      music.set('stageClear');
-      for (const k of [1, 2, 3]) setTimeout(() => sfx.play('star', k), (2.4 + k * 0.5) * 1000);
-      setTimeout(() => sfx.play('gems'), 4.6 * 1000);
-    }),
+    button('matchmaking: search, found', '', () => matchmaking(false)),
+    button('matchmaking: champion', '', () => matchmaking(true)),
+    button('a fight: bell, READY, FIGHT, brawl, KOs, win', '', () => fightNight(true)),
+    button('a fight that is lost', '', () => fightNight(false)),
+    button('result: count-ups, level up', '', () => result()),
   ),
 );
 
+/** The searching moment (the music loop and a tick a second), then FOUND or CHAMPION MATCH. */
+function matchmaking(champion: boolean) {
+  music.set('search');
+  for (let i = 0; i < 3; i++) setTimeout(() => sfx.play('search'), 300 + i * 1000);
+  setTimeout(() => {
+    sfx.play(champion ? 'champion' : 'found');
+    music.set(champion ? 'champion' : 'lobby');
+  }, 3300);
+}
+
+/** A whole fight the way the game would play it. */
+function fightNight(win: boolean) {
+  const T = (s: number, f: () => void) => setTimeout(f, s * 1000);
+  music.set('off');
+  T(0, () => sfx.play('bellStart'));
+  T(0.9, () => sfx.play('ready'));
+  T(2.1, () => {
+    sfx.play('fight');
+    music.set('fight');
+    music.energy(0.4);
+  });
+  // the brawl: punches, voices, a crit now and then with a comic word, knock-outs with coins
+  let kos = 0;
+  for (let i = 0; i < 70; i++) {
+    T(2.6 + i * 0.08, () => {
+      const pet = CAST[Math.floor(frand(0, CAST.length))];
+      const enemy = frand(0, 1) < 0.5;
+      const x = frand(60, 480);
+      const r = frand(0, 1);
+      if (r < 0.45) {
+        sfx.play(petVoice(pet, 'attack'), 0, { x, enemy });
+        sfx.play('punch', 0, { x, enemy, delay: 0.04 });
+      } else if (r < 0.75) sfx.play(petVoice(pet, 'hurt'), 0, { x, enemy });
+      else if (r < 0.82) {
+        sfx.play('crit', 0, { x });
+        sfx.play(['pow', 'bonk', 'wham', 'smash'][Math.floor(frand(0, 4))] as SoundName, 0, { x, delay: 0.03 });
+        sfx.play('ooh', 0, { delay: 0.1 });
+      } else if (r < 0.88) {
+        sfx.play('ko', 0, { x, enemy });
+        sfx.play(petVoice(pet, 'death'), 0, { x, enemy, delay: 0.05 });
+        sfx.play('coins', 0, { delay: 0.3 });
+        kos++;
+        if (kos === 2) sfx.play('doubleKo', 0, { delay: 0.2 });
+        if (kos === 3) sfx.play('tripleKo', 0, { delay: 0.2 });
+        if (kos === 5) {
+          sfx.play('rampage', 0, { delay: 0.2 });
+          sfx.play('roar', 3, { delay: 0.3 });
+        }
+      }
+      music.energy(Math.min(1, 0.4 + i / 70));
+    });
+  }
+  const end = 2.6 + 70 * 0.08 + 0.3;
+  T(end, () => {
+    sfx.play('ko', 0, { x: 270 });
+    sfx.play('slowmo');
+    sfx.play('lastKill');
+  });
+  T(end + 1.6, () => {
+    sfx.play('bellEnd');
+    sfx.play(win ? 'victory' : 'defeat', 0, { delay: 0.4 });
+    if (win) sfx.play('roar', 2, { delay: 0.5 });
+    music.set(win ? 'victory' : 'defeat');
+  });
+}
+
+/** The result panel: cash counting up, the XP bar filling, LEVEL UP, the MVP. */
+function result() {
+  const T = (s: number, f: () => void) => setTimeout(f, s * 1000);
+  for (let i = 0; i <= 24; i++) T(i * 0.045, () => sfx.play('cashCount', i / 24));
+  for (let i = 0; i <= 30; i++) T(1.4 + i * 0.04, () => sfx.play('xpCount', i / 30));
+  T(2.7, () => sfx.play('levelUp'));
+  T(4.6, () => sfx.play('mvp'));
+}
+
 // ---- every sound, every level
+/** Sounds whose n is a progress 0..1 (they climb a scale). */
+const PROGRESS: SoundName[] = ['spinTick', 'cashCount', 'xpCount'];
 for (const [title, names] of GROUPS) {
   root.append(heading(title));
   // plain sounds share one wrapping row; sounds with levels (and the spin tick's progress) get a row each
-  root.append(row(null, ...names.filter((n) => !SOUNDS[n]?.levels && n !== 'spinTick').map((n) => button(n, '', () => sfx.play(n, 0, { x: 270 })))));
+  root.append(row(null, ...names.filter((n) => !SOUNDS[n]?.levels && !PROGRESS.includes(n)).map((n) => button(n, '', () => sfx.play(n, 0, { x: 270 })))));
   for (const name of names) {
     const levels = SOUNDS[name]?.levels;
-    if (name === 'spinTick') root.append(row(`${name} (progress)`, ...[0, 0.25, 0.5, 0.75, 1].map((p) => button(String(p), 'lv', () => sfx.play(name, p)))));
+    if (PROGRESS.includes(name)) root.append(row(`${name} (progress)`, ...[0, 0.25, 0.5, 0.75, 1].map((p) => button(String(p), 'lv', () => sfx.play(name, p)))));
     else if (levels) root.append(row(name, ...levels.map((l) => button(String(l), 'lv', () => sfx.play(name, l)))));
   }
 }

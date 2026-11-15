@@ -8,7 +8,7 @@ import { Inventory, isOwned } from './inventory';
 
 /*
  * The cases, like Bunny Brigade's: CASE costs cash (its price climbs a little with every CASE opened), ELITE costs
- * gems (never an E-class item, and its units sit ELITE_RUNG rungs higher). The odds improve with the stage. One
+ * gems (never an E-class item, and its units sit ELITE_RUNG rungs higher). The odds improve with the player level. One
  * shared pity counter: the case after PITY in a row without an A-class item or a top unit is guaranteed one.
  */
 
@@ -26,21 +26,21 @@ export function caseBlock(state: SaveState, kind: CaseKind): string | null {
   return null;
 }
 
-/** The odds of a case on the player's stage, for an odds panel: kinds (% by ROLL_KINDS), item classes E..SSS, unit rungs 1..12. */
-export function caseOdds(state: Pick<SaveState, 'stage'>, kind: CaseKind): { kinds: number[]; classes: number[]; rungs: number[] } {
+/** The odds of a case at the player's level, for an odds panel: kinds (% by ROLL_KINDS), item classes E..SSS, unit rungs 1..12. */
+export function caseOdds(state: Pick<SaveState, 'level'>, kind: CaseKind): { kinds: number[]; classes: number[]; rungs: number[] } {
   const elite = kind === 'elite';
   return {
     kinds: ROLL_KINDS.map((k) => ROLL_KIND_ODDS[k]),
-    classes: classOdds(state.stage, elite),
-    rungs: petOdds(homeRung(state.stage, elite), elite),
+    classes: classOdds(state.level, elite),
+    rungs: petOdds(homeRung(state.level, elite), elite),
   };
 }
 
 /** The roll of a case, without paying or adding anything (state is only read). */
-export function rollPiece(state: Pick<SaveState, 'stage' | 'pity' | 'cases'>, kind: CaseKind, rng: Rng): { type: PieceType; level: number; pity: boolean } {
+export function rollPiece(state: Pick<SaveState, 'level' | 'pity' | 'cases'>, kind: CaseKind, rng: Rng): { type: PieceType; level: number; pity: boolean } {
   if (kind === 'case' && state.cases < SCRIPTED_ROLLS.length) return { ...SCRIPTED_ROLLS[state.cases], pity: false };
   const elite = kind === 'elite';
-  const home = homeRung(state.stage, elite);
+  const home = homeRung(state.level, elite);
   const pity = state.pity >= PITY;
   const k = ROLL_KINDS[rng.weighted(ROLL_KINDS.map((x) => ROLL_KIND_ODDS[x]))];
   if (k === 'pet') {
@@ -49,7 +49,7 @@ export function rollPiece(state: Pick<SaveState, 'stage' | 'pity' | 'cases'>, ki
       : rng.weighted(petOdds(home, elite)) + 1;
     return { type: petAt(rung)!, level: 1, pity };
   }
-  return { type: k, level: rng.weighted(pity ? TOP_ODDS : classOdds(state.stage, elite)) + 1, pity };
+  return { type: k, level: rng.weighted(pity ? TOP_ODDS : classOdds(state.level, elite)) + 1, pity };
 }
 
 /**
@@ -72,7 +72,7 @@ export function openCase(state: SaveState, kind: CaseKind, rng?: Rng): RollResul
   state.rolled += 1;
   const pet = isPet(r.type);
   const rung = pet ? rungOf(r.type as PetType) : 0;
-  const top = pet ? rung >= pityRung(homeRung(state.stage, kind === 'elite')) : r.level >= 5;
+  const top = pet ? rung >= pityRung(homeRung(state.level, kind === 'elite')) : r.level >= 5;
   state.pity = top ? 0 : state.pity + 1;
   const fresh = pet && !isOwned(state, r.type as PetType);
   const piece = new Inventory(state).add(r.type, r.level)!;

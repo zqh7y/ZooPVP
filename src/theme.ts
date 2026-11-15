@@ -15,13 +15,13 @@ export const FONT = '"Barlow Condensed", "Arial Narrow", "Helvetica Neue", Arial
  * few interface entries left here (page, grid, health) are tuned to match UI.
  */
 export const COLOR = {
-  page: '#e7e4dd', // behind the canvas (and the screen-change fade): a soft greige
+  page: '#1f1940', // behind the canvas (and the screen-change fade): the deep indigo base
   ink: '#14181f', // every outline: a neutral slate-black, so the art sits with the interface
   white: '#ffffff',
   textDim: '#6c727a',
   textInk: '#2e343c', // text on paper
   toast: '#e2c98f',
-  shade: 'rgba(240, 238, 233, 0.82)', // the light wash behind a panel that covers the screen
+  shade: 'rgba(31, 25, 64, 0.82)', // the deep wash behind a panel that covers the screen
 
   // paper: panels, pills and cards
   paper: '#f6f4ef',
@@ -40,17 +40,17 @@ export const COLOR = {
   indigo: '#56609a',
   indigoLight: '#949cd0',
   indigoDark: '#373d68',
-  gold: '#e3c06a', // rewards (soft, never glaring)
-  goldLight: '#f5e6bc',
-  goldDark: '#b8913a',
-  jade: '#6fae92',
-  jadeLight: '#bfe0cf',
-  jadeDark: '#4a8a6d',
+  gold: '#f2c14e', // rewards: a warm gold, rich but never glaring
+  goldLight: '#fbe3a0',
+  goldDark: '#c48a1c',
+  jade: '#5cc46a',
+  jadeLight: '#bfeac2',
+  jadeDark: '#2f8a3c',
 
   // the field
-  grass: '#9cc58a',
-  grassLight: '#c8e0b4',
-  grassDark: '#6f9e64',
+  grass: '#8fc477',
+  grassLight: '#c3e3ae',
+  grassDark: '#64a055',
   sky: '#cfe2ee',
   wood: '#ad8460',
   woodDark: '#7a5a3e',
@@ -58,72 +58,83 @@ export const COLOR = {
   stoneDark: '#7f7a8a',
 
   // health
-  hpGood: '#6fbf7f',
-  hpBad: '#d96a62',
-  hpBack: '#2a3038',
+  hpGood: '#6fcf7f',
+  hpBad: '#ef6a62',
+  hpBack: '#2a2348',
 
-  // the grid: a calm stone tray with light cells
-  gridFrame: '#dcd8cf',
-  gridInner: '#e6e2da',
-  gridInnerEdge: '#d2ccc0',
-  cell: 'rgba(60, 54, 44, 0.07)',
-  cellLight: 'rgba(255, 255, 255, 0.55)',
-  joint: '#d9b467', // a link in use
-  jointIdle: 'rgba(46, 52, 60, 0.2)', // a link the unit does not use (it has a better one)
-  valid: 'rgba(106, 167, 122, 0.22)',
-  invalid: 'rgba(207, 107, 99, 0.22)',
-  fuse: '#d9b467',
+  // the grid: a deep plum tray with darker cells, so the white tiles pop
+  gridFrame: '#3a2f6c',
+  gridInner: '#2a2253',
+  gridInnerEdge: '#1f1840',
+  cell: 'rgba(16, 10, 40, 0.28)',
+  cellLight: 'rgba(255, 255, 255, 0.08)',
+  joint: '#f2c14e', // a link in use
+  jointIdle: 'rgba(170, 150, 230, 0.32)', // a link the unit does not use (it has a better one)
+  valid: 'rgba(92, 196, 106, 0.3)',
+  invalid: 'rgba(239, 106, 98, 0.3)',
+  fuse: '#f2c14e',
 
   bot: '#2b3441', // kept for old callers
 };
 
-/** Team colours: 0 = you (blue), 1 = the enemy wave (red). A little softer than pure, still clear at a glance. */
+/** Team colours (the corners): 0 = you (blue), 1 = the opponent (red). Clear at a glance, a little softer than pure. */
 export const TEAM = [
   { main: '#4f94d9', light: '#a9cdef', dark: '#2f6aa8' },
   { main: '#de6a62', light: '#f0b2ab', dark: '#a8433d' },
 ] as const;
 
 /**
- * The interface: calm and easy on the eyes. Soft greige and warm white surfaces, slate text, one grey for
- * secondary text and one gentle accent (a muted sage teal) for the main action, with white text on it. Rewards
- * use a soft wheat tone, never a glaring gold. Team blue / red appear only where something belongs to a team.
+ * The interface: a deep, inviting base. Deep indigo behind everything, plum-indigo panels with chunky depth, light
+ * text on them; saturated but soft-edged buttons (BATTLE a juicy green, CASE a warm orange, ELITE a purple); warm
+ * white only where a thing is held or read up close (the piece tiles, the top-bar pills, the guide's bubbles), with
+ * dark ink on it. Rewards are a warm gold. Team blue / red appear only where something belongs to a corner.
+ *
+ * text / textDim / textMute are INK for light plates (the label() default); hi / hiDim / hiMute are for the dark base.
  */
 export const UI = {
-  bg: '#e7e4dd', // the page behind everything
-  surface: '#f7f5f1', // bars, panels, plates
-  surfaceAlt: '#eeebe5', // neutral chips, inner cells
+  bg: '#241d4a', // the page behind everything: deep indigo
+  bgTop: '#2f2560', // the top of the page's gentle gradient (a touch of plum)
+  bgLow: '#1b1538', // its bottom
+  surface: '#3d3274', // panels and plates on the base
+  surfaceHi: '#4a3e8a', // a panel's lit top
+  surfaceAlt: '#2f2760', // chips and wells inside a panel
   tile: '#fbfaf7', // the top face of the tile a piece sits on
   tileHi: '#ffffff', // a lifted tile
-  track: '#dedad2', // the empty part of a bar
-  border: '#dcd7cd',
-  borderStrong: '#c7c0b3',
+  track: '#221b47', // the empty part of a bar
+  border: '#5b4ea0',
+  borderStrong: '#7262bf',
+  /** ink: text on light plates (tiles, pills, bubbles) */
   text: '#2e343c',
   textDim: '#6c727a',
   textMute: '#9da1a7',
-  accent: '#5a9686', // the one main-action colour: a muted sage teal
-  accentDim: '#4f8577', // the accent, pressed
-  accentDark: '#3f6c60', // the side face of an accent block
-  accentLight: '#d5e7e1', // a pale wash of the accent (a fuse target, a selected chip)
+  /** text on the dark base and panels */
+  hi: '#fbf8ff',
+  hiDim: '#c8bdef',
+  hiMute: '#8f83c2',
+  accent: '#56c15a', // the main action: a juicy green (BATTLE, CONTINUE, a good drop)
+  accentDim: '#45ad4b', // the accent, pressed
+  accentDark: '#2c7f30', // the side face of an accent block
+  accentLight: '#bdf0b8', // a pale wash of the accent (a fuse target, a selected chip)
   accentText: '#ffffff', // text on the accent
-  /** a soft wheat for rewards: cash, stars, the reward glow */
-  reward: '#d7b46a',
-  rewardDark: '#a9873f',
-  rewardLight: '#f1e3bf',
-  /** gems: a soft lilac */
-  gem: '#9b8fd0',
-  gemDark: '#6f63a6',
-  /** a muted amber: "not enough yet" (power under the recommended one, a price you cannot pay) */
-  warm: '#c48552',
-  ok: '#6aa77a', // a drop that fits
-  danger: '#cf6b63',
-  sky: '#e4ecf0', // a pale sky tint, where a panel wants air
-  /** the soft shadow everything casts (light from the upper left) */
-  shadow: 'rgba(60, 54, 44, 0.14)',
+  /** a warm gold for rewards: cash, the XP bar, the reward glow */
+  reward: '#f2c14e',
+  rewardDark: '#c48a1c',
+  rewardLight: '#fde7a8',
+  /** gems: a soft lilac-violet */
+  gem: '#a98cf5',
+  gemDark: '#7a5bd6',
+  /** a warm orange: "not enough yet" (a price you cannot pay) */
+  warm: '#ff9f4a',
+  ok: '#5cc46a', // a drop that fits
+  danger: '#ef6a62',
+  sky: '#e4ecf0', // a pale sky tint, where a light card wants air
+  /** the shadow everything casts on the deep base */
+  shadow: 'rgba(10, 6, 30, 0.45)',
   /** the thin dark edge of light text that sits directly on the pitch */
   edge: 'rgba(24, 34, 30, 0.66)',
-  /** a see-through warm white, for plates that float over the pitch */
-  glass: 'rgba(247, 245, 241, 0.94)',
-  scrim: 'rgba(231, 228, 221, 0.82)',
+  /** a see-through deep plate, for plates that float over the pitch */
+  glass: 'rgba(36, 29, 74, 0.92)',
+  scrim: 'rgba(24, 18, 52, 0.78)',
   /** class rim colours E..SSS on light surfaces: greys, a cool steel, then soft wheat (see TIER) */
   tier: ['#b4b8bd', '#9ea6ae', '#8b95a0', '#93a8bb', '#c8a660', '#c99a52', '#d8b874'],
   /** the class plate: fill top, fill bottom, letter */
@@ -138,6 +149,33 @@ export const UI = {
   ],
   /** class letters on a light surface (odds rows, captions) */
   tierText: ['#8a9099', '#78808a', '#626b76', '#5f7489', '#a5823a', '#ad7b34', '#9b7a2c'],
+};
+
+/**
+ * The top bar's cash, gems and LEVEL pills: the v4 look the player asked to keep EXACTLY (a warm white pill, a
+ * recessed well for the number), so they keep their own colours whatever the rest of the palette does.
+ */
+export const PILL = {
+  fill: '#f7f5f1',
+  edge: '#dcd7cd',
+  well: '#eeebe5',
+  shadow: 'rgba(60, 54, 44, 0.12)',
+  text: '#2e343c',
+  moving: '#a9873f', // the number while it ticks
+  xp: '#f0bf4f', // the XP fill in the LEVEL pill's well
+  xpLight: '#fbe7ad',
+};
+
+/**
+ * Rarity as a colour, E..SSS (a unit takes the tier its rung looks like): the roll's reel cards, the prize burst and
+ * class letters on the dark base. Grey, green, blue, purple, gold, coral, then a pink-gold shimmer for SSS: the
+ * ramp roll games use, softened so it never glares.
+ */
+export const RARITY = {
+  main: ['#9aa3b8', '#5cc46a', '#4fa3ea', '#a173f2', '#f2b83d', '#ff7a5c', '#ff7ccf'],
+  light: ['#d3d8e4', '#b6eab9', '#b4daf8', '#d6bffb', '#fde3a0', '#ffc6b4', '#ffd0ef'],
+  dark: ['#5b6378', '#2f8a3c', '#2a6fb0', '#6a40b8', '#b67d12', '#c2492f', '#b8418e'],
+  name: ['COMMON', 'UNCOMMON', 'RARE', 'EPIC', 'LEGENDARY', 'MYTHIC', 'SECRET'],
 };
 
 /**
