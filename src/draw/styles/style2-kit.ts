@@ -83,11 +83,11 @@ export function split(ctx: Ctx, key: number, cx: number, cy: number, dx: number,
 // ------------------------------------------------------------------ the soft long shadow, baked once
 
 let shadowSprite: HTMLCanvasElement | null = null;
-/** 160 x 48: a dark core under the feet at (40, 24), and a long soft tail running off to the right. */
+/** 144 x 48 (the tail ends near 140): a dark core under the feet at (40, 24), a long soft tail off to the right. */
 export function shadow(): HTMLCanvasElement {
   if (shadowSprite) return shadowSprite;
   const c = document.createElement('canvas');
-  c.width = 160;
+  c.width = 144;
   c.height = 48;
   const g = c.getContext('2d')!;
   const blob = (x: number, y: number, rx: number, ry: number, a: number) => {
@@ -104,7 +104,7 @@ export function shadow(): HTMLCanvasElement {
     g.fill();
     g.restore();
   };
-  blob(84, 25, 74, 15, 0.42); // the long tail
+  blob(76, 25, 64, 15, 0.42); // the long tail
   blob(42, 24, 38, 14, 0.5); // the core under the body
   blob(40, 24, 24, 8, 0.35); // contact
   shadowSprite = c;

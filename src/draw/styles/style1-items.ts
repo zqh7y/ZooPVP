@@ -1,6 +1,6 @@
 import type { ItemType } from './api';
 import { clamp, seeded } from '../../util';
-import { BRUSH, EVEN, PRESS, SWELL, arc, begin, cub, dot, dryPattern, emit, pt, quad, type Prof } from './style1-brush';
+import { BRUSH, EVEN, PRESS, SWELL, arc, begin, cub, dot, dryPattern, emit, inkGrain, plateGrain, pt, quad, type Prof } from './style1-brush';
 
 /*
  * Style 1 (Ink Brush): the weapons, the helmet and the perk icons, in the same brush as the pets. Each item is
@@ -57,9 +57,21 @@ function plate(ctx: Ctx, on: boolean) {
   const o = on ? -off() : off();
   ctx.translate(o, o * 0.7);
 }
+/** fills the current path with ink, and with the paper showing through it when big */
+function inkFill(ctx: Ctx) {
+  ctx.fillStyle = INK;
+  ctx.fill();
+  if (Q === 2) inkGrain(ctx);
+}
+/** fills the current path with a flat colour plate, grained when big */
+function plateFill(ctx: Ctx, color: string) {
+  ctx.fillStyle = color;
+  ctx.fill();
+  if (Q === 2) plateGrain(ctx);
+}
 /** a wash: the dry-brush texture when big, a flat tone when small */
 function wash(ctx: Ctx, color: string, alpha = 0.6) {
-  if (Q === 0) {
+  if (Q < 2) {
     ctx.fillStyle = color;
     ctx.globalAlpha = alpha;
     ctx.fill();
@@ -81,8 +93,7 @@ function knife(ctx: Ctx) {
   ctx.quadraticCurveTo(3.9, -33, 3.9, -24);
   ctx.lineTo(3.9, -1);
   ctx.closePath();
-  ctx.fillStyle = PAPER;
-  ctx.fill();
+  plateFill(ctx, PAPER);
   ctx.beginPath();
   begin();
   pt(-1.1, -3);
@@ -110,8 +121,7 @@ function knife(ctx: Ctx) {
   pt(0, 14);
   emit(ctx, 7, EVEN, 4);
   dot(ctx, 0, 15, 3.8, 3.3);
-  ctx.fillStyle = INK;
-  ctx.fill();
+  inkFill(ctx);
   if (Q > 0) {
     ctx.beginPath();
     for (const y of [4.5, 10]) {
@@ -137,8 +147,7 @@ function bat(ctx: Ctx) {
   ctx.bezierCurveTo(7.6, -24, 3.2, -12, 2.8, 2);
   ctx.lineTo(2.5, 15);
   ctx.closePath();
-  ctx.fillStyle = WOOD;
-  ctx.fill();
+  plateFill(ctx, WOOD);
   ctx.beginPath();
   C(4.4, -46, 5, -30, 3, -14, 1.4, -2);
   emit(ctx, 5.5, SWELL, 5);
@@ -172,54 +181,50 @@ function bat(ctx: Ctx) {
       pt(2.6, 2 + i * 3.6);
       ink(ctx, 1.5, EVEN, i);
     }
-  ctx.fillStyle = INK;
-  ctx.fill();
+  inkFill(ctx);
 }
 
 function spear(ctx: Ctx, icon: boolean) {
   // the shaft: one long stroke of ink
   ctx.beginPath();
   begin();
-  pt(0, 52);
+  pt(0, 36);
   pt(0, 0);
-  pt(0, -45);
-  emit(ctx, 4.2 * Math.min(G, 1.25), { a: 0.55, h: 0.35, b: 0.85, wob: 0.06, cap: true }, 1);
-  ctx.fillStyle = INK;
-  ctx.fill();
+  pt(0, -38);
+  emit(ctx, (icon ? 5.4 : 4.2) * Math.min(G, 1.25), { a: 0.55, h: 0.35, b: 0.85, wob: 0.06, cap: true }, 1);
+  inkFill(ctx);
   // the blade
   plate(ctx, true);
   ctx.beginPath();
-  ctx.moveTo(0, -44);
-  ctx.quadraticCurveTo(-7.5, -52, 0, -76);
-  ctx.quadraticCurveTo(7.5, -52, 0, -44);
+  ctx.moveTo(0, -37);
+  ctx.quadraticCurveTo(-7.5, -44, 0, -64);
+  ctx.quadraticCurveTo(7.5, -44, 0, -37);
   ctx.closePath();
-  ctx.fillStyle = PAPER;
-  ctx.fill();
+  plateFill(ctx, PAPER);
   ctx.beginPath();
-  C(1.8, -48, 4, -53, 3, -60, 0.6, -69);
+  C(1.8, -41, 4, -45, 3, -51, 0.6, -58);
   emit(ctx, 2.8, EVEN, 2);
   wash(ctx, STEEL, 0.9);
   plate(ctx, false);
   ctx.beginPath();
   begin();
-  pt(0.4, -44);
-  quad(7.9, -52, 0, -77, st(36));
+  pt(0.4, -37);
+  quad(7.9, -44, 0, -65, st(32));
   ink(ctx, 2.8, LATE, 3);
   begin();
-  pt(0, -76);
-  quad(-7.6, -53, -1.4, -45.5, st(34));
+  pt(0, -64);
+  quad(-7.6, -45, -1.4, -38.5, st(30));
   ink(ctx, 1.8, BRUSH, 4);
   if (Q > 1) {
     begin();
-    pt(0, -50);
-    pt(0, -58);
-    pt(0, -67);
+    pt(0, -42);
+    pt(0, -49);
+    pt(0, -56);
     ink(ctx, 1.1, BRUSH, 5);
   }
-  dot(ctx, 0, -44, 4, 2.4);
+  dot(ctx, 0, -37, 4, 2.4);
   if (!icon) tassel(ctx);
-  ctx.fillStyle = INK;
-  ctx.fill();
+  inkFill(ctx);
   if (icon) {
     ctx.beginPath();
     tassel(ctx);
@@ -229,11 +234,11 @@ function spear(ctx: Ctx, icon: boolean) {
 }
 
 function tassel(ctx: Ctx) {
-  C(-0.5, -43, -4, -38, -8, -33, -9, -24);
+  C(-0.5, -36, -4, -31, -8, -26, -9, -17);
   ink(ctx, 3.4, PRESS, 6);
-  C(-0.5, -43, -2, -37, -3.5, -31, -2.8, -23);
+  C(-0.5, -36, -2, -30, -3.5, -24, -2.8, -16);
   ink(ctx, 2.8, PRESS, 7);
-  C(-0.5, -43, -6, -41, -12, -37, -15, -30);
+  C(-0.5, -36, -6, -34, -12, -30, -15, -23);
   ink(ctx, 2.8, PRESS, 8);
 }
 
@@ -241,8 +246,7 @@ function shield(ctx: Ctx, team?: string) {
   plate(ctx, true);
   ctx.beginPath();
   dot(ctx, 0, 0, 22, 22);
-  ctx.fillStyle = PAPER;
-  ctx.fill();
+  plateFill(ctx, PAPER);
   ctx.beginPath();
   A(0, 0, 17.5, 17.5, 0, -0.3, 2.4);
   emit(ctx, 8, SWELL, 4);
@@ -259,8 +263,7 @@ function shield(ctx: Ctx, team?: string) {
     A(0, 0, 12.5, 12.5, 0, -1.25, 4.15);
     ink(ctx, Q === 0 ? 7 : 6, PRESS, 3);
   }
-  ctx.fillStyle = INK;
-  ctx.fill();
+  inkFill(ctx);
   if (team) {
     ctx.beginPath();
     A(0, 0, 12.5, 12.5, 0, -1.25, 4.15);
@@ -281,171 +284,180 @@ export function weapon(ctx: Ctx, type: string, q: number, team?: string) {
 
 // ------------------------------------------------------------------ the helmet: a lacquered kabuto with a gold crescent
 
+/** the gold crescent crest's outline, its lowest point on the origin (d shifts it, for the ink under it) */
+function crescent(ctx: Ctx, d: number) {
+  ctx.moveTo(d + 11 * Math.cos(Math.PI + 0.3), d - 11 + 11 * Math.sin(Math.PI + 0.3));
+  ctx.arc(d, d - 11, 11, Math.PI + 0.3, -0.3, true);
+  ctx.arc(d, d - 15, 9, -0.1, Math.PI + 0.1, false);
+  ctx.closePath();
+}
+
 /**
- * The helmet, the middle of its rim on the origin, facing right. s scales it (1 = an ant's head). small leaves
- * out the lacing.
+ * The helmet, the middle of its rim on the origin, facing right: a bowl of black lacquer (the ink itself) with a
+ * shine left bare, a gold rim, the neck guard flaring out behind, a peak in front and a gold crescent (crest
+ * scales it, 0 leaves it off). s scales the whole helmet (1 = an ant's head). Three fills: ink, gold, shine.
  */
-export function helmet(ctx: Ctx, s: number, q: number, frog: boolean) {
+export function helmet(ctx: Ctx, s: number, q: number, crest: number) {
   Q = q;
   ctx.save();
   ctx.scale(s, s);
-  // the crest first, behind the dome's front edge
+  const crestAt = (d: number) => {
+    if (crest <= 0) return;
+    ctx.save();
+    ctx.translate(11, -13);
+    ctx.rotate(0.12);
+    ctx.scale(crest, crest);
+    crescent(ctx, d);
+    ctx.restore();
+  };
   ctx.beginPath();
-  ctx.moveTo(15 + 11 * Math.cos(Math.PI + 0.32), -22 + 11 * Math.sin(Math.PI + 0.32));
-  ctx.arc(15, -22, 11, Math.PI + 0.32, -0.32, true);
-  ctx.arc(15, -26, 9.2, -0.08, Math.PI + 0.08, false);
+  // the crest's ink: the same crescent a little down and back, like a print's key plate
+  crestAt(1.6 / crest);
+  // the neck guard
+  ctx.moveTo(-17, -2);
+  ctx.quadraticCurveTo(-27, 3, -31, 13);
+  ctx.quadraticCurveTo(-20, 11, -10, 8);
+  ctx.quadraticCurveTo(-2, 5, 4, 1);
   ctx.closePath();
+  // the bowl
+  ctx.moveTo(-21, 1);
+  ctx.ellipse(0, 1, 21, 20, 0, Math.PI, Math.PI * 2, false);
+  ctx.closePath();
+  // the peak
+  begin();
+  pt(12, 0.5);
+  quad(21, 0.5, 29, 4.5, 4);
+  emit(ctx, 5.4, { a: 1, h: 0.2, b: 0.2, wob: 0, cap: false }, 0);
+  inkFill(ctx);
+  // gold: the crest and the rim
+  ctx.beginPath();
+  crestAt(0);
+  begin();
+  pt(-20.5, 0.4);
+  quad(0, 2.6, 20.5, 0.4, st(42));
+  emit(ctx, 2.6, { a: 0.4, h: 0.5, b: 0.6, wob: 0.05, cap: false }, 3);
   ctx.fillStyle = GOLD;
   ctx.fill();
+  // the shine: paper left bare, and the lacing of the neck guard
   ctx.beginPath();
-  A(15, -22, 11.2, 11.2, 0, Math.PI + 0.25, Math.PI * 0.5);
-  ink(ctx, 1.8, SWELL, 1);
-  A(15, -22, 11.2, 11.2, 0, Math.PI * 0.5, -0.25);
-  ink(ctx, 1.8, SWELL, 2);
-  // the neck guard flaring out behind, the dome, the peak
-  ctx.moveTo(-19, -2);
-  ctx.quadraticCurveTo(-27, 3, -32, 13);
-  ctx.quadraticCurveTo(-18, 9, -6, 8);
-  ctx.quadraticCurveTo(8, 7, 16, 4);
-  ctx.lineTo(18, -1);
-  ctx.closePath();
-  ctx.moveTo(-21, 1);
-  ctx.ellipse(0, 1, 21, 19, 0, Math.PI, Math.PI * 2, false);
-  ctx.lineTo(21, 1);
-  ctx.closePath();
-  begin();
-  pt(14, 0.5);
-  quad(22, 0, 30, 4, 4);
-  emit(ctx, 5, { a: 1, h: 0.2, b: 0.15, wob: 0, cap: false }, 0);
-  ctx.fillStyle = INK;
-  ctx.fill();
-  // the shine: paper left bare, and the lacing on the neck guard
-  ctx.beginPath();
-  A(-1, 1, 14.5, 13, 0, -2.75, -1.75);
-  emit(ctx, frog ? 3.6 : 3.2, TAIL, 3);
+  A(-1, 1, 14.5, 13.5, 0, -2.75, -1.7);
+  emit(ctx, 3.6, TAIL, 3);
   if (Q > 0) {
-    C(-25, 7, -16, 4.5, -4, 4, 12, 2.4);
-    emit(ctx, 1.2, SWELL, 4);
+    C(-26, 8.5, -18, 6, -8, 5, 1, 2.6);
+    emit(ctx, 1.3, SWELL, 4);
   }
-  ctx.fillStyle = PAPER;
-  ctx.fill();
+  plateFill(ctx, PAPER);
   ctx.restore();
 }
 
 // ------------------------------------------------------------------ gear (icons only)
 
 function sneaker(ctx: Ctx) {
-  // speed: dry streaks behind
+  // speed: three quick strokes behind the heel
   ctx.beginPath();
   for (let i = 0; i < 3; i++) {
     begin();
-    pt(-52 + i * 4, -6 + i * 9);
-    pt(-34 + i * 2, -6 + i * 9);
-    emit(ctx, 4 - i * 0.6, { a: 0.1, h: 0.85, b: 0.4, wob: 0.15, cap: false }, i);
+    pt(-38 - i * 2, -8 + i * 8);
+    pt(-46 - i * 2, -8 + i * 8);
+    pt(-54 + i * 2, -8 + i * 8);
+    emit(ctx, 3.4 - i * 0.4, { a: 0.9, h: 0.15, b: 0, wob: 0.1, cap: true }, i);
   }
-  ctx.fillStyle = dryPattern(ctx, INK, 11, 1.1);
-  ctx.fill();
+  inkFill(ctx);
   plate(ctx, true);
+  // the shoe: upper and sole in one piece of paper
   ctx.beginPath();
-  ctx.moveTo(-30, 12);
-  ctx.lineTo(-29, -8);
-  ctx.quadraticCurveTo(-22, -12, -13, -9);
-  ctx.quadraticCurveTo(-8, -4, -2, -6);
-  ctx.lineTo(3, -18);
-  ctx.quadraticCurveTo(9, -17, 10, -11);
-  ctx.quadraticCurveTo(24, -4, 31, 4);
-  ctx.quadraticCurveTo(34, 9, 30, 13);
+  ctx.moveTo(-32, 14);
+  ctx.lineTo(-33, -4);
+  ctx.quadraticCurveTo(-33, -16, -26, -17);
+  ctx.quadraticCurveTo(-18, -16, -14, -12);
+  ctx.lineTo(-9, -22);
+  ctx.quadraticCurveTo(-3, -26, 1, -22);
+  ctx.quadraticCurveTo(10, -10, 24, -6);
+  ctx.quadraticCurveTo(37, -2, 37, 8);
+  ctx.lineTo(36, 14);
   ctx.closePath();
-  ctx.fillStyle = PAPER;
-  ctx.fill();
+  plateFill(ctx, PAPER);
   ctx.beginPath();
-  // the side flash, one red flick
-  C(-24, 4, -12, 4, 2, -2, 14, -10);
-  emit(ctx, 7, PRESS, 2);
+  C(-28, 3, -10, 4, 14, 3, 33, 2);
+  emit(ctx, 5, SWELL, 3);
+  wash(ctx, PAPER_DK, 0.9);
+  // the side flash: one red stroke swept forward like a wing
+  ctx.beginPath();
+  C(-28, -2, -16, -1, -4, -6, 10, -14);
+  emit(ctx, 8.5, PRESS, 2);
   ctx.fillStyle = SEAL;
   ctx.fill();
-  ctx.beginPath();
-  C(-27, 10, -10, 9, 10, 9, 28, 6);
-  emit(ctx, 6, SWELL, 3);
-  wash(ctx, PAPER_DK, 0.9);
   plate(ctx, false);
   ctx.beginPath();
-  // the upper: heel, collar, tongue, over the laces to the toe
-  C(-29.5, 10, -30, 2, -30, -4, -28.5, -9);
-  ink(ctx, 3.6, SWELL, 4);
-  C(-27, -10.5, -20, -13, -13, -10, -6, -5.5);
+  // the opening of the shoe, dark inside
+  dot(ctx, -21, -15.5, 7.5, 2.8, 0.12);
+  // heel: down the back, heavy
+  C(-26.5, -18, -33, -16, -34, -4, -33, 13);
+  ink(ctx, 4.4, SWELL, 4);
+  // the tongue and over the laces to the toe, heavy round the toe
+  C(-10, -21, -6, -27, 0, -26, 3, -21);
   ink(ctx, 2.6, SWELL, 5);
-  C(-1.5, -6.5, 1, -13, 3, -19, 10.5, -11.5);
-  ink(ctx, 2.6, SWELL, 6);
-  C(12, -10, 22, -5, 30, 2, 32.5, 8);
-  ink(ctx, 3.4, LATE, 7);
+  C(3, -21, 10, -10, 22, -7.5, 31, -3);
+  quad(38.5, 1, 37.5, 9, 4);
+  ink(ctx, 4, LATE, 7);
+  // the line of the sole
+  C(-31, 6.5, -10, 7.5, 14, 7.5, 36, 6);
+  ink(ctx, 1.8, SWELL, 6);
   // laces
   for (let i = 0; i < 3; i++) {
     begin();
-    pt(5 + i * 5.5, -11 + i * 3.6);
-    pt(9 + i * 5.5, -7 + i * 3.6);
-    ink(ctx, 2.2, EVEN, 8 + i);
+    pt(-2 + i * 6, -17 + i * 3.6);
+    pt(3 + i * 6, -13 + i * 3.6);
+    ink(ctx, 2.6, EVEN, 8 + i);
   }
-  // the sole: one heavy stroke, turned up at the toe
+  // the tread: one heavy stroke along the ground, turned up at the toe
   begin();
-  pt(-31, 12.5);
-  quad(0, 15.5, 25, 14, st(56));
-  quad(32, 13, 34, 7, 3);
-  ink(ctx, 6, { a: 0.9, h: 0.5, b: 0.4, wob: 0.06, cap: true }, 11);
-  ctx.fillStyle = INK;
-  ctx.fill();
+  pt(-34, 14);
+  quad(0, 17, 28, 15.5, st(64));
+  quad(35, 15, 37.5, 10, 3);
+  ink(ctx, 5.6, { a: 0.95, h: 0.45, b: 0.5, wob: 0.06, cap: true }, 11);
+  inkFill(ctx);
 }
 
 function chili(ctx: Ctx) {
   // ink under, colour over: the outline is the wider stroke showing round the red one
   const body = (w: number, dx: number, dy: number) => {
     begin();
-    pt(-10 + dx, -18 + dy);
-    cub(12 + dx, -22 + dy, 22 + dx, -4 + dy, 14 + dx, 14 + dy, st(50));
-    quad(9 + dx, 24 + dy, -4 + dx, 28 + dy, st(18));
-    emit(ctx, w, { a: 0.85, h: 0.22, b: 0, wob: 0.06, cap: true }, 1);
+    pt(-14 + dx, -16 + dy);
+    cub(6 + dx, -22 + dy, 24 + dx, -10 + dy, 20 + dx, 10 + dy, st(50));
+    quad(16 + dx, 26 + dy, -2 + dx, 34 + dy, st(26));
+    emit(ctx, w, { a: 0.9, h: 0.2, b: 0, wob: 0.05, cap: true }, 1);
   };
   ctx.beginPath();
-  body(23 + 2 * 3.2, 0, 0);
-  ctx.fillStyle = INK;
-  ctx.fill();
+  body(20 + 2 * 3.4, 0, 0);
+  inkFill(ctx);
   ctx.beginPath();
-  body(23, -1.4, -1);
-  ctx.fillStyle = CHILI;
-  ctx.fill();
+  body(20, -1.5, -1);
+  plateFill(ctx, CHILI);
   ctx.beginPath();
-  C(12, -8, 18, 2, 14, 12, 6, 20);
+  C(16, -8, 22, 2, 18, 14, 8, 24);
   emit(ctx, 6, SWELL, 2);
   wash(ctx, CHILI_DK, 0.7);
   ctx.beginPath();
-  C(-6, -16, 4, -16.5, 10, -13, 13, -7);
-  emit(ctx, 3.4, TAIL, 3);
+  C(-8, -17, 2, -19, 10, -16, 14, -10);
+  emit(ctx, 3.6, TAIL, 3);
   ctx.fillStyle = '#ffd9c8';
   ctx.fill();
   // the calyx and the stem
   ctx.beginPath();
-  ctx.moveTo(-18, -18);
-  ctx.quadraticCurveTo(-12, -28, -2, -24);
-  ctx.quadraticCurveTo(2, -16, -4, -12);
-  ctx.quadraticCurveTo(-10, -16, -18, -18);
+  ctx.moveTo(-22, -14);
+  ctx.quadraticCurveTo(-18, -26, -6, -24);
+  ctx.quadraticCurveTo(-1, -16, -6, -9);
+  ctx.quadraticCurveTo(-14, -13, -22, -14);
   ctx.closePath();
   ctx.fillStyle = LEAF;
   ctx.fill();
   ctx.beginPath();
-  C(-18, -18, -12, -28, -2, -25, 1, -21);
-  ink(ctx, 2.2, SWELL, 4);
-  C(-9, -22, -11, -30, -8, -36, -1, -38);
-  ink(ctx, 3.6, PRESS, 5);
-  ctx.fillStyle = INK;
-  ctx.fill();
-  // two hot flicks
-  ctx.beginPath();
-  C(26, -24, 30, -28, 31, -33, 29, -38);
-  ink(ctx, 2.6, BRUSH, 6);
-  C(33, -14, 38, -16, 41, -20, 41, -25);
-  ink(ctx, 2.2, BRUSH, 7);
-  ctx.fillStyle = SEAL;
-  ctx.fill();
+  C(-22, -14, -18, -26, -6, -25, -2, -19);
+  ink(ctx, 2.4, SWELL, 4);
+  C(-13, -21, -15, -30, -12, -37, -4, -40);
+  ink(ctx, 3.8, PRESS, 5);
+  inkFill(ctx);
 }
 
 // ------------------------------------------------------------------ the seal and the icons
@@ -512,50 +524,41 @@ export function sealStamp(ctx: Ctx, x: number, y: number, s: number) {
 /** A perk icon in a 100 x 100 box centred on the origin. */
 export function itemIcon(ctx: Ctx, type: ItemType) {
   const k0 = K;
-  // a pale dry swash behind, like the brush was cleaned on the paper first
-  ctx.beginPath();
-  begin();
-  pt(-40, 18);
-  quad(0, 4, 42, -14, st(90));
-  emit(ctx, 26, { a: 0.4, h: 0.3, b: 0.2, wob: 0.18, cap: true }, 9);
-  ctx.fillStyle = dryPattern(ctx, PAPER_DK, 3, 1);
-  ctx.fill();
-
   ctx.save();
   let s = 1;
   if (type === 'knife') {
-    s = 1.42;
-    ctx.translate(-4, 8);
-    ctx.rotate(Math.PI / 4);
-    ctx.scale(s, s);
-    ctx.translate(0, 13);
-  } else if (type === 'bat') {
-    s = 1.12;
-    ctx.translate(-2, 4);
-    ctx.rotate(Math.PI / 4);
-    ctx.scale(s, s);
-    ctx.translate(0, 18);
-  } else if (type === 'spear') {
-    s = 0.86;
-    ctx.translate(-2, 2);
+    s = 1.66;
+    ctx.translate(-3, 3);
     ctx.rotate(Math.PI / 4);
     ctx.scale(s, s);
     ctx.translate(0, 12);
+  } else if (type === 'bat') {
+    s = 1.38;
+    ctx.translate(-3, 2);
+    ctx.rotate(Math.PI / 4);
+    ctx.scale(s, s);
+    ctx.translate(0, 17);
+  } else if (type === 'spear') {
+    s = 1.04;
+    ctx.translate(-3, 2);
+    ctx.rotate(Math.PI / 4);
+    ctx.scale(s, s);
+    ctx.translate(0, 14);
   } else if (type === 'shield') {
-    s = 1.62;
-    ctx.translate(-2, -2);
+    s = 1.9;
+    ctx.translate(-3, -3);
     ctx.scale(s, s);
   } else if (type === 'helmet') {
-    s = 1.42;
-    ctx.translate(2, 14);
+    s = 1.55;
+    ctx.translate(-1, 16);
     ctx.scale(s, s);
   } else if (type === 'sneakers') {
-    s = 1.05;
-    ctx.translate(4, 0);
+    s = 1.15;
+    ctx.translate(3, 0);
     ctx.scale(s, s);
   } else {
-    s = 1.3;
-    ctx.translate(-2, 0);
+    s = 1.42;
+    ctx.translate(0, -3);
     ctx.scale(s, s);
   }
   K = k0 * s;
@@ -563,7 +566,7 @@ export function itemIcon(ctx: Ctx, type: ItemType) {
   else if (type === 'bat') bat(ctx);
   else if (type === 'spear') spear(ctx, true);
   else if (type === 'shield') shield(ctx);
-  else if (type === 'helmet') helmet(ctx, 1, 2, false);
+  else if (type === 'helmet') helmet(ctx, 1, 2, 1);
   else if (type === 'sneakers') sneaker(ctx);
   else chili(ctx);
   K = k0;

@@ -2,7 +2,7 @@ import type { PetType, Team } from '../../types';
 import type { ArtStyle, ItemType, PetOpts, Pose } from './api';
 import { TEAM } from '../../theme';
 import { clamp } from '../../util';
-import { BRUSH, EVEN, PRESS, SWELL, along, arc, begin, cub, dot, dryPattern, emit, pt, quad, tail, type Prof } from './style1-brush';
+import { BRUSH, EVEN, PRESS, SWELL, along, arc, begin, cub, dot, dryPattern, emit, inkGrain, plateGrain, pt, quad, tail, type Prof } from './style1-brush';
 import { INK, helmet, itemIcon, sealStamp, setInk, weapon } from './style1-items';
 
 /*
@@ -51,6 +51,8 @@ const ell = (ctx: Ctx, x: number, y: number, rx: number, ry: number, rot = 0) =>
 
 /** heavy late: the shadow side of an outline drawn from the light */
 const LATE: Prof = { a: 0.12, h: 0.6, b: 0.02, wob: 0.1, cap: false };
+/** a sweep round a body: lands, presses through the shadow side, runs out dry at the top */
+const SWEEP: Prof = { a: 0.3, h: 0.4, b: 0.02, wob: 0.1, cap: true };
 /** lands heavy and runs out */
 const TAIL: Prof = { a: 0.55, h: 0.2, b: 0.0, wob: 0.08, cap: true };
 /** the fat limb of a frog */
@@ -82,6 +84,37 @@ function flushTails(ctx: Ctx) {
   tailAng.length = 0;
 }
 
+// ------------------------------------------------------------------ pupils
+
+/*
+ * Ink-dot pupils stay solid black: when the ink is textured (big pets), they are held back from the textured
+ * fill and painted in a fill of their own, else they join the ink path.
+ */
+const pupils: number[] = [];
+function pupil(ctx: Ctx, x: number, y: number, rx: number, ry: number, rot = 0) {
+  if (Q === 2) pupils.push(x, y, rx, ry, rot);
+  else ell(ctx, x, y, rx, ry, rot);
+}
+function flushPupils(ctx: Ctx) {
+  if (!pupils.length) return;
+  ctx.beginPath();
+  for (let i = 0; i < pupils.length; i += 5) ell(ctx, pupils[i], pupils[i + 1], pupils[i + 2], pupils[i + 3], pupils[i + 4]);
+  ctx.fillStyle = INK;
+  ctx.fill();
+  pupils.length = 0;
+}
+
+// ------------------------------------------------------------------ paper and print
+
+/** Over the path just filled with ink: the paper showing through (big pets only). */
+function inkTexture(ctx: Ctx) {
+  if (Q === 2) inkGrain(ctx);
+}
+/** Over the path just filled with a colour plate: the grain of the print (big pets only). */
+function plateTexture(ctx: Ctx) {
+  if (Q === 2) plateGrain(ctx);
+}
+
 // ------------------------------------------------------------------ shared bits
 
 /** the ground shadow: one horizontal smear of thin ink */
@@ -100,12 +133,12 @@ const offOf = () => clamp(1.7 / K, 1.6, 3.6);
 
 /** a highlight: the team's light dragged on dry when big, flat when small */
 function lightFill(ctx: Ctx, c: Col) {
-  ctx.fillStyle = Q === 0 ? c.light : dryPattern(ctx, c.light, 17, 2.4);
+  ctx.fillStyle = Q < 2 ? c.light : dryPattern(ctx, c.light, 17, 2.4);
   ctx.fill();
 }
 /** the shadow side: the team's dark dragged on dry */
 function washFill(ctx: Ctx, c: Col) {
-  if (Q === 0) {
+  if (Q < 2) {
     ctx.globalAlpha = 0.5;
     ctx.fillStyle = c.dark;
     ctx.fill();
@@ -119,7 +152,10 @@ function washFill(ctx: Ctx, c: Col) {
 /** the white glints of ink-dot eyes */
 function glints(ctx: Ctx, pts: number[]) {
   ctx.beginPath();
-  for (let i = 0; i < pts.length; i += 3) ell(ctx, pts[i], pts[i + 1], Math.max(pts[i + 2], 0.8 / K));
+  for (let i = 0; i < pts.length; i += 3) {
+    const g = Math.max(pts[i + 2], 0.8 / K);
+    ell(ctx, pts[i], pts[i + 1], g, g);
+  }
   ctx.fillStyle = '#ffffff';
   ctx.fill();
 }
@@ -160,7 +196,7 @@ function impact(ctx: Ctx, x: number, y: number) {
 
 /** a sweep of dry ink: the trail of a swing or a thrust */
 function trail(ctx: Ctx) {
-  ctx.fillStyle = Q === 0 ? 'rgba(23, 22, 29, 0.3)' : dryPattern(ctx, INK, 11, 1.1);
+  ctx.fillStyle = Q < 2 ? 'rgba(23, 22, 29, 0.3)' : dryPattern(ctx, INK, 11, 1.1);
   ctx.fill();
 }
 
@@ -198,7 +234,7 @@ function leg(ctx: Ctx, L: Look, hx: number, hy: number, kx: number, ky: number, 
   begin();
   pt(hx, hy);
   quad((hx + kx) / 2, Math.min(hy, ky) - 6, kx, ky, st(ln(hx, hy, kx, ky)));
-  quad(kx + (FX - kx) * 0.12, ky + (FY - ky) * 0.5, FX, FY, st(ln(kx, ky, FX, FY)));
+  quad(kx + (FX - kx) * 0.12 + dir * 5, ky + (FY - ky) * 0.45, FX, FY, st(ln(kx, ky, FX, FY)));
   ink(ctx, w, BRUSH, seed);
   begin();
   pt(FX - dir, FY);
@@ -231,13 +267,13 @@ function ant(ctx: Ctx, L: Look) {
   const hry = 25.5;
   const hr = 0.12;
   const off = offOf();
-  const hand = atk ? [44, -62] : hit ? [32, -70] : [39, -50];
-  const elbow = atk ? [30, -56] : hit ? [30, -54] : [27, -40];
+  const hand = atk ? [44, -62] : hit ? [24, -46] : [39, -50];
+  const elbow = atk ? [30, -56] : hit ? [22, -40] : [27, -40];
 
   // ---- far limbs, behind the body: the team's dark
   ctx.beginPath();
-  leg(ctx, L, 7, -47, -4, -42, atk ? -14 : hit ? -2 : -6, 3.2, 1);
-  leg(ctx, L, 12, -48, 33, -46, atk ? 48 : hit ? 36 : 42, 3.2, 3);
+  leg(ctx, L, 7, -47, -3, -45, atk ? -13 : hit ? -3 : -7, 3.2, 1);
+  leg(ctx, L, 12, -48, 37, -49, atk ? 50 : hit ? 39 : 45, 3.2, 3);
   if (atk) C(8, -58, -2, -62, -10, -56, -14, -48);
   else if (hit) C(14, -58, 24, -66, 32, -74, 36, -80);
   else C(16, -58, 26, -62, 34, -60, 42, -58);
@@ -251,6 +287,11 @@ function ant(ctx: Ctx, L: Look) {
   ink(ctx, 2.8, BRUSH, 6);
   ctx.fillStyle = c.dark;
   ctx.fill();
+  // the near hind leg comes out from behind the abdomen
+  ctx.beginPath();
+  leg(ctx, L, 2, -44, -12, -38, atk ? -27 : hit ? -15 : -21, 4, 9);
+  ctx.fillStyle = INK;
+  ctx.fill();
 
   // ---- the colour plate, off register
   ctx.translate(-off, -off * 0.7);
@@ -260,6 +301,7 @@ function ant(ctx: Ctx, L: Look) {
   ell(ctx, hx, hy, hrx, hry, hr);
   ctx.fillStyle = c.main;
   ctx.fill();
+  plateTexture(ctx);
   // the light: one dry highlight on the brow, one along the abdomen
   ctx.beginPath();
   A(hx, hy, hrx - 8, hry - 8, hr, -0.25, -1.85);
@@ -279,9 +321,9 @@ function ant(ctx: Ctx, L: Look) {
   // ---- ink
   ctx.beginPath();
   // abdomen: a heavy stroke round the back and under, a light one along the top, two segment marks
-  A(gx, gy, grx, gry, gr, -1.9, -5.3);
-  ink(ctx, 6.2, LATE, 1);
-  addTail(6.2, 1);
+  A(gx, gy, grx, gry, gr, -5.3, -1.95);
+  ink(ctx, 6.2, SWEEP, 1);
+  addTail(6.2, 1, 0.6);
   A(gx, gy, grx, gry, gr, -0.42, -1.6);
   ink(ctx, 2.8, SWELL, 2);
   if (Q > 0) {
@@ -300,14 +342,13 @@ function ant(ctx: Ctx, L: Look) {
   A(tx, ty, trx, tr_, tr, 0.5, 2.2);
   ink(ctx, 2.6, SWELL, 6);
   // head: heavy round the back and under the chin, light over the brow
-  A(hx, hy, hrx, hry, hr, -2.05, -5.45);
-  ink(ctx, 6.4, LATE, 7);
-  addTail(6.4, 7);
+  A(hx, hy, hrx, hry, hr, -5.4, -2.1);
+  ink(ctx, 6.4, SWEEP, 7);
+  addTail(6.4, 7, 0.62);
   A(hx, hy, hrx, hry, hr, 0.12, -1.42);
   ink(ctx, 2.8, SWELL, 8);
   // near legs
-  leg(ctx, L, 2, -44, -15, -38, atk ? -28 : hit ? -14 : -21, 4, 9);
-  leg(ctx, L, 9, -46, 26, -41, atk ? 37 : hit ? 25 : 31, 4, 11);
+  leg(ctx, L, 9, -46, 29, -44, atk ? 38 : hit ? 27 : 33, 4, 11);
   // mandibles: open wide in a bite, else a neat closed pincer
   if (atk && !L.weapon) {
     C(43, hy + 14, 52, hy + 7, 61, hy + 8, 64, hy + 14);
@@ -315,10 +356,11 @@ function ant(ctx: Ctx, L: Look) {
     C(41, hy + 20, 49, hy + 28, 58, hy + 30, 62, hy + 25);
     ink(ctx, 4, BRUSH, 14);
   } else {
-    C(41, hy + 16, 47, hy + 14, 54, hy + 15, 56, hy + 21);
-    ink(ctx, 3.6, BRUSH, 13);
-    C(40, hy + 20, 45, hy + 23, 50, hy + 24, 53, hy + 22);
-    ink(ctx, 2.8, BRUSH, 14);
+    // the mandibles: two little fangs at the chin, tips turned in
+    C(39, hy + 19, 43, hy + 22, 44, hy + 26, 47, hy + 29);
+    ink(ctx, 3.4, BRUSH, 13);
+    C(47, hy + 16, 52, hy + 19, 53, hy + 24, 50.5, hy + 28.5);
+    ink(ctx, 3.2, BRUSH, 14);
   }
   // near antenna: up from the brow, a sharp elbow, a club at the tip
   if (hit) {
@@ -328,10 +370,10 @@ function ant(ctx: Ctx, L: Look) {
     ell(ctx, 3, hy - 42, 2.6, 2.2);
   } else if (L.helmet) {
     // through the helmet like the horns of a kabuto
-    C(14, hy - 34, 10, hy - 46, 12, hy - 54, 22, hy - 56);
-    cub(30, hy - 58, 36, hy - 54, 38, hy - 48, st(20));
+    C(14, hy - 34, 9, hy - 41, 12, hy - 47, 21, hy - 48.5);
+    cub(29, hy - 50, 36, hy - 47, 39, hy - 41, st(20));
     ink(ctx, 3.4, BRUSH, 15);
-    ell(ctx, 38.5, hy - 47, 3.2, 2.8, 0.4);
+    ell(ctx, 39.5, hy - 40, 3.2, 2.8, 0.4);
     ell(ctx, 62.5, hy - 36, 2.7, 2.3, 0.6);
   } else {
     C(18, hy - 22, 13, hy - 32, 9, hy - 40, 15, hy - 44);
@@ -350,14 +392,28 @@ function ant(ctx: Ctx, L: Look) {
     shut(ctx, ex, ey + 2, 7.5);
     shut(ctx, ex + 12.5, ey, 4.5);
   } else {
-    ell(ctx, ex, ey, 8.4, 11, 0.12);
-    ell(ctx, ex + 12.5, ey - 1.5, 4.4, 8.8, 0.1);
+    pupil(ctx, ex, ey, 8.4, 11, 0.12);
+    pupil(ctx, ex + 12.5, ey - 1.5, 4.4, 8.8, 0.1);
+  }
+  // brows (under a helmet its rim is the brow): level and cool, or knitted for the attack
+  if (!L.helmet && !hit) {
+    if (atk) {
+      C(26, hy - 19, 31, hy - 19, 37, hy - 16, 42, hy - 11.5);
+      ink(ctx, 3.4, BRUSH, 16);
+      C(53, hy - 16, 51, hy - 14, 49, hy - 12, 47.5, hy - 9.5);
+      ink(ctx, 2.6, BRUSH, 17);
+    } else {
+      C(27, hy - 15.5, 31, hy - 19, 37, hy - 19.5, 42, hy - 17);
+      ink(ctx, 3, BRUSH, 16);
+    }
   }
   if (!L.weapon) arm(ctx, elbow, hand);
   if (hit) impact(ctx, 60, hy - 4);
   ctx.fillStyle = INK;
   ctx.fill();
+  inkTexture(ctx);
   flushTails(ctx);
+  flushPupils(ctx);
 
   if (!hit && !L.blink) glints(ctx, [ex - 2.6, ey - 4.4, 3, ex + 2, ey + 4.4, 1.2, ex + 11.6, ey - 5.2, 1.6]);
 
@@ -391,7 +447,7 @@ function arm(ctx: Ctx, e: number[], h: number[]) {
 /** the angle the weapon is held at (0 = straight up, + = forward), by weapon and pose */
 function grip(w: string, pose: Pose) {
   if (w === 'knife') return pose === 'attack' ? 1.7 : pose === 'hit' ? -0.5 : 0.5;
-  if (w === 'bat') return pose === 'attack' ? 1.75 : pose === 'hit' ? -1.0 : -0.5;
+  if (w === 'bat') return pose === 'attack' ? 2.3 : pose === 'hit' ? -1.0 : -0.5;
   if (w === 'spear') return pose === 'attack' ? 1.5 : pose === 'hit' ? -0.35 : 0.1;
   return 0;
 }
@@ -413,10 +469,10 @@ function held(ctx: Ctx, L: Look, x: number, y: number) {
       emit(ctx, 3.5, { a: 0.05, h: 0.8, b: 0.1, wob: 0.2, cap: false }, 4);
     } else {
       // a swing: a dry arc round the hand from where the weapon was
-      const reach = w === 'bat' ? 44 : 32;
-      const from = grip(w, 'idle') - Math.PI / 2;
-      A(x, y, reach, reach, 0, from - 0.25, a - Math.PI / 2 + 0.05);
-      emit(ctx, w === 'bat' ? 15 : 11, { a: 0.05, h: 0.78, b: 0.3, wob: 0.2, cap: false }, 9);
+      const reach = w === 'bat' ? 42 : 31;
+      const to = a - Math.PI / 2 + 0.05;
+      A(x, y, reach, reach, 0, to - 1.75, to);
+      emit(ctx, w === 'bat' ? 13 : 10, { a: 0.02, h: 0.8, b: 0.3, wob: 0.2, cap: false }, 9);
     }
     trail(ctx);
   }
@@ -426,7 +482,11 @@ function held(ctx: Ctx, L: Look, x: number, y: number) {
     ctx.translate(L.pose === 'attack' ? 10 : 4, L.pose === 'hit' ? -4 : 6);
     ctx.scale(0.64, 1);
     ctx.rotate(L.pose === 'hit' ? -0.2 : 0);
-  } else ctx.rotate(a);
+  } else {
+    ctx.rotate(a);
+    // a spear is gripped near its blade when thrusting, so it does not reach across the pitch
+    if (w === 'spear' && L.pose === 'attack') ctx.translate(0, 12);
+  }
   weapon(ctx, w, Q, L.c.main);
   ctx.restore();
 }
@@ -444,15 +504,7 @@ function frog(ctx: Ctx, L: Look) {
   const ney = -68 - b * 1.2;
   const fey = -70 - b * 1.2;
   const throat = 1 + (pose === 'idle' ? 0.05 * (b + 1) : 0);
-  const hand = atk ? [56, -42] : hit ? [44, -54] : [48, -30];
-
-  // ---- far front arm: a stub of the team's dark behind the chin
-  ctx.beginPath();
-  C(44, -22, 48, -14, 52, -8, 55, -3);
-  ink(ctx, 6.5, LIMB, 1);
-  ell(ctx, 57, -2.5, 3.6, 2.4);
-  ctx.fillStyle = c.dark;
-  ctx.fill();
+  const hand = atk ? [50, -46] : hit ? [44, -54] : [48, -30];
 
   // ---- the colour plate
   ctx.translate(-off, -off * 0.7);
@@ -471,6 +523,7 @@ function frog(ctx: Ctx, L: Look) {
   }
   ctx.fillStyle = c.main;
   ctx.fill();
+  plateTexture(ctx);
   // light: the throat, a dry stroke along the crown
   ctx.beginPath();
   begin();
@@ -482,8 +535,8 @@ function frog(ctx: Ctx, L: Look) {
   lightFill(ctx, c);
   // the shadow side: a dry wash down the rump and under the haunch
   ctx.beginPath();
-  C(-34, -44, -42, -30, -40, -14, -30, -6);
-  emit(ctx, 11, SWELL, 4);
+  C(-31, -44, -38, -30, -36, -14, -27, -7);
+  emit(ctx, 10, SWELL, 4);
   A(-20, -20, 17, 10, -0.32, 2.7, 1.0);
   emit(ctx, 8, SWELL, 5);
   washFill(ctx, c);
@@ -541,7 +594,9 @@ function frog(ctx: Ctx, L: Look) {
   if (hit) impact(ctx, 64, -48);
   ctx.fillStyle = INK;
   ctx.fill();
+  inkTexture(ctx);
   flushTails(ctx);
+  flushPupils(ctx);
   if (!L.helmet) eyeGlints(ctx, L, ney, fey);
 
   if (tongue) {
@@ -579,6 +634,8 @@ function frog(ctx: Ctx, L: Look) {
     eyeInk(ctx, L, ney, fey);
     ctx.fillStyle = INK;
     ctx.fill();
+    inkTexture(ctx);
+    flushPupils(ctx);
     eyeGlints(ctx, L, ney, fey);
   }
 
@@ -622,8 +679,15 @@ function eyeInk(ctx: Ctx, L: Look, ney: number, fey: number) {
     shut(ctx, 15, ney + 1, 7);
     shut(ctx, 38, fey + 1, 5);
   } else {
-    ell(ctx, 18, ney + 1, 7, 8);
-    ell(ctx, 40, fey + 1, 4.9, 6.1);
+    pupil(ctx, 18, ney + 1, 7, 8);
+    if (L.pose === 'attack') {
+      // knitted brows across the domes
+      C(5, ney - 12, 11, ney - 11, 17, ney - 9, 24, ney - 5);
+      ink(ctx, 3.6, BRUSH, 11);
+      C(46, fey - 9, 43, fey - 8, 40, fey - 6, 36, fey - 3);
+      ink(ctx, 2.8, BRUSH, 12);
+    }
+    pupil(ctx, 40, fey + 1, 4.9, 6.1);
   }
 }
 function eyeGlints(ctx: Ctx, L: Look, ney: number, fey: number) {

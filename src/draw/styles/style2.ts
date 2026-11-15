@@ -54,17 +54,6 @@ function dot(ctx: Ctx, x: number, y: number, r: number) {
   ctx.moveTo(x + r, y);
   ctx.arc(x, y, r, 0, PI * 2);
 }
-function legs(ctx: Ctx, color: string, w: number, pts: number[][]) {
-  ctx.strokeStyle = color;
-  ctx.lineWidth = w;
-  ctx.beginPath();
-  for (const p of pts) {
-    ctx.moveTo(p[0], p[1]);
-    for (let i = 2; i < p.length; i += 2) ctx.lineTo(p[i], p[i + 1]);
-  }
-  ctx.stroke();
-}
-
 /** Eye states. */
 const OPEN = 0;
 const SHUT = 1;
@@ -265,10 +254,10 @@ const ANT_ARMS = [
   [0.3, -1.38, 0.48, -1.18, 0.66, -1.46, 0.24, -1.32, 0.42, -1.04, 0.6, -1.34],
 ];
 
-function ant(ctx: Ctx, g: Rig, pose: number, t: number, o: PetOpts, blink: boolean) {
+function ant(ctx: Ctx, g: Rig, pose: number, ph: number, o: PetOpts, blink: boolean) {
   const P = g.P;
   const w = o.weapon ?? null;
-  const b = pose === 0 ? Math.sin(t * 3.2) : 0;
+  const b = pose === 0 ? Math.sin(ph) : 0;
   const hx = 0.52 + (pose === 1 ? 0.05 : 0);
   const hy = -1.7 + b * 0.025 + (pose === 2 ? 0.05 : 0);
   const hr = 0.56;
@@ -276,7 +265,7 @@ function ant(ctx: Ctx, g: Rig, pose: number, t: number, o: PetOpts, blink: boole
   ctx.lineJoin = 'round';
 
   // antennae, behind the head: long curls ending in a bead, swept back in the lunge
-  const sway = Math.sin(t * 2.3) * 0.035;
+  const sway = pose === 0 ? Math.sin(ph + 1.3) * 0.035 : 0;
   const bk = pose === 1 ? 0.3 : pose === 2 ? -0.08 : 0;
   ctx.strokeStyle = P.shade;
   ctx.lineWidth = 0.075;
@@ -301,7 +290,7 @@ function ant(ctx: Ctx, g: Rig, pose: number, t: number, o: PetOpts, blink: boole
   const gb = 1 + b * 0.035;
   ctx.fillStyle = tone(ctx, g, ANT_GASTER, -0.7, -0.92, P.base, P.mid, 0.12);
   ctx.beginPath();
-  drop(ctx, -0.68, -0.92, 0.5 * gb, 2.55, 0.6 * gb);
+  drop(ctx, -0.68, -0.92, 0.5 * gb, 2.55, 0.58 * gb);
   ctx.fill();
   ctx.fillStyle = tone(ctx, g, ANT_WAIST, -0.11, -1.08, P.mid, P.shade);
   ctx.beginPath();
@@ -321,12 +310,31 @@ function ant(ctx: Ctx, g: Rig, pose: number, t: number, o: PetOpts, blink: boole
   ctx.fill();
 
   // pincers: a small V at rest, gaping for a bite
-  const gape = pose === 1 && !w ? 0.6 : pose === 2 ? 0.3 : 0.14;
-  ctx.fillStyle = P.shade;
-  ctx.beginPath();
-  pincer(ctx, hx + 0.46, hy + 0.2, 0.42 - gape, 0.26, 0.06);
-  pincer(ctx, hx + 0.42, hy + 0.27, 0.42 + gape, 0.24, 0.055);
-  ctx.fill();
+  // pincers only come out for a bite
+  if (pose === 1 && !w) {
+    ctx.fillStyle = P.shade;
+    ctx.beginPath();
+    pincer(ctx, hx + 0.46, hy + 0.2, -0.2, 0.3, 0.065);
+    pincer(ctx, hx + 0.42, hy + 0.28, 1.0, 0.28, 0.06);
+    ctx.fill();
+  }
+
+  // a little smirk at rest, a shout when it swings
+  if (pose === 0) {
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 0.055;
+    ctx.beginPath();
+    ctx.moveTo(hx + 0.2, hy + 0.27);
+    ctx.quadraticCurveTo(hx + 0.32, hy + 0.36, hx + 0.47, hy + 0.22);
+    ctx.stroke();
+  } else if (pose === 1 && w) {
+    ctx.fillStyle = INK;
+    ctx.beginPath();
+    ctx.moveTo(hx + 0.22, hy + 0.24);
+    ctx.quadraticCurveTo(hx + 0.36, hy + 0.48, hx + 0.52, hy + 0.2);
+    ctx.closePath();
+    ctx.fill();
+  }
 
   const state = pose === 2 ? OUCH : blink ? SHUT : OPEN;
   eyes(ctx, [hx + 0.1, hy - 0.04, 0.22, hx + 0.44, hy - 0.06, 0.16], headFill, pose === 1 ? 0.36 : 0.16, pose === 1 ? 0.42 : 0.1, state);
@@ -346,7 +354,7 @@ function ant(ctx: Ctx, g: Rig, pose: number, t: number, o: PetOpts, blink: boole
     ctx.fill();
   }
   limbs(ctx, P.shade, 0.07, [[A[6], A[7], A[8], A[9], fx, fy]]);
-  if (w) held(ctx, w, fx, fy, pose, w === 'shield' ? 0.52 : w === 'spear' ? 0.92 : 0.86);
+  if (w) held(ctx, w, fx, fy, pose, w === 'shield' ? 0.52 : w === 'spear' ? 0.86 : 0.86);
   ctx.fillStyle = P.mid;
   ctx.beginPath();
   dot(ctx, fx, fy, 0.1);
@@ -364,11 +372,11 @@ const FROG_EYE_N = 23;
 const FROG_EYE_F = 24;
 const FROG_FOOT = 25;
 
-function frog(ctx: Ctx, g: Rig, pose: number, t: number, o: PetOpts, blink: boolean) {
+function frog(ctx: Ctx, g: Rig, pose: number, ph: number, o: PetOpts, blink: boolean) {
   const P = g.P;
   const w = o.weapon ?? null;
-  const b = pose === 0 ? Math.sin(t * 2.6) : 0;
-  const puff = pose === 0 ? Math.max(0, Math.sin(t * 1.9)) ** 2 : 0;
+  const b = pose === 0 ? Math.sin(ph) : 0;
+  const puff = pose === 0 ? Math.max(0, Math.sin(ph - 1)) ** 2 : 0;
   const tongue = pose === 1 && !w;
 
   // body and head: one mass, one cut of light across it
@@ -422,11 +430,11 @@ function frog(ctx: Ctx, g: Rig, pose: number, t: number, o: PetOpts, blink: bool
   ctx.fill();
   if (tongue) {
     ctx.fillStyle = '#ff7fa8';
-    capsule(ctx, 0.9, my + 0.12, 1.9, my + 0.02, 0.07);
+    capsule(ctx, 0.9, my + 0.12, 1.72, my + 0.04, 0.07);
     ctx.fill();
-    ctx.fillStyle = tone(ctx, g, 30, 1.95, my, '#ff9ec0', '#e0578f');
+    ctx.fillStyle = tone(ctx, g, 30, 1.78, my, '#ff9ec0', '#e0578f');
     ctx.beginPath();
-    dot(ctx, 1.95, my + 0.02, 0.16);
+    dot(ctx, 1.78, my + 0.04, 0.16);
     ctx.fill();
   }
 
@@ -445,7 +453,7 @@ function frog(ctx: Ctx, g: Rig, pose: number, t: number, o: PetOpts, blink: bool
 
   // eyes on top
   const state = pose === 2 ? OUCH : blink ? SHUT : OPEN;
-  if (o.helmet) hat(ctx, 0.44, hy - 0.42, 0.48, pose === 2 ? -0.25 : -0.08);
+  if (o.helmet) hat(ctx, 0.44, hy - 0.42, 0.46, pose === 2 ? -0.25 : -0.08);
   eyes(ctx, [0.13, hy - 0.5, 0.24, 0.76, hy - 0.53, 0.2], farDome, pose === 1 ? 0.34 : 0.1, pose === 1 ? 0.4 : 0.06, state);
 
   // the near arm and what it holds
@@ -453,8 +461,8 @@ function frog(ctx: Ctx, g: Rig, pose: number, t: number, o: PetOpts, blink: bool
   let fy = -0.07;
   if (w) {
     if (pose === 1) {
-      fx = 1.06;
-      fy = -0.95;
+      fx = 0.98;
+      fy = -0.98;
     } else if (pose === 2) {
       fx = 0.78;
       fy = -0.9;
@@ -467,7 +475,7 @@ function frog(ctx: Ctx, g: Rig, pose: number, t: number, o: PetOpts, blink: bool
     fx += 0.1;
     fy -= 0.08;
   }
-  if (pose === 1 && (w === 'knife' || w === 'bat')) smear(ctx, P.hi, fx, fy, w === 'bat' ? 0.8 : 0.72, -1.75, AIM[w][1] - 0.1, 0.26);
+  if (pose === 1 && (w === 'knife' || w === 'bat')) smear(ctx, P.hi, fx, fy, w === 'bat' ? 0.76 : 0.68, -1.75, AIM[w][1] - 0.1, 0.26);
   if (pose === 1 && w === 'spear') {
     ctx.fillStyle = P.hi;
     capsule(ctx, fx - 0.2, fy - 0.2, fx + 0.5, fy - 0.18, 0.04);
@@ -479,7 +487,7 @@ function frog(ctx: Ctx, g: Rig, pose: number, t: number, o: PetOpts, blink: bool
   ctx.fillStyle = armFill;
   capsule(ctx, 0.52, -0.72, fx, fy, 0.1);
   ctx.fill();
-  if (w) held(ctx, w, fx, fy, pose, w === 'shield' ? 0.5 : w === 'spear' ? 0.8 : 0.68);
+  if (w) held(ctx, w, fx, fy, pose, w === 'shield' ? 0.5 : w === 'spear' ? 0.78 : 0.64);
   ctx.fillStyle = armFill;
   ctx.beginPath();
   if (w) dot(ctx, fx, fy, 0.12);
@@ -495,35 +503,165 @@ function frog(ctx: Ctx, g: Rig, pose: number, t: number, o: PetOpts, blink: bool
 
 // ------------------------------------------------------------------ the style
 
+// ------------------------------------------------------------------ painting
+
+/** idle breaths per second, as a phase rate (radians per second) */
+const RATE = { ant: 3.2, frog: 2.6 };
+const TAU = PI * 2;
+
+/** The pet itself (no shadow), standing on (x, y). ph is the idle breath's phase in radians. */
+function paint(ctx: Ctx, type: PetType, team: Team, x: number, y: number, r: number, p: number, ph: number, blink: boolean, o: PetOpts) {
+  const face = o.face ?? 1;
+  const b = p === 0 ? Math.sin(ph) : 0;
+  ctx.save();
+  ctx.translate(x, y);
+  const sx = p === 1 ? 1.05 : p === 2 ? 0.96 : 1 - b * 0.012;
+  const sy = p === 1 ? 0.97 : p === 2 ? 1.02 : 1 + b * 0.025;
+  ctx.scale(face * r * sx, r * sy);
+  ctx.translate(LUNGE[p], 0);
+  if (LEAN[p]) ctx.rotate(LEAN[p]);
+  const g = rigOf(team, face, p);
+  if (type === 'frog') frog(ctx, g, p, ph, o, blink);
+  else ant(ctx, g, p, ph, o, blink);
+  ctx.restore();
+}
+
+/** where the shadow's dark core sits (x offset from the ground point) and its scale, both for radius r */
+const shadowK = (type: PetType, r: number) => (r * (type === 'frog' ? 2.4 : 2.0)) / 76;
+const shadowX = (type: PetType, p: number, face: number, r: number) => (LUNGE[p] + (type === 'frog' ? -0.05 : -0.18)) * face * r;
+/** the shadow sprite is squashed to this much of its height on the ground */
+const FLAT = 0.7;
+
+// ------------------------------------------------------------------ the sprite cache
+
+/*
+ * A battle draws ~50 pets 60 times a second, so each look is painted once, at the device's own scale, into a
+ * sprite, and then only blitted, snapped to whole device pixels (a pixel-aligned blit is several times cheaper
+ * than a resampled one). The idle breath is cut into FRAMES phases. Anything a sprite cannot match exactly (a
+ * rotated, skewed or mirrored context, a huge pet, or a burst of new looks in one frame) is painted directly.
+ */
+interface Sprite {
+  c: HTMLCanvasElement;
+  ox: number;
+  oy: number;
+  n: number;
+}
+const FRAMES = 8;
+const SPRITES = new Map<string, Sprite>();
+const CAP = 12e6; // device pixels kept, all sprites together
+let held_px = 0;
+let burstAt = 0;
+let burst = 0;
+/** sprite bounds around the ground point, in r, per pet and pose: back, front, up, down (for a pet facing right) */
+const BOUNDS: Record<PetType, number[][]> = {
+  ant: [
+    [1.45, 1.6, 2.85, 0.15],
+    [1.35, 2.7, 2.9, 0.32],
+    [1.75, 1.65, 3.0, 0.22],
+  ],
+  frog: [
+    [1.3, 1.65, 2.5, 0.15],
+    [1.3, 2.7, 2.6, 0.32],
+    [1.6, 1.8, 2.65, 0.22],
+  ],
+};
+
+function canBuild(): boolean {
+  const now = performance.now();
+  if (now - burstAt > 12) {
+    burstAt = now;
+    burst = 0;
+  }
+  return burst++ < 10;
+}
+
+function keep(key: string, s: Sprite) {
+  SPRITES.set(key, s);
+  held_px += s.n;
+  while (held_px > CAP) {
+    const old = SPRITES.keys().next().value as string;
+    held_px -= SPRITES.get(old)!.n;
+    SPRITES.delete(old);
+  }
+}
+
+function bodySprite(type: PetType, team: Team, p: number, q: number, blink: boolean, o: PetOpts, face: number, R: number): Sprite | null {
+  const key = `${type}${team}${p}${q}${blink ? 1 : 0}${o.weapon ?? '-'}${o.helmet ? 1 : 0}${face}${R}`;
+  const hit = SPRITES.get(key);
+  if (hit) {
+    SPRITES.delete(key);
+    SPRITES.set(key, hit);
+    return hit;
+  }
+  if (!canBuild()) return null;
+  const bd = BOUNDS[type][p];
+  const L = Math.ceil(R * (face > 0 ? bd[0] : bd[1]));
+  const Rt = Math.ceil(R * (face > 0 ? bd[1] : bd[0]));
+  const T = Math.ceil(R * bd[2]);
+  const B = Math.ceil(R * bd[3]);
+  const c = document.createElement('canvas');
+  c.width = L + Rt;
+  c.height = T + B;
+  const cx = c.getContext('2d');
+  if (!cx) return null;
+  paint(cx, type, team, L, T, R, p, ((q + 0.5) * TAU) / FRAMES, blink, o);
+  const s = { c, ox: L, oy: T, n: c.width * c.height };
+  keep(key, s);
+  return s;
+}
+
+function shadowSprite(type: PetType, R: number): Sprite | null {
+  const key = `s${type}${R}`;
+  const hit = SPRITES.get(key);
+  if (hit) return hit;
+  if (!canBuild()) return null;
+  const k = shadowK(type, R);
+  const c = document.createElement('canvas');
+  c.width = Math.ceil(144 * k) + 2;
+  c.height = Math.ceil(48 * k * FLAT) + 2;
+  const cx = c.getContext('2d');
+  if (!cx) return null;
+  cx.drawImage(shadow(), 1, 1, 144 * k, 48 * k * FLAT);
+  const s = { c, ox: Math.round(40 * k) + 1, oy: Math.round(24 * k * FLAT) + 1, n: c.width * c.height };
+  keep(key, s);
+  return s;
+}
+
+// ------------------------------------------------------------------ the style
+
 export const style2: ArtStyle = {
   NAME: 'Flat Geometric',
   BLURB: 'No outlines: clean shapes cut by one hard diagonal of sun, with a long soft shadow',
   drawPet(ctx, type: PetType, team: Team, x, y, r, pose, t, o: PetOpts = {}) {
+    if (!(r > 0)) return;
     const face = o.face ?? 1;
     const p = POSE[pose];
-    const g = rigOf(team, face, p);
-    const frogg = type === 'frog';
-    const b = p === 0 ? Math.sin(t * (frogg ? 2.6 : 3.2)) : 0;
+    const ph = t * RATE[type];
     const blink = p === 0 && (t + 0.6) % 3.3 < 0.14;
-    const lunge = LUNGE[p];
 
-    ctx.save();
-    ctx.translate(x, y);
-    // the shadow: the sun is up-left, so it runs off down-right whichever way the pet faces
-    const sp = shadow();
-    const k = (r * (frogg ? 2.5 : 2.1)) / 76;
-    const cx = (lunge + (frogg ? -0.05 : -0.18)) * face * r;
-    ctx.globalAlpha = 1 - b * 0.06;
-    ctx.drawImage(sp, cx - 40 * k, -24 * k * 0.7, 160 * k, 48 * k * 0.7);
-    ctx.globalAlpha = 1;
+    // the fast path: blit cached sprites at whole device pixels
+    const m = ctx.getTransform();
+    if (m.b === 0 && m.c === 0 && m.a > 0 && Math.abs(m.a - m.d) < 1e-6 && r * m.a < 160) {
+      const R = Math.round(r * m.a * 2) / 2;
+      const q = p === 0 && !blink ? Math.floor((((ph / TAU) % 1) + 1) % 1 * FRAMES) % FRAMES : 0;
+      const sh = shadowSprite(type, R);
+      const bo = sh && bodySprite(type, team, p, q, blink, o, face, R);
+      if (sh && bo) {
+        const X = m.a * x + m.e;
+        const Y = m.d * y + m.f;
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.drawImage(sh.c, Math.round(X + shadowX(type, p, face, R) - sh.ox), Math.round(Y - sh.oy));
+        ctx.drawImage(bo.c, Math.round(X - bo.ox), Math.round(Y - bo.oy));
+        ctx.restore();
+        return;
+      }
+    }
 
-    const sq = p === 1 ? 1.05 : p === 2 ? 0.96 : 1 - b * 0.012;
-    ctx.scale(face * r * sq, (r * (p === 1 ? 0.97 : p === 2 ? 1.02 : 1 + b * 0.025)));
-    ctx.translate(lunge, 0);
-    if (LEAN[p]) ctx.rotate(LEAN[p]);
-    if (frogg) frog(ctx, g, p, t, o, blink);
-    else ant(ctx, g, p, t, o, blink);
-    ctx.restore();
+    // the slow path: paint it all now
+    const k = shadowK(type, r);
+    ctx.drawImage(shadow(), x + shadowX(type, p, face, r) - 40 * k, y - 24 * k * FLAT, 144 * k, 48 * k * FLAT);
+    paint(ctx, type, team, x, y, r, p, ph, blink, o);
   },
   drawItem(ctx, type, x, y, size) {
     icon(ctx, type, x, y, size);

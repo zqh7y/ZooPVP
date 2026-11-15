@@ -244,3 +244,67 @@ export function along(p: CanvasPattern | string, a: number) {
   const s = Math.sin(a) * 0.5;
   p.setTransform(new DOMMatrix([c, s, -s, c, 0, 0]));
 }
+
+// ------------------------------------------------------------------ grain
+
+type Painter = (g: CanvasRenderingContext2D, w: number, h: number, rnd: () => number) => void;
+const texCache = new WeakMap<Ctx, Map<string, CanvasPattern | null>>();
+/** A small texture tile, painted once by paint and kept as a repeating pattern (texels at half size). */
+export function texture(ctx: Ctx, key: string, paint: Painter, seed = 1): CanvasPattern | null {
+  let m = texCache.get(ctx);
+  if (!m) {
+    m = new Map();
+    texCache.set(ctx, m);
+  }
+  if (m.has(key)) return m.get(key)!;
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 128;
+  paint(c.getContext('2d')!, 256, 128, seeded(seed));
+  const p = ctx.createPattern(c, 'repeat');
+  p?.setTransform(new DOMMatrix([0.5, 0, 0, 0.5, 0, 0]));
+  m.set(key, p);
+  return p;
+}
+
+/** Thin paper-coloured streaks: the bare paper that shows through a quick stroke of ink. */
+function paperStreaks(g: CanvasRenderingContext2D, w: number, h: number, rnd: () => number) {
+  g.fillStyle = '#f6efe2';
+  for (let i = 0; i < 34; i++) {
+    const x = rnd() * w;
+    const y = rnd() * h;
+    const len = 40 + rnd() * 120;
+    const th = 0.45 + rnd() * 0.9;
+    g.globalAlpha = 0.14 + rnd() * 0.26;
+    for (let dx = -w; dx <= 0; dx += w) {
+      g.beginPath();
+      g.ellipse(x + dx + len / 2, y, len / 2, th, 0, 0, Math.PI * 2);
+      g.fill();
+    }
+  }
+}
+/** A fine print grain: light and dark specks. */
+function printSpecks(g: CanvasRenderingContext2D, w: number, h: number, rnd: () => number) {
+  for (let i = 0; i < 1400; i++) {
+    const light = rnd() < 0.7;
+    g.fillStyle = light ? '#ffffff' : '#000000';
+    g.globalAlpha = light ? 0.06 + rnd() * 0.14 : 0.04 + rnd() * 0.06;
+    g.beginPath();
+    g.arc(rnd() * w, rnd() * h, 0.5 + rnd() * 0.9, 0, Math.PI * 2);
+    g.fill();
+  }
+}
+/** Fills the current path again with the paper showing through ink. */
+export function inkGrain(ctx: Ctx) {
+  const p = texture(ctx, 'ink', paperStreaks, 31);
+  if (!p) return;
+  ctx.fillStyle = p;
+  ctx.fill();
+}
+/** Fills the current path again with the grain of the print. */
+export function plateGrain(ctx: Ctx) {
+  const p = texture(ctx, 'plate', printSpecks, 37);
+  if (!p) return;
+  ctx.fillStyle = p;
+  ctx.fill();
+}
