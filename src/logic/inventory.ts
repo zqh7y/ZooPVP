@@ -1,15 +1,27 @@
-import { BENCH_SLOTS, GRID, MAX_COUNT, MAX_LEVEL, PIECE_NAME, WEAPON_TYPES, armyPower, footprint, isGear, isPet, isWeapon } from '../data';
-import type { ArmySpec, GearType, LinkEdge, Piece, PieceType, SaveState, SquadSpec, WeaponType } from '../types';
+import { BENCH_SLOTS, GRID, MAX_COUNT, MAX_LEVEL, PIECE_NAME, WEAPON_TYPES, armyPower, footprint, isGear, isPet, isWeapon, nextPet, rungOf } from '../data';
+import type { ArmySpec, GearType, LinkEdge, PetType, Piece, PieceType, SaveState, SquadSpec, WeaponType } from '../types';
 
 /**
  * Where a piece is dropped: a grid cell (the cell its top-left corner goes to) or a bench slot.
  */
 export type Target = { col: number; row: number } | { slot: number };
+/**
+ * How two pieces fuse: 'stack' doubles a pet's count (x1 -> x2 -> x4), 'class' lifts a weapon or gear one class,
+ * 'evolve' turns two x4 squads of a pet into one x1 of the next rung's pet.
+ */
+export type FuseKind = 'stack' | 'class' | 'evolve';
+/** Why two x4 squads of the top pet do not fuse. */
+export const TOP_OF_LADDER = 'Turtles are the top of the ladder';
 export interface PlaceResult {
   kind: 'moved' | 'swapped' | 'fused' | 'denied';
-  /** what now sits at the target (the grown piece after a fuse) */
+  /** what now sits at the target (the grown piece after a fuse; after an evolve, the new pet) */
   piece?: Piece;
-  fuse?: 'stack' | 'class';
+  fuse?: FuseKind;
+  /** an evolve: the pet it was and the pet it became */
+  from?: PetType;
+  to?: PetType;
+  /** an evolve into a pet the player never owned before (show the NEW PET reveal); in a preview, it would be */
+  fresh?: boolean;
   /** id of the piece that was used up */
   gone?: number;
   /** the piece that went to the dragged piece's old spot in a swap */
@@ -42,6 +54,26 @@ export function cellsOf(p: Piece): Cell[] {
 
 const inGrid = (c: number, r: number) => c >= 0 && c < GRID.cols && r >= 0 && r < GRID.rows;
 const name = (p: Piece) => PIECE_NAME[p.type];
+
+// ------------------------------------------------------------------ the pets ever owned (SaveState.seen)
+
+const bitOf = (pet: PetType) => 1 << (rungOf(pet) - 1);
+/** true when the player has owned this pet at some point (rolled, evolved, gifted or started with it). */
+export function seenPet(state: Pick<SaveState, 'seen'>, pet: PetType): boolean {
+  return (state.seen & bitOf(pet)) !== 0;
+}
+/** Remembers that the player owns this pet. True when it is the first time (show the NEW PET reveal). */
+export function markSeen(state: Pick<SaveState, 'seen'>, pet: PetType): boolean {
+  if (seenPet(state, pet)) return false;
+  state.seen |= bitOf(pet);
+  return true;
+}
+/** The rungs ever owned, 1..12 (for the ladder bar of the NEW PET card). */
+export function seenRungs(state: Pick<SaveState, 'seen'>): number[] {
+  const out: number[] = [];
+  for (let r = 1; r <= 12; r++) if (state.seen & (1 << (r - 1))) out.push(r);
+  return out;
+}
 
 /**
  * The cells side by side with a w x h shape at (col, row), each with the cell of the shape it touches.
@@ -94,11 +126,25 @@ export class Inventory {
     return this.state.pieces.find((p) => p.id === id) ?? null;
   }
 
-  /** 'stack' doubles a pet's count, 'class' lifts a weapon or gear one class, null when they cannot fuse. */
-  canFuse(a: Piece, b: Piece): 'stack' | 'class' | null {
-    if (a === b || a.id === b.id || a.type !== b.type || a.level !== b.level) return null;
-    if (isPet(a.type)) return a.count === b.count && a.count < MAX_COUNT ? 'stack' : null;
+  /**
+   * 'stack' doubles a pet's count (two pets of the same type and count under 4), 'evolve' turns two x4 squads of a
+   * pet into one x1 of the next rung's pet, 'class' lifts a weapon or gear one class; null when they cannot fuse
+   * (two x4 turtles, different pets or counts, different items or classes, an SSS item).
+   */
+  canFuse(a: Piece, b: Piece): FuseKind | null {
+    if (a === b || a.id === b.id || a.type !== b.type) return null;
+    if (isPet(a.type)) {
+      if (a.count !== b.count) return null;
+      if (a.count < MAX_COUNT) return 'stack';
+      return a.count === MAX_COUNT && nextPet(a.type) ? 'evolve' : null;
+    }
+    if (a.level !== b.level) return null;
     return a.level < MAX_LEVEL ? 'class' : null;
+  }
+
+  /** true when two pieces are full squads of the top pet: they cannot fuse (place() says so). */
+  private topPair(a: Piece, b: Piece): boolean {
+    return a !== b && a.type === b.type && isPet(a.type) && a.count === MAX_COUNT && b.count === MAX_COUNT && !nextPet(a.type);
   }
 
   private valid(t: Target): boolean {
@@ -141,14 +187,16 @@ export class Inventory {
         if (apply) this.toSlot(piece, target.slot);
         return { kind: 'moved', piece };
       }
+      if (this.topPair(piece, other)) return { kind: 'denied', reason: TOP_OF_LADDER };
       const fuse = this.canFuse(piece, other);
       if (fuse) {
-        // on the bench a piece of any size fits its slot, so it simply grows there
+        // on the bench a piece of any size fits its slot, so it simply grows there (an evolved pet keeps the slot)
+        const res = this.fused(other, piece, fuse);
         if (apply) {
           this.remove(piece);
-          this.grow(other, fuse);
+          res.fresh = this.grow(other, fuse);
         }
-        return { kind: 'fused', piece: other, fuse, gone: piece.id };
+        return res;
       }
       if (!onBench) {
         const f = footprint(other);
@@ -173,6 +221,7 @@ export class Inventory {
     }
     const mate = under.find((o) => this.canFuse(piece, o));
     if (mate) return this.fuseInto(piece, mate, target, apply);
+    if (under.some((o) => this.topPair(piece, o))) return { kind: 'denied', reason: TOP_OF_LADDER };
     if (!onBench && piece.col === target.col && piece.row === target.row) return { kind: 'denied' };
     if (cells.some((c) => !inGrid(c.col, c.row))) return { kind: 'denied', reason: 'It does not fit there' };
     if (under.length === 0) {
@@ -201,11 +250,24 @@ export class Inventory {
    */
   private fuseInto(piece: Piece, mate: Piece, drop: { col: number; row: number }, apply: boolean): PlaceResult {
     const fuse = this.canFuse(piece, mate)!;
-    const done: PlaceResult = { kind: 'fused', piece: mate, fuse, gone: piece.id };
+    const done = this.fused(mate, piece, fuse);
     if (fuse === 'class' || mate.slot >= 0) {
       if (apply) {
         this.remove(piece);
-        this.grow(mate, fuse);
+        done.fresh = this.grow(mate, fuse);
+      }
+      return done;
+    }
+    if (fuse === 'evolve') {
+      // the new pet covers one cell: the drop cell when it is one of the mate's, else the mate's top-left cell
+      const inMate = cellsOf(mate).some((c) => c.col === drop.col && c.row === drop.row);
+      if (apply) {
+        this.remove(piece);
+        done.fresh = this.grow(mate, fuse);
+        if (inMate) {
+          mate.col = drop.col;
+          mate.row = drop.row;
+        }
       }
       return done;
     }
@@ -242,12 +304,33 @@ export class Inventory {
     return best && { col: best.col, row: best.row, turned: best.turned };
   }
 
-  private grow(p: Piece, fuse: 'stack' | 'class') {
+  /** The answer to a fuse of `piece` into `mate`, before it is applied (fresh: the evolved pet would be new). */
+  private fused(mate: Piece, piece: Piece, fuse: FuseKind): PlaceResult {
+    const res: PlaceResult = { kind: 'fused', piece: mate, fuse, gone: piece.id };
+    if (fuse === 'evolve') {
+      const to = nextPet(mate.type as PetType)!;
+      res.from = mate.type as PetType;
+      res.to = to;
+      res.fresh = !seenPet(this.state, to);
+    }
+    return res;
+  }
+
+  /** Grows a piece by a fuse. Returns true when an evolve made a pet the player never owned before. */
+  private grow(p: Piece, fuse: FuseKind): boolean {
     if (fuse === 'class') p.level += 1;
-    else {
+    else if (fuse === 'stack') {
       p.count *= 2;
       if (p.count !== 2) delete p.turned;
+    } else {
+      p.type = nextPet(p.type as PetType)!;
+      p.count = 1;
+      p.level = 1;
+      delete p.turned;
+      this.state.evolves += 1;
+      return markSeen(this.state, p.type);
     }
+    return false;
   }
 
   private toSlot(p: Piece, slot: number): void {
@@ -276,12 +359,17 @@ export class Inventory {
     return { ok: true };
   }
 
-  /** A new piece on the first free bench slot, or null when the bench is full. */
+  /**
+   * A new piece on the first free bench slot, or null when the bench is full. A pet's level is always 1, and the
+   * pet is remembered as owned (check seenPet before adding to know whether it is new).
+   */
   add(type: PieceType, level: number): Piece | null {
     const slot = this.freeBenchSlot();
     if (slot < 0) return null;
-    const p: Piece = { id: this.state.nextId++, type, level, count: 1, col: -1, row: -1, slot };
+    const pet = isPet(type);
+    const p: Piece = { id: this.state.nextId++, type, level: pet ? 1 : level, count: 1, col: -1, row: -1, slot };
     this.state.pieces.push(p);
+    if (pet) markSeen(this.state, type);
     return p;
   }
 
@@ -345,8 +433,7 @@ export class Inventory {
     const lv = (t: GearType) => b.gear[t]?.level ?? 0;
     return {
       key: pet.id,
-      pet: pet.type as 'ant' | 'frog',
-      level: pet.level,
+      pet: pet.type as PetType,
       count: pet.count,
       weapon: b.weapon ? (b.weapon.type as WeaponType) : null,
       weaponLevel: b.weapon ? b.weapon.level : 0,

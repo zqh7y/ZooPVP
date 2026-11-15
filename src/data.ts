@@ -6,8 +6,9 @@ import type { GearType, PetType, PieceKind, PieceType, RollResult, SquadSpec, We
  * the game does.
  */
 
-// ------------------------------------------------------------------ classes
+// ------------------------------------------------------------------ classes (weapons and gear only)
 
+/** The class of a weapon or gear piece is its level, 1..7 = E..SSS. Pets have no class: they climb the ladder. */
 export const MAX_LEVEL = 7;
 export const CLASSES = ['E', 'D', 'C', 'B', 'A', 'S', 'SSS'] as const;
 export const classOf = (level: number) => CLASSES[Math.max(1, Math.min(MAX_LEVEL, level)) - 1];
@@ -34,19 +35,32 @@ export function footprint(p: { type: PieceType; count: number; turned?: boolean 
 
 // ------------------------------------------------------------------ pieces
 
-export const PET_TYPES: readonly PetType[] = ['ant', 'frog'];
+/** The pets in ladder order, rung 1 (the weakest and most common) to rung 12. The only source of a pet's rung. */
+export const PET_TYPES: readonly PetType[] = ['ant', 'bee', 'mouse', 'snail', 'frog', 'crab',
+  'grasshopper', 'hedgehog', 'chameleon', 'penguin', 'beetle', 'turtle'];
 export const WEAPON_TYPES: readonly WeaponType[] = ['knife', 'bat', 'shield', 'spear'];
 export const GEAR_TYPES: readonly GearType[] = ['helmet', 'sneakers', 'chili'];
 export const PIECE_TYPES: readonly PieceType[] = [...PET_TYPES, ...WEAPON_TYPES, ...GEAR_TYPES];
 
-export const isPet = (t: PieceType): t is PetType => t === 'ant' || t === 'frog';
+const PET_SET: ReadonlySet<string> = new Set(PET_TYPES);
+export const isPet = (t: PieceType): t is PetType => PET_SET.has(t);
 export const isWeapon = (t: PieceType): t is WeaponType => t === 'knife' || t === 'bat' || t === 'shield' || t === 'spear';
 export const isGear = (t: PieceType): t is GearType => t === 'helmet' || t === 'sneakers' || t === 'chili';
 export const kindOf = (t: PieceType): PieceKind => (isPet(t) ? 'pet' : isWeapon(t) ? 'weapon' : 'gear');
 
 export const PIECE_NAME: Record<PieceType, string> = {
   ant: 'Ant',
+  bee: 'Bee',
+  mouse: 'Mouse',
+  snail: 'Snail',
   frog: 'Frog',
+  crab: 'Crab',
+  grasshopper: 'Grasshopper',
+  hedgehog: 'Hedgehog',
+  chameleon: 'Chameleon',
+  penguin: 'Penguin',
+  beetle: 'Beetle',
+  turtle: 'Turtle',
   knife: 'Knife',
   bat: 'Bat',
   shield: 'Shield',
@@ -58,8 +72,18 @@ export const PIECE_NAME: Record<PieceType, string> = {
 
 /** One short line shown while a piece is dragged. {v} is replaced by the number for its class. */
 export const PIECE_DESC: Record<PieceType, string> = {
-  ant: 'Tiny and fast. Gets there first.',
-  frog: 'Big and tough. Hops in late and hits hard.',
+  ant: 'Bites harder next to other ants.',
+  bee: 'Flies over friends. Its sting keeps hurting.',
+  mouse: 'Tiny and quick. Dodges almost a third of hits.',
+  snail: 'Hides in its shell once when hurt.',
+  frog: 'Its tongue slaps foes far away.',
+  crab: 'Two pinches every attack.',
+  grasshopper: 'Leaps onto the back line at the whistle.',
+  hedgehog: 'Spikes hurt whoever hits it.',
+  chameleon: 'Hits from afar and reels light foes in.',
+  penguin: 'Belly-slides in and bowls foes over.',
+  beetle: 'Charges in: its first strike hits huge.',
+  turtle: 'Armour cuts every hit. It stomps all round.',
   knife: 'Pets touching it stab very fast.',
   bat: 'Pets touching it swing slow and send foes flying.',
   shield: 'Pets touching it block hits and take the heat.',
@@ -69,41 +93,122 @@ export const PIECE_DESC: Record<PieceType, string> = {
   chili: 'Pets touching it hit +{v}% harder.',
 };
 
-// ------------------------------------------------------------------ pets
+// ------------------------------------------------------------------ pets: the twelve-rung ladder
 
-export type MoveStyle = 'scurry' | 'hop';
+/** The top rung. Two x4 squads of a pet evolve into one x1 of the next rung's pet; two x4 turtles cannot fuse. */
+export const MAX_RUNG = 12;
+/** The ladder (the same list as PET_TYPES): PET_LADDER[rung - 1] is the pet on that rung. */
+export const PET_LADDER = PET_TYPES;
+/** A pet's rung, 1..12. */
+export const rungOf = (p: PetType) => PET_TYPES.indexOf(p) + 1;
+export const petRung = rungOf;
+/** The pet on a rung (undefined outside 1..12). */
+export const petAt = (rung: number): PetType | undefined => PET_TYPES[rung - 1];
+/** The pet one rung up, or null at the top. */
+export const nextPet = (p: PetType): PetType | null => petAt(rungOf(p) + 1) ?? null;
+/**
+ * The item-style tier (1..7 = E..SSS) a rung looks like: tile frames, classFx, a pet's natural kit, the reveal
+ * sound. Rung 1..12 -> E D D C C B B A A S S SSS.
+ */
+export const tierOf = (rung: number) => Math.max(1, Math.min(MAX_LEVEL, Math.round(1 + ((rung - 1) * 6) / 11)));
+/** The tier of a pet's rung (see tierOf). */
+export const petTier = (p: PetType) => tierOf(rungOf(p));
+
+/** How a pet gets about. The simulator walks every style but 'hop' and 'leap' (hops) and 'fly' (over its own side). */
+export type MoveStyle = 'scurry' | 'fly' | 'dart' | 'glide' | 'hop' | 'scuttle' | 'leap' | 'roll' | 'creep' | 'slide' | 'charge' | 'plod';
+/** A pet's band at kick-off. */
+export type LineRow = 'front' | 'middle' | 'back';
 
 export interface PetDef {
-  /** health of one fighter at E-class */
+  /** health of one fighter */
   hp: number;
-  /** damage of its own attack (a bite, or the frog's tongue) at E-class */
+  /** damage of its own attack */
   dmg: number;
   /** seconds between its own attacks */
   cd: number;
   /** how far its own attack reaches past its body, px */
   reach: number;
-  /** px per second at E-class */
+  /** px per second */
   speed: number;
-  /** body radius at E-class, px (in the arena) */
+  /** body radius in the arena, px */
   radius: number;
   /** how hard it is to push around */
   mass: number;
   move: MoveStyle;
+  /** its band at kick-off */
+  row: LineRow;
+  /** what its trait and body are worth in squadPower (fitted by tools/balance.ts against its ladder neighbours) */
+  power: number;
 }
 
+/**
+ * Every pet doubles the POWER of the rung below: hp and damage both double each rung, so kill times hold. A pet
+ * piece covers one cell per fighter, so POWER per cell doubles too. These numbers are internal and never shown.
+ */
 export const PETS: Record<PetType, PetDef> = {
-  ant: { hp: 50, dmg: 4.6, cd: 0.6, reach: 4, speed: 56, radius: 16, mass: 1, move: 'scurry' },
-  frog: { hp: 85, dmg: 11, cd: 1.0, reach: 9, speed: 39, radius: 26, mass: 2.6, move: 'hop' },
+  ant:         { hp: 58,    dmg: 3.96,  cd: 0.6,  reach: 4,  speed: 56, radius: 16, mass: 1.0, move: 'scurry',  row: 'middle', power: 1.00 },
+  bee:         { hp: 89,    dmg: 5.54,  cd: 0.5,  reach: 5,  speed: 74, radius: 13, mass: 0.6, move: 'fly',     row: 'back',   power: 1.25 },
+  mouse:       { hp: 177,   dmg: 14.6,  cd: 0.45, reach: 3,  speed: 68, radius: 14, mass: 0.8, move: 'dart',    row: 'middle', power: 1.03 },
+  snail:       { hp: 413,   dmg: 61,    cd: 1.1,  reach: 4,  speed: 26, radius: 20, mass: 2.4, move: 'glide',   row: 'front',  power: 1.03 },
+  frog:        { hp: 862,   dmg: 86.4,  cd: 1.0,  reach: 9,  speed: 40, radius: 24, mass: 2.6, move: 'hop',     row: 'front',  power: 1.15 },
+  crab:        { hp: 1686,  dmg: 146.6, cd: 1.0,  reach: 7,  speed: 48, radius: 23, mass: 2.6, move: 'scuttle', row: 'middle', power: 1.26 },
+  grasshopper: { hp: 3616,  dmg: 306,   cd: 0.8,  reach: 6,  speed: 46, radius: 21, mass: 1.6, move: 'leap',    row: 'back',   power: 1.06 },
+  hedgehog:    { hp: 7846,  dmg: 447,   cd: 0.9,  reach: 4,  speed: 46, radius: 25, mass: 2.6, move: 'roll',    row: 'front',  power: 1.27 },
+  chameleon:   { hp: 15232, dmg: 1400,  cd: 1.1,  reach: 52, speed: 36, radius: 25, mass: 2.2, move: 'creep',   row: 'back',   power: 1.14 },
+  penguin:     { hp: 34560, dmg: 2975,  cd: 1.0,  reach: 6,  speed: 34, radius: 28, mass: 3.4, move: 'slide',   row: 'front',  power: 0.99 },
+  beetle:      { hp: 65434, dmg: 6103,  cd: 1.3,  reach: 10, speed: 40, radius: 30, mass: 4.2, move: 'charge',  row: 'front',  power: 1.14 },
+  turtle:      { hp: 97280, dmg: 15421, cd: 1.4,  reach: 6,  speed: 26, radius: 34, mass: 6.0, move: 'plod',    row: 'front',  power: 1.22 },
 };
 
-/** What a pet's class changes: a higher class is bigger, tougher, stronger and a little slower. */
-export const PET_CLASS = {
-  hp: 1.58, // x per class
-  dmg: 1.36, // x per class
-  size: 0.11, // + per class (radius)
-  speed: 0.95, // x per class
-  mass: 1.25, // x per class
+/** What the UI says about a pet: its name, its role, its trait in one line, and its band at kick-off. */
+export interface PetInfo {
+  name: string;
+  role: string;
+  trait: string;
+  row: LineRow;
+}
+export const PET_INFO: Record<PetType, PetInfo> = {
+  ant: { name: 'Ant', role: 'Swarm biter', trait: 'Bites +10% per nearby ant (up to +30%)', row: 'middle' },
+  bee: { name: 'Bee', role: 'Flying poisoner', trait: 'Stings poison for 80% more over 3 s; flies over its own lines', row: 'back' },
+  mouse: { name: 'Mouse', role: 'Evasive skirmisher', trait: 'Dodges 30% of hits', row: 'middle' },
+  snail: { name: 'Snail', role: 'Shell tank', trait: 'Once per life, hides in its shell below half health', row: 'front' },
+  frog: { name: 'Frog', role: 'Hopping bruiser', trait: 'Tongue slap: +30 knock-back, interrupts lighter foes', row: 'front' },
+  crab: { name: 'Crab', role: 'Double-hit brawler', trait: 'Every attack is two pinches of 55%', row: 'middle' },
+  grasshopper: { name: 'Grasshopper', role: 'Back-line leaper', trait: 'Leaps onto the enemy back line at the whistle; the landing stuns', row: 'back' },
+  hedgehog: { name: 'Hedgehog', role: 'Spiky tank', trait: 'Spikes return 30% of every hit it takes', row: 'front' },
+  chameleon: { name: 'Chameleon', role: 'Long-reach puller', trait: 'Tongue reach 52; pulls light foes in', row: 'back' },
+  penguin: { name: 'Penguin', role: 'Line-breaker', trait: 'Belly-slides at 3x speed and bowls foes over', row: 'front' },
+  beetle: { name: 'Beetle', role: 'Charging heavy', trait: 'After a 90 px run-up, the next strike deals 2.5x with a big shove', row: 'front' },
+  turtle: { name: 'Turtle', role: 'Armoured boss', trait: 'Armour cuts 35% of everything; its stomp hits up to 4 foes around it', row: 'front' },
 };
+
+/** Every trait number in one table, so tools/balance.ts can sweep them (see docs/pets.md, section 3). */
+export const TRAIT = {
+  /** +per damage for each other friendly ant within range px, up to max of them */
+  ant: { per: 0.1, max: 3, range: 100 },
+  /** a landed sting poisons for poison x its damage, drained over time s; a poison event at most every tickEvent s */
+  bee: { poison: 0.8, time: 3, tickEvent: 0.5 },
+  /** share of hits that miss it */
+  mouse: { dodge: 0.3 },
+  /** below this share of health it hides for time s: takes this share of damage, regrows regrow x its health, counts as massMul heavier */
+  snail: { below: 0.5, time: 2.5, take: 0.15, regrow: 0.15, massMul: 5 },
+  /** + knock on every hit; interrupts the wind-up of foes lighter than interruptMass x its mass, for interrupt s */
+  frog: { knock: 30, interruptMass: 0.8, interrupt: 0.2 },
+  /** every attack is two pinches of share x the damage */
+  crab: { share: 0.55 },
+  /** the opening leap: flight s, lands gap px short; hits foes within splash px, stun s, knock; target score: spread per teammate aimed, side x |dx|; cdLeft of its cooldown left; the landing marker shows warn s before */
+  grasshopper: { flight: 0.8, gap: 2, splash: 30, stun: 0.6, knock: 20, spread: 120, side: 0.3, cdLeft: 0.5, warn: 0.3 },
+  /** spikes return thorns x the damage it took */
+  hedgehog: { thorns: 0.3 },
+  /** hits on foes lighter than pullMass x its mass pull them pull px toward it */
+  chameleon: { pull: 28, pullMass: 1.5 },
+  /** slides at speed x when its target is over minDist px away, for up to maxTime s; slams the first foe within touch px for slam x damage, knock; shoves others within splash px; stands up standUp s; ready again recharge s after; steer = velocity blend per s */
+  penguin: { speed: 3, minDist: 110, maxTime: 1.6, touch: 3, slam: 1.5, knock: 55, splash: 36, standUp: 0.4, recharge: 5, steer: 30 },
+  /** after run px walked it is charged: speed x faster; the next strike deals mul x with + knock and a stun of at least stun s */
+  beetle: { run: 90, speed: 1.35, mul: 2.5, knock: 70, stun: 0.35 },
+  /** armour cuts this share of everything; the stomp hits up to max(stompMax, splash) foes all round */
+  turtle: { armour: 0.35, stompMax: 4 },
+} as const;
 
 // ------------------------------------------------------------------ weapons
 
@@ -138,10 +243,15 @@ export const WEAPONS: Record<WeaponType, WeaponDef> = {
   spear: { dmg: 1.25, cd: 1.1, reach: 24, knock: 14, hp: 1, block: 0, stun: 0, splash: 1, pierce: 2 },
 };
 
-/** What a weapon's class changes: fusing two identical weapons makes it hit harder and faster. */
+/**
+ * What a weapon's class changes: fusing two identical weapons makes it hit harder, faster and hold on longer.
+ * Each class is worth x1.112 POWER (as before the ladder), split between damage and health, so duels at S and
+ * SSS last about as long as at E.
+ */
 export const WEAPON_CLASS = {
-  dmg: 1.2, // x per class
+  dmg: 1.1, // x per class
   cd: 0.97, // x per class
+  hp: 1.09, // x per class
 };
 
 // ------------------------------------------------------------------ gear
@@ -176,29 +286,31 @@ export interface UnitStats {
   splash: number;
   pierce: number;
   move: MoveStyle;
+  /** its pet's rung, 1..12 */
+  rung: number;
 }
 
-/** The numbers of one fighter of a squad. */
+/** The numbers of one fighter of a squad. Speed, radius and mass come from the pet (sneakers add speed). */
 export function unitStats(s: SquadSpec): UnitStats {
   const p = PETS[s.pet];
   const w = s.weapon ? WEAPONS[s.weapon] : NO_WEAPON;
-  const pl = Math.max(1, s.level) - 1;
   const wl = s.weapon ? Math.max(1, s.weaponLevel) - 1 : 0;
   const speedUp = gearPct('sneakers', s.sneakers) / 100;
   return {
-    hp: p.hp * PET_CLASS.hp ** pl * w.hp * (1 + gearPct('helmet', s.helmet) / 100),
-    dmg: p.dmg * PET_CLASS.dmg ** pl * w.dmg * WEAPON_CLASS.dmg ** wl * (1 + gearPct('chili', s.chili) / 100),
+    hp: p.hp * w.hp * WEAPON_CLASS.hp ** wl * (1 + gearPct('helmet', s.helmet) / 100),
+    dmg: p.dmg * w.dmg * WEAPON_CLASS.dmg ** wl * (1 + gearPct('chili', s.chili) / 100),
     cd: (p.cd * w.cd * WEAPON_CLASS.cd ** wl) / (1 + speedUp * SNEAKERS_ATTACK_SHARE),
     reach: p.reach + w.reach,
-    speed: p.speed * PET_CLASS.speed ** pl * (1 + speedUp),
-    radius: p.radius * (1 + PET_CLASS.size * pl),
-    mass: p.mass * PET_CLASS.mass ** pl,
+    speed: p.speed * (1 + speedUp),
+    radius: p.radius,
+    mass: p.mass,
     knock: w.knock,
     block: w.block,
     stun: w.stun,
     splash: w.splash,
     pierce: w.pierce,
     move: p.move,
+    rung: rungOf(s.pet),
   };
 }
 
@@ -210,7 +322,7 @@ export function squadPower(s: SquadSpec): number {
   const u = unitStats(s);
   const toughness = u.hp / (1 - u.block);
   const dps = (u.dmg / u.cd) * (1 + 0.25 * (u.splash - 1)) * (1 + 0.2 * (u.pierce - 1)) * (1 + 2 * u.stun);
-  const one = Math.sqrt(toughness * dps);
+  const one = Math.sqrt(toughness * dps) * PETS[s.pet].power;
   return one * s.count ** POWER.countExp * POWER.scale;
 }
 export const POWER = { scale: 0.6, countExp: 1 };
@@ -239,8 +351,8 @@ export const FIGHT = {
   lineBack: 26,
   /** px between the bodies of neighbours in a row, and between rows */
   lineGap: 8,
-  /** seconds between the front kind setting off and the kind lined up behind it */
-  wave: 5,
+  /** seconds between one kick-off band (front, middle, back) setting off and the next one that has fighters */
+  wave: 2.5,
   /** a foe already fought by others looks this much farther per attacker, so fights spread along the line */
   crowd: 2,
   /** how hard a stuck fighter slips sideways around what blocks it */
@@ -251,18 +363,43 @@ export const FIGHT = {
 
 // ------------------------------------------------------------------ rolls
 
-/** Share of rolls that give each piece (they sum to 100). */
-export const ROLL_TYPE_ODDS: Record<PieceType, number> = {
-  ant: 20,
-  frog: 14,
-  knife: 9,
-  bat: 9,
-  shield: 9,
-  spear: 9,
-  helmet: 10,
-  sneakers: 10,
+/** Share of rolls that give each kind of piece (they sum to 100). A pet roll then picks a rung (petOdds). */
+export const ROLL_KIND_ODDS: Record<'pet' | WeaponType | GearType, number> = {
+  pet: 40,
+  knife: 8,
+  bat: 8,
+  shield: 8,
+  spear: 8,
+  helmet: 9,
+  sneakers: 9,
   chili: 10,
 };
+/** The kinds ROLL_KIND_ODDS picks from, in a fixed order. */
+export const ROLL_KINDS: readonly ('pet' | WeaponType | GearType)[] = ['pet', 'knife', 'bat', 'shield', 'spear', 'helmet', 'sneakers', 'chili'];
+
+/**
+ * Each league's home rung (Sprout .. Legend): a pet roll's rung weighs PET_ODDS_STEP.up ^ (rung - home) above it
+ * and PET_ODDS_STEP.down ^ (home - rung) below it. The up step must stay steep (well under 1/8), so evolving
+ * stays cheaper than rolling the next rung.
+ */
+export const PET_HOME: readonly number[] = [1, 2, 3, 4.5, 6, 7.5, 9];
+export const PET_ODDS_STEP = { up: 0.2, down: 0.3 };
+/** The % chance of each rung 1..12 on a pet roll in this league (sums to 100). */
+export function petOdds(league: number): number[] {
+  const home = PET_HOME[Math.max(0, Math.min(PET_HOME.length - 1, league))];
+  const w = PET_TYPES.map((_, i) => {
+    const rung = i + 1;
+    return rung >= home ? PET_ODDS_STEP.up ** (rung - home) : PET_ODDS_STEP.down ** (home - rung);
+  });
+  const sum = w.reduce((a, b) => a + b, 0);
+  return w.map((x) => (x / sum) * 100);
+}
+/** A pity pet is this many rungs above ceil(home), at these % (capped at the top rung). */
+export const PITY_PET = { above: [2, 3, 4] as const, odds: [88, 10.5, 1.5] as const };
+/** The lowest rung that counts as a top pet in this league: rolling one (however) resets the pity counter. */
+export const pityRung = (league: number) => Math.ceil(PET_HOME[Math.max(0, Math.min(PET_HOME.length - 1, league))]) + PITY_PET.above[0];
+/** While the player has never evolved and has played fewer matches than this, a normal pet roll is an ant. */
+export const ANT_SEASON = 12;
 
 /** Chance (in %) of each class E..SSS, per league: the higher your league, the better the rolls. */
 export const ROLL_CLASS_ODDS: readonly (readonly number[])[] = [
@@ -274,7 +411,7 @@ export const ROLL_CLASS_ODDS: readonly (readonly number[])[] = [
   [30, 32, 21.5, 11, 4.4, 0.85, 0.25],
   [22, 31, 24.5, 14.5, 6.3, 1.3, 0.4],
 ];
-/** A-class or better: what the guaranteed roll picks from. */
+/** A-class or better: what a guaranteed (pity) item roll picks from. */
 export const TOP_ODDS: readonly number[] = [0, 0, 0, 0, 88, 10.5, 1.5];
 /** Every this many rolls without an A-class or better, the next one is guaranteed. */
 export const PITY = 30;
@@ -282,8 +419,8 @@ export const PITY = 30;
 /** The first rolls of a new player are fixed, so the guide can teach fusing. */
 export const SCRIPTED_ROLLS: readonly RollResult[] = [
   { type: 'ant', level: 1, pity: false },
-  { type: 'frog', level: 1, pity: false },
   { type: 'chili', level: 1, pity: false },
+  { type: 'ant', level: 1, pity: false },
 ];
 
 /** What a new player starts with, on the bench. */
@@ -332,13 +469,24 @@ export const leagueOf = (trophies: number) => {
 export interface RoadReward {
   at: number;
   rolls: number;
-  /** when set, one of the rolls is at least this class */
-  minLevel?: number;
+  /** a welcome pet, handed out on the roll screen like a roll (see SaveState.gifts) */
+  pet?: PetType;
 }
+/** The welcome pets: one rung above each league's home rung, then a beetle, and a turtle at the end of the road. */
+const ROAD_PETS: Readonly<Record<number, { rolls: number; pet: PetType }>> = {
+  100: { rolls: 3, pet: 'mouse' },
+  250: { rolls: 3, pet: 'snail' },
+  450: { rolls: 3, pet: 'crab' },
+  700: { rolls: 3, pet: 'grasshopper' },
+  1000: { rolls: 3, pet: 'chameleon' },
+  1400: { rolls: 3, pet: 'penguin' },
+  1700: { rolls: 2, pet: 'beetle' },
+  2000: { rolls: 2, pet: 'turtle' },
+};
 export const TROPHY_ROAD: readonly RoadReward[] = Array.from({ length: 40 }, (_, i) => {
   const at = (i + 1) * 50;
-  const league = LEAGUES.some((l) => l.at === at);
-  return league ? { at, rolls: 4, minLevel: 4 } : { at, rolls: 2 };
+  const special = ROAD_PETS[at];
+  return special ? { at, rolls: special.rolls, pet: special.pet } : { at, rolls: 2 };
 });
 
 /**
@@ -349,8 +497,8 @@ export const BOT = {
   /** x the player's power for match 0, 1, 2 */
   firstMatches: [0.8, 0.9, 0.9] as const,
   /** from then on x this at 0 trophies, rising evenly to `hard` at `hardAt` trophies */
-  easy: 0.95,
-  hard: 1.1,
+  easy: 0.88,
+  hard: 1.03,
   hardAt: 1500,
   /** +- this share of random spread on the target power */
   spread: 0.06,
@@ -367,6 +515,11 @@ export const BOT = {
   maxFighters: 25,
   /** against at most this many fighters the bot fields the player's own kinds of pets (and weapon in a 1 v 1) */
   mirrorUpTo: 3,
+  /**
+   * How a bot shadows each player squad of rung k and count c: the same pet and count, rung k + 1 at half the
+   * count (c >= 2), or rung k - 1 at double the count (c <= 2). All three have the same bare POWER.
+   */
+  shapes: { same: 3, up: 1, down: 1 },
 };
 
 export const TUTORIAL_DONE = 99;

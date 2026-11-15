@@ -1,6 +1,6 @@
-import { BENCH_SLOTS, GRID, MAX_COUNT, MAX_LEVEL, PIECE_TYPES, STARTER_KIT, TROPHY_ROAD, footprint, isPet } from '../data';
+import { BENCH_SLOTS, GRID, MAX_COUNT, MAX_LEVEL, PET_TYPES, PIECE_TYPES, STARTER_KIT, TROPHY_ROAD, footprint, isPet, rungOf } from '../data';
 import { makeRng } from '../rng';
-import type { Piece, PieceType, SaveState } from '../types';
+import type { PetType, Piece, PieceType, SaveState } from '../types';
 
 export const SAVE_KEY = 'zoopvp-save';
 
@@ -16,13 +16,23 @@ function store(): Store | null {
   }
 }
 
-/** The save format. A save of another version (the 8 x 8 grid was version 1) is replaced by a fresh start. */
-export const SAVE_VERSION = 2;
+/**
+ * The save format. A save of another version is replaced by a fresh start (version 1 was the 8 x 8 grid, version 2
+ * the ant and frog with classes; version 3 is the twelve-pet ladder).
+ */
+export const SAVE_VERSION = 3;
+/** The toast the lobby shows once when an older save was replaced (see replacedOldSave). */
+export const FRESH_START_TOAST = 'New pets have arrived! Your zoo starts fresh.';
+
+/** The bit of SaveState.seen for a pet (bit rung - 1). */
+const seenBit = (pet: PetType) => 1 << (rungOf(pet) - 1);
+const ALL_RUNGS = (1 << PET_TYPES.length) - 1;
 
 /** A fresh player: the starter kit on the bench, the scripted first rolls still to come. The seed only picks the name number. */
 export function newSave(seed = 48213): SaveState {
   const n = makeRng(seed).int(10000, 99999);
-  const pieces: Piece[] = STARTER_KIT.map((k, i) => ({ id: i + 1, type: k.type, level: k.level, count: 1, col: -1, row: -1, slot: i }));
+  const pieces: Piece[] = STARTER_KIT.map((k, i) => ({ id: i + 1, type: k.type, level: isPet(k.type) ? 1 : k.level, count: 1, col: -1, row: -1, slot: i }));
+  const seen = pieces.reduce((m, p) => (isPet(p.type) ? m | seenBit(p.type) : m), seenBit('ant'));
   return {
     version: SAVE_VERSION,
     name: `Player${n}`,
@@ -40,7 +50,21 @@ export function newSave(seed = 48213): SaveState {
     tutorial: 0,
     claimed: 0,
     seed: 1,
+    gifts: [],
+    seen,
+    tips: 0,
+    evolves: 0,
   };
+}
+
+/**
+ * true when this stored save is one of an older version (so load() starts fresh): the lobby shows
+ * FRESH_START_TOAST once.
+ */
+export function replacedOldSave(raw: unknown): boolean {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+  const v = (raw as Record<string, unknown>).version;
+  return typeof v === 'number' && v !== SAVE_VERSION;
 }
 
 const num = (v: unknown, def: number, min = -Infinity, max = Infinity): number =>
@@ -69,7 +93,8 @@ export function repair(raw: unknown): SaveState {
     const o = q as Record<string, unknown>;
     if (typeof o.type !== 'string' || !PIECE_TYPES.includes(o.type as PieceType)) continue;
     const type = o.type as PieceType;
-    const level = whole(o.level, 1, 1, MAX_LEVEL);
+    // a pet has no class: its level is always 1
+    const level = isPet(type) ? 1 : whole(o.level, 1, 1, MAX_LEVEL);
     let count = whole(o.count, 1, 1, MAX_COUNT);
     count = isPet(type) ? 2 ** Math.floor(Math.log2(count)) : 1;
     let id = whole(o.id, -1, 0);
@@ -110,6 +135,11 @@ export function repair(raw: unknown): SaveState {
   }
   const hasSave = Array.isArray(r.pieces);
   const trophiesBest = Math.max(trophies, whole(r.bestTrophies, 0, 0));
+  const kept = hasSave ? pieces : base.pieces;
+  const gifts = Array.isArray(r.gifts) ? r.gifts.filter((g): g is PetType => typeof g === 'string' && (PET_TYPES as readonly string[]).includes(g)) : [];
+  // every pet it owns (on the grid or the bench) counts as seen; a gift still waiting does not (it is not owned yet)
+  let seen = (whole(r.seen, base.seen, 0) & ALL_RUNGS) | seenBit('ant');
+  for (const p of kept) if (isPet(p.type)) seen |= seenBit(p.type);
   return {
     version: SAVE_VERSION,
     name: typeof r.name === 'string' && r.name.trim() ? r.name.slice(0, 24) : base.name,
@@ -119,7 +149,7 @@ export function repair(raw: unknown): SaveState {
     rollMeter: num(r.rollMeter, 0, 0, 0.999999),
     pity: whole(r.pity, 0, 0),
     rolled: whole(r.rolled, 0, 0),
-    pieces: hasSave ? pieces : base.pieces,
+    pieces: kept,
     nextId: Math.max(whole(r.nextId, 1, 1), maxId + 1),
     matches: whole(r.matches, 0, 0),
     wins: whole(r.wins, 0, 0),
@@ -127,6 +157,10 @@ export function repair(raw: unknown): SaveState {
     tutorial: whole(r.tutorial, 0, 0),
     claimed: whole(r.claimed, 0, 0, TROPHY_ROAD.length),
     seed: whole(r.seed, 1, 0),
+    gifts,
+    seen,
+    tips: whole(r.tips, 0, 0),
+    evolves: whole(r.evolves, 0, 0),
   };
 }
 
