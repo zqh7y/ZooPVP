@@ -1,10 +1,12 @@
-import type { GearType, PetType, Team, WeaponType } from '../../types';
+import type { GearType, Team, WeaponType } from '../../types';
 
 /*
  * The shape every art-style sample (style1..style5) has, so the one the player picks can replace the live pet,
  * weapon and gear art without changing its callers' idea of what to ask for. Samples only: the game does not
  * import these yet.
  */
+/** The samples show the two original pets; the game's PetType grows past these. */
+export type SamplePet = 'ant' | 'frog';
 export type Pose = 'idle' | 'attack' | 'hit';
 export type ItemType = WeaponType | GearType;
 
@@ -26,7 +28,7 @@ export interface ArtStyle {
    * radius (ant 16 / frog 26 at game size; the sheet also draws them at about 50-60). Draws its own shadow.
    * t is seconds, for idle breathing / blinking; pose 'attack' is the moment of the lunge, 'hit' the flinch.
    */
-  drawPet(ctx: CanvasRenderingContext2D, type: PetType, team: Team, x: number, y: number, r: number, pose: Pose, t: number, o?: PetOpts): void;
+  drawPet(ctx: CanvasRenderingContext2D, type: SamplePet, team: Team, x: number, y: number, r: number, pose: Pose, t: number, o?: PetOpts): void;
   /** An item's icon centred at (x, y), fitting a size x size box (the lobby tile is drawn by the caller). */
   drawItem(ctx: CanvasRenderingContext2D, type: ItemType, x: number, y: number, size: number): void;
 }

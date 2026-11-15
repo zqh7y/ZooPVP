@@ -1,7 +1,7 @@
-import type { PetType, Team } from '../src/types';
+import type { Team } from '../src/types';
 import { TEAM, UI } from '../src/theme';
 import { label, rr } from '../src/util';
-import type { ArtStyle, ItemType, Pose } from '../src/draw/styles/api';
+import type { ArtStyle, ItemType, Pose, SamplePet } from '../src/draw/styles/api';
 import { style1 } from '../src/draw/styles/style1';
 import { style2 } from '../src/draw/styles/style2';
 import { style3 } from '../src/draw/styles/style3';
@@ -59,7 +59,7 @@ function sheet(ctx: Ctx, st: ArtStyle, n: number, t: number) {
   label(ctx, st.BLURB, 360, 76, 18, { color: UI.textDim });
 
   // the big pets: ants, then frogs; three poses, the last in red
-  const rows: [PetType, number, number][] = [
+  const rows: [SamplePet, number, number][] = [
     ['ant', 250, 50],
     ['frog', 455, 56],
   ];
@@ -79,7 +79,7 @@ function sheet(ctx: Ctx, st: ArtStyle, n: number, t: number) {
   // the game-size view: red at the top, blue at the bottom, fight radius ant 16 / frog 26
   label(ctx, 'AT GAME SIZE', 360, 510, 16, { color: UI.text, weight: 700 });
   grass(ctx, 30, 524, 660, 300);
-  const fighters: [PetType, Team, number, number, Pose][] = [
+  const fighters: [SamplePet, Team, number, number, Pose][] = [
     ['frog', 1, 150, 628, 'idle'],
     ['frog', 1, 300, 618, 'attack'],
     ['ant', 1, 430, 598, 'idle'],
@@ -111,7 +111,7 @@ function sheet(ctx: Ctx, st: ArtStyle, n: number, t: number) {
 
   // dressed: a knife and a helmet, and a spear / shield pair
   label(ctx, 'EQUIPPED', 360, 1020, 16, { color: UI.text, weight: 700 });
-  const dressed: [PetType, Team, Pose, 'knife' | 'bat' | 'spear' | 'shield'][] = [
+  const dressed: [SamplePet, Team, Pose, 'knife' | 'bat' | 'spear' | 'shield'][] = [
     ['ant', 0, 'idle', 'knife'],
     ['frog', 0, 'attack', 'bat'],
     ['ant', 1, 'attack', 'spear'],
