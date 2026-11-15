@@ -1,8 +1,8 @@
 import type { GearType, PetType, PieceKind, PieceType, SquadSpec, WeaponType } from './types';
 
 /*
- * The game's numbers: classes, the twelve units, weapons, gear, cases, stages and waves, the grid's locked cells,
- * the economy and the balance knobs. Plain data and pure functions only, so the headless simulator and the
+ * The game's numbers: classes, the twelve fighters, weapons, gear, cases, matchmaking, rewards and the player level,
+ * the grid's locked cells, the economy and the balance knobs. Plain data and pure functions only, so the headless simulator and the
  * balance tools read the same table the game does.
  */
 
@@ -33,8 +33,8 @@ export function footprint(p: { type: PieceType; count: number; turned?: boolean 
   return { w: 2, h: 2 };
 }
 
-/** How a locked grid cell opens: with cash (each costs more than the last), on reaching a stage, or after enough knock-outs. */
-export type CellLock = { kind: 'cash' } | { kind: 'stage'; stage: number } | { kind: 'ko'; count: number };
+/** How a locked grid cell opens: with cash (each costs more than the last), on reaching a player level, or after enough knock-outs. */
+export type CellLock = { kind: 'cash' } | { kind: 'level'; level: number } | { kind: 'ko'; count: number };
 /** The bit of a cell in SaveState.open. */
 export const cellBit = (col: number, row: number) => 1 << (row * GRID.cols + col);
 /** The cells open from the start: the middle 3 x 3. */
@@ -51,11 +51,11 @@ export const CELL_LOCKS: Readonly<Record<string, CellLock>> = {
   '4,2': { kind: 'cash' },
   '0,3': { kind: 'cash' },
   '4,3': { kind: 'cash' },
-  '1,0': { kind: 'stage', stage: 2 },
-  '2,0': { kind: 'stage', stage: 3 },
-  '3,0': { kind: 'stage', stage: 4 },
-  '0,0': { kind: 'stage', stage: 6 },
-  '4,0': { kind: 'stage', stage: 8 },
+  '1,0': { kind: 'level', level: 3 },
+  '2,0': { kind: 'level', level: 5 },
+  '3,0': { kind: 'level', level: 7 },
+  '0,0': { kind: 'level', level: 10 },
+  '4,0': { kind: 'level', level: 14 },
   '1,4': { kind: 'ko', count: 30 },
   '2,4': { kind: 'ko', count: 80 },
   '3,4': { kind: 'ko', count: 160 },
@@ -94,18 +94,18 @@ export interface PetInfo {
   row: LineRow;
 }
 export const PET_INFO: Readonly<Record<PetType, PetInfo>> = {
-  sprout: { name: 'Sprout', role: 'Swarm biter', trait: 'Bites +10% harder per Sprout nearby (up to +30%)', desc: 'Bites harder next to other Sprouts.', row: 'middle' },
-  buzzy: { name: 'Buzzy', role: 'Flying poisoner', trait: 'Stings poison for 80% more over 3 s; flies over its own lines', desc: 'Flies over friends. Its sting keeps hurting.', row: 'back' },
-  ninja: { name: 'Ninja', role: 'Evasive skirmisher', trait: 'Dodges 30% of hits', desc: 'Quick and sneaky. Dodges almost a third of hits.', row: 'middle' },
-  snailor: { name: 'Snailor', role: 'Shell tank', trait: 'Once per life, hides in its shell below half health', desc: 'Hides in its sea-chest shell once when hurt.', row: 'front' },
+  sprout: { name: 'Pea', role: 'Swarm puncher', trait: 'Punches +10% harder per Pea nearby (up to +30%)', desc: 'Tiny but never alone. Hits harder next to other Peas.', row: 'middle' },
+  buzzy: { name: 'Stinger', role: 'Flying luchador', trait: 'Its stinger jab poisons for 80% more over 3 s; flies over its own lines', desc: 'Flies over friends. Its sting keeps hurting.', row: 'back' },
+  ninja: { name: 'Kit', role: 'Kickboxer', trait: 'Quick feet: dodges 30% of hits', desc: 'Light on its feet. Dodges almost a third of hits.', row: 'middle' },
+  snailor: { name: 'Dillo', role: 'Armoured boxer', trait: 'Once per life, curls into its armoured ball below half health', desc: 'Curls into a ball once when hurt, and heals a bit.', row: 'front' },
   roo: { name: 'Roo', role: 'Hopping bruiser', trait: 'Punches knock foes back and interrupt lighter ones', desc: 'Its punches send foes flying.', row: 'front' },
-  cacto: { name: 'Cacto', role: 'Double-hit brawler', trait: 'Every attack is two jabs', desc: 'Two jabs every attack.', row: 'middle' },
-  pogo: { name: 'Pogo', role: 'Back-line leaper', trait: 'Leaps onto the enemy back line at the start; the landing stuns', desc: 'Bounces onto the back line at the whistle.', row: 'back' },
-  briar: { name: 'Briar', role: 'Thorny tank', trait: 'Thorns return 30% of every hit it takes', desc: 'Thorns hurt whoever hits it.', row: 'front' },
-  angler: { name: 'Angler', role: 'Long-reach puller', trait: 'Long reach; the hook pulls light foes in', desc: 'Casts from afar and reels light foes in.', row: 'back' },
-  sumo: { name: 'Sumo', role: 'Line-breaker', trait: 'Belly-slides at 3x speed and bowls foes over', desc: 'Belly-slides in and bowls foes over.', row: 'front' },
-  rhino: { name: 'Rhino', role: 'Charger', trait: 'After a run-up, the next strike deals 2.5x with a big shove', desc: 'Charges in: its first strike hits huge.', row: 'front' },
-  boulder: { name: 'Boulder', role: 'Armoured giant', trait: 'Armour cuts 35% of everything; its stomp hits up to 4 foes', desc: 'Armour cuts every hit. It stomps all round.', row: 'front' },
+  cacto: { name: 'Cacto', role: 'Double-jab brawler', trait: 'Every attack is two jabs', desc: 'Two jabs every attack.', row: 'middle' },
+  pogo: { name: 'Leapo', role: 'Top-rope luchador', trait: 'Leaps onto the enemy back line at the bell; the landing stuns', desc: 'Leaps off the top rope onto the back line.', row: 'back' },
+  briar: { name: 'Spike', role: 'Spiky wrestler', trait: 'Thorns return 30% of every hit it takes', desc: 'Its spikes hurt whoever hits it.', row: 'front' },
+  angler: { name: 'Inky', role: 'Long-reach boxer', trait: 'Long reach; its gloves pull light foes in', desc: 'Four gloves, long reach. Reels light foes in.', row: 'back' },
+  sumo: { name: 'Walrus', role: 'Belly-slide wrestler', trait: 'Belly-slides at 3x speed and bowls foes over', desc: 'Belly-slides in and bowls foes over.', row: 'front' },
+  rhino: { name: 'Bull', role: 'Charger', trait: 'After a run-up, the next strike deals 2.5x with a big shove', desc: 'Charges in: its first strike hits huge.', row: 'front' },
+  boulder: { name: 'Champ', role: 'Armoured champion', trait: 'Armour cuts 35% of everything; its ground-pound hits up to 4 foes', desc: 'Armour cuts every hit. Its ground-pound hits all round.', row: 'front' },
 };
 
 export const PIECE_NAME: Readonly<Record<PieceType, string>> = {
@@ -222,7 +222,7 @@ export const TRAIT = {
 } as const;
 
 /**
- * A boss (wave 10 of every stage): a giant of a high-rung unit. radius / mass / reach scale its body, hp / dmg its
+ * A boss (the leader of a CHAMPION match): a giant of a high-rung unit. radius / mass / reach scale its body, hp / dmg its
  * numbers, speed its walk. power is what squadPower counts it as on top of sqrt(hp x dmg) (its big body is easier
  * to surround), fitted by tools/balance.ts.
  */
@@ -335,7 +335,7 @@ export function unitStats(s: SquadSpec): UnitStats {
 }
 
 /**
- * How strong a squad is, as one number (the POWER tab, and what a wave's recommended power is measured in).
+ * How strong a squad is, as one number (the POWER tab, and what matchmaking matches on).
  * The balance tool keeps this honest: two armies of equal power should win about equally often.
  */
 export function squadPower(s: SquadSpec): number {
@@ -359,7 +359,7 @@ export function formatPower(p: number): string {
 
 // ------------------------------------------------------------------ the fight
 
-/** The arena in the simulator's own pixels. You hold the bottom, the enemy wave the top. */
+/** The arena in the simulator's own pixels. You hold the bottom (the blue corner), the opponent the top (red). */
 export const ARENA = { w: 460, h: 820 } as const;
 
 export const FIGHT = {
@@ -389,59 +389,14 @@ export const FIGHT = {
   cheer: 0.8,
 };
 
-// ------------------------------------------------------------------ stages and waves
-
-/** Waves in a stage; the last one is the boss wave. */
-export const WAVES = 10;
-export const isBossWave = (wave: number) => wave >= WAVES;
-/** The wave's number counted from the very first one (stage 1 wave 1 is 1). */
-export const waveIndex = (stage: number, wave: number) => (Math.max(1, stage) - 1) * WAVES + Math.max(1, Math.min(WAVES, wave));
-
 /**
- * The army a wave sends (src/logic/waves.ts builds it): its POWER is the recommended power x share (x the boss
- * wave's own share on wave 10), spread over about fighters(stage, wave) fighters; the boss is one of a rung a
- * little above the wave's own.
+ * Critical hits: a hit that lands (not dodged; not thorns or poison) is a crit with this chance and deals mul x.
+ * Decided by a seeded hash of the fight, the step, the attacker, the victim and the hit, so it is deterministic and
+ * never depends on the order units are looked at. Both teams roll the same odds.
  */
-export const ENEMY = {
-  /** the wave's army POWER is recommendedPower x this: an army at the recommended power wins it about 4 times in 5 */
-  share: 0.8,
-  /** on the boss wave (a boss with its escort fights a little below its POWER, so a little more) */
-  bossShare: 1,
-  /** fighters on a normal wave: base + perWave x (wave - 1) + perStage x (stage - 1), up to max */
-  base: 1,
-  perWave: 0.3,
-  perStage: 1.1,
-  max: 18,
-  /** on the boss wave: this share of a normal wave's fighters escorts the boss */
-  escort: 0.5,
-  /** the share of a boss wave's POWER that is the boss */
-  bossPart: 0.55,
-  /** at most this many squads */
-  maxSquads: 8,
-  /** the army's POWER lands within this share of its target */
-  tolerance: 0.06,
-  /** stage 1's first waves send only bare or knife units: a bat's or shield's shove keeps a lone Sprout out of reach */
-  gentle: 3,
-  /** mercy: every loss in a row on a wave makes its next roll of the army this much weaker, at most mercyMax times */
-  mercy: 0.05,
-  mercyMax: 5,
-};
+export const CRIT = { chance: 0.08, mul: 1.6 };
 
-/**
- * The recommended power curve, fitted to a typical player (tools/balance.ts, "player"): wave 1 of stage s is
- * stages[s - 1] (past the table, each stage is x late the one before); waves 2..9 climb evenly (in log) to ramp of
- * the way to the next stage's wave 1; the boss wave asks for boss x wave 9.
- */
-export const RECOMMENDED = {
-  stages: [16, 175, 380, 680, 1100, 1500, 1950, 3000, 4300, 5400] as number[],
-  late: 1.4,
-  ramp: 0.8,
-  boss: 1.3,
-};
-const stageBase = (stage: number) => {
-  const t = RECOMMENDED.stages;
-  return stage <= t.length ? t[stage - 1] : t[t.length - 1] * RECOMMENDED.late ** (stage - t.length);
-};
+// ------------------------------------------------------------------ matched fights
 
 /** Rounds to 2 significant figures (3 from 1000), so the numbers on buttons look friendly. */
 export const friendly = (p: number) => {
@@ -452,17 +407,125 @@ export const friendly = (p: number) => {
 };
 
 /**
- * The army POWER a wave is comfortable at, in the units of the POWER tab (shown on the START WAVE button). An army
- * of this POWER beats the wave about 4 times in 5 (see ENEMY.share); wave 10 (the boss) asks for more.
+ * Matchmaking (src/logic/match.ts): BATTLE finds a bot whose army is built to the player's. Its POWER is the
+ * player's x difficulty(): `intro[n]` for the first fights (so the starter army wins them), else `base`; minus
+ * `slump` per loss in a row (at most slumpMax), plus `hot` per win in the streak beyond the first (at most hotMax),
+ * never below `floor`. Its fighters are about the player's (the theme scales them), at most maxSquads squads.
  */
-export function recommendedPower(stage: number, wave: number): number {
-  const s = Math.max(1, Math.floor(stage));
-  const w = Math.max(1, Math.min(WAVES, Math.floor(wave)));
-  const a = stageBase(s);
-  const step = (stageBase(s + 1) / a) ** (RECOMMENDED.ramp / (WAVES - 2));
-  const p = isBossWave(w) ? a * step ** (WAVES - 2) * RECOMMENDED.boss : a * step ** (w - 1);
-  return friendly(p);
+export const MATCH = {
+  base: 0.9,
+  intro: [0.6, 0.72, 0.82] as readonly number[],
+  slump: 0.08,
+  slumpMax: 4,
+  hot: 0.025,
+  hotMax: 4,
+  floor: 0.55,
+  /** the army's POWER lands within this share of its target */
+  tolerance: 0.06,
+  maxSquads: 8,
+  /** never more fighters than a full 5 x 5 grid holds */
+  maxFighters: 25,
+};
+
+/** Every `every`-th match is a CHAMPION match: a boss (SquadSpec.boss) leads a tougher team (power x the usual), for `rewards` x the rewards. */
+export const CHAMPION = {
+  every: 5,
+  power: 1.1,
+  /** the share of the champion team's POWER that is the boss */
+  bossPart: 0.5,
+  /** the escort: this share of the player's fighters (the boss comes on top) */
+  escort: 0.6,
+  rewards: 2,
+};
+/** true when match number n (1 = the first match) is a champion match. */
+export const isChampionMatch = (n: number) => n >= CHAMPION.every && n % CHAMPION.every === 0;
+
+/**
+ * The opponent themes, so fights stay interesting. fighters: x the player's fighter count; rungs: where its units
+ * sit against the player's own (-1 a rung lower ...); kit: the kit it favours. weight: how often it comes up.
+ */
+export type ThemeId = 'mixed' | 'swarm' | 'heavy' | 'glass' | 'tanks' | 'mirror' | 'champion';
+export interface ThemeDef {
+  name: string;
+  /** one line for the matchmaking card */
+  blurb: string;
+  fighters: number;
+  weight: number;
 }
+export const THEMES: Readonly<Record<ThemeId, ThemeDef>> = {
+  mixed: { name: 'Mixed', blurb: 'A bit of everything', fighters: 1, weight: 3 },
+  swarm: { name: 'Swarm', blurb: 'Lots of little fighters', fighters: 1.75, weight: 2 },
+  heavy: { name: 'Heavy Hitters', blurb: 'A few big bruisers', fighters: 0.5, weight: 2 },
+  glass: { name: 'Glass Cannons', blurb: 'Hit hard, fall fast', fighters: 1, weight: 2 },
+  tanks: { name: 'Tanks', blurb: 'Shields up, hard to knock down', fighters: 1, weight: 2 },
+  mirror: { name: 'Mirror', blurb: 'Your own lineup!', fighters: 1, weight: 1.5 },
+  champion: { name: 'Champion', blurb: 'A crowned champion and its crew', fighters: 1, weight: 0 },
+};
+/** The themes a normal match picks from, in a fixed order. */
+export const MATCH_THEMES: readonly ThemeId[] = ['mixed', 'swarm', 'heavy', 'glass', 'tanks', 'mirror'];
+
+/** Fun bot names (the UI shows a BOT tag next to them: bots must be clearly AI). Champions take CHAMPION_NAMES. */
+export const BOT_NAMES = {
+  first: ['Punchy', 'Rumble', 'Jab', 'Bonk', 'Knuckle', 'Thunder', 'Turbo', 'Sir', 'Captain', 'Lil', 'Big', 'Mighty', 'Fuzzy', 'Banana', 'Bouncy', 'Sneaky', 'Wobbly', 'Grumpy'],
+  last: ['Panda', 'Koala', 'Gloves', 'Hooks', 'Paws', 'Bean', 'Noodle', 'Potato', 'Pickle', 'Muffin', 'Badger', 'Wombat', 'Mango', 'Turnip', 'Pretzel', 'Waffle', 'Jabsalot', 'Uppercut'],
+};
+export const CHAMPION_NAMES: readonly string[] = [
+  'King Knockout', 'The Golden Glove', 'Iron Belly', 'Champ Kong', 'Big Belt Bertha', 'The Undefeated', 'Mister Uppercut', 'Queen of the Ring',
+];
+
+// ------------------------------------------------------------------ rewards and the player level
+
+/**
+ * What a match pays (applyMatch in src/logic/progress.ts). A win: win + winPerLevel x (level - 1) cash, plus every
+ * knock-out (ko + koPerLevel x (level - 1), rounded down; the boss counts bossKo), plus a streak bonus of streak x
+ * the base for each win in the streak beyond the first (at most streakMax); XP xpWin + xpKo per knock-out; gems
+ * (gems[0]..gems[1]) with gemChance. A loss: loss + lossPerLevel x (level - 1) cash plus the knock-outs, xpLoss +
+ * xpKo per knock-out; nothing is taken away. A champion win pays CHAMPION.rewards x the cash and XP, and always
+ * champGems + floor(level / champGemsLevels) gems.
+ */
+export const REWARD = {
+  win: 10,
+  winPerLevel: 3,
+  loss: 4,
+  lossPerLevel: 1,
+  ko: 2,
+  koPerLevel: 0.5,
+  bossKo: 5,
+  streak: 0.2,
+  streakMax: 5,
+  xpWin: 25,
+  xpLoss: 10,
+  xpKo: 1,
+  gemChance: 0.3,
+  gems: [1, 2] as readonly [number, number],
+  champGems: 5,
+  champGemsLevels: 3,
+};
+export const winCash = (level: number) => REWARD.win + REWARD.winPerLevel * (Math.max(1, level) - 1);
+export const lossCash = (level: number) => REWARD.loss + REWARD.lossPerLevel * (Math.max(1, level) - 1);
+/** Cash for one enemy knocked out at this level (a boss counts REWARD.bossKo). */
+export const koCash = (level: number) => Math.floor(REWARD.ko + REWARD.koPerLevel * (Math.max(1, level) - 1));
+/** The win-streak bonus on a win that makes the streak this long (0 for a streak of 1). */
+export const streakCash = (level: number, streak: number) =>
+  Math.round(winCash(level) * REWARD.streak * Math.max(0, Math.min(REWARD.streakMax, streak - 1)));
+/** Gems for a champion win at this level. */
+export const champGems = (level: number) => REWARD.champGems + Math.floor(Math.max(1, level) / REWARD.champGemsLevels);
+
+/** The player level: from level L to L + 1 takes base + step x (L - 1) XP. */
+export const LEVEL = { base: 50, step: 25, max: 99 };
+/** XP from this level to the next. */
+export const xpToNext = (level: number) => LEVEL.base + LEVEL.step * (Math.max(1, level) - 1);
+/** Total XP from level 1 to reach this level. */
+export const xpForLevel = (level: number) => {
+  let t = 0;
+  for (let l = 1; l < Math.min(LEVEL.max, Math.max(1, level)); l++) t += xpToNext(l);
+  return t;
+};
+/** The level a version-4 save's stage maps to (so its case odds and its level cells carry over). */
+export const levelForStage = (stage: number) => {
+  const s = Math.max(1, Math.floor(stage));
+  return Math.min(LEVEL.max, Math.max(1, 2 * s - 1 - Math.floor((s - 1) / 4)));
+};
 
 // ------------------------------------------------------------------ the economy
 
@@ -475,34 +538,11 @@ export const ECON = {
   caseStep: 0.6,
   /** ELITE price in gems */
   eliteCost: 6,
-  /** cash per enemy knocked out: ko + floor(koPerStage x (stage - 1)); the boss pays bossKo x that */
-  ko: 2,
-  koPerStage: 1,
-  bossKo: 8,
-  /** cash for clearing a wave: clear + clearPerWave x wave + clearPerStage x (stage - 1) */
-  clear: 5,
-  clearPerWave: 1,
-  clearPerStage: 3,
-  /** gems for a stage clear: stageGems + stage + stars */
-  stageGems: 3,
-  /** stars for the share of your fighters still standing when the boss falls: 3 from star3, 2 from star2 */
-  star3: 0.67,
-  star2: 0.34,
 };
 /** TRASH: a weapon or gear sells for this by class; a unit for its rung x its count. */
 export const ITEM_SELL: readonly number[] = [1, 2, 4, 6, 10, 16, 25];
 export const sellValue = (p: { type: PieceType; level: number; count: number }) =>
   isPet(p.type) ? rungOf(p.type) * p.count : ITEM_SELL[Math.max(1, Math.min(MAX_LEVEL, p.level)) - 1];
-
-/** Cash for one enemy knocked out on this stage (the boss pays ECON.bossKo x this). */
-export const koCash = (stage: number) => ECON.ko + Math.floor(ECON.koPerStage * (Math.max(1, stage) - 1));
-/** Cash for clearing this wave. */
-export const clearCash = (stage: number, wave: number) =>
-  Math.round(ECON.clear + ECON.clearPerWave * wave + ECON.clearPerStage * (Math.max(1, stage) - 1));
-/** Stars for a stage clear by the share of your fighters still standing (1..3). */
-export const starsFor = (survived: number) => (survived >= ECON.star3 ? 3 : survived >= ECON.star2 ? 2 : 1);
-/** Gems for clearing this stage with these stars. */
-export const stageGems = (stage: number, stars: number) => ECON.stageGems + stage + stars;
 
 // ------------------------------------------------------------------ cases
 
@@ -521,15 +561,15 @@ export const ROLL_KIND_ODDS: Readonly<Record<'pet' | WeaponType | GearType, numb
 export const ROLL_KINDS: readonly ('pet' | WeaponType | GearType)[] = ['pet', 'knife', 'bat', 'shield', 'spear', 'helmet', 'sneakers', 'chili'];
 
 /**
- * A unit roll's rung weighs PET_ODDS_STEP.up ^ (rung - home) above the stage's home rung and PET_ODDS_STEP.down ^
+ * A unit roll's rung weighs PET_ODDS_STEP.up ^ (rung - home) above the level's home rung and PET_ODDS_STEP.down ^
  * (home - rung) below it. The up step must stay steep (well under 1/8), so evolving stays the main way up.
  */
 export const PET_ODDS_STEP = { up: 0.2, down: 0.3 };
-/** The home rung of a CASE's unit on this stage (an ELITE's is ELITE_RUNG higher): 1 on stage 1, then up by perStage, at most max. */
-export const PET_HOME = { start: 1, perStage: 0.4, max: 10 };
+/** The home rung of a CASE's unit at this player level (an ELITE's is ELITE_RUNG higher): 1 at level 1, then up by perLevel, at most max. */
+export const PET_HOME = { start: 1, perLevel: 0.2, max: 10 };
 export const ELITE_RUNG = 1.5;
-export const homeRung = (stage: number, elite = false) =>
-  Math.min(PET_HOME.max, PET_HOME.start + PET_HOME.perStage * (Math.max(1, stage) - 1)) + (elite ? ELITE_RUNG : 0);
+export const homeRung = (level: number, elite = false) =>
+  Math.min(PET_HOME.max, PET_HOME.start + PET_HOME.perLevel * (Math.max(1, level) - 1)) + (elite ? ELITE_RUNG : 0);
 /** The % chance of each rung 1..12 on a unit roll around this home rung (sums to 100; an ELITE never gives rung 1). */
 export function petOdds(home: number, elite = false): number[] {
   const w = PET_TYPES.map((_, i) => {
@@ -545,7 +585,7 @@ export const PITY_PET = { above: [2, 3, 4] as const, odds: [88, 10.5, 1.5] as co
 /** The lowest rung that counts as a top unit around this home: rolling one resets the pity counter. */
 export const pityRung = (home: number) => Math.ceil(home) + PITY_PET.above[0];
 
-/** Chance (in %) of each class E..SSS of a CASE's weapon or gear: the row for the stage (row = floor((stage - 1) / 3), at most the last). */
+/** Chance (in %) of each class E..SSS of a CASE's weapon or gear: the row for the level (row = floor((level - 1) / CLASS_ODDS_LEVELS), at most the last). */
 export const ROLL_CLASS_ODDS: readonly (readonly number[])[] = [
   [70, 22, 6.4, 1.3, 0.25, 0.04, 0.01],
   [62, 26, 8.8, 2.5, 0.55, 0.12, 0.03],
@@ -555,10 +595,10 @@ export const ROLL_CLASS_ODDS: readonly (readonly number[])[] = [
   [30, 32, 21.5, 11, 4.4, 0.85, 0.25],
   [22, 31, 24.5, 14.5, 6.3, 1.3, 0.4],
 ];
-export const CLASS_ODDS_STAGES = 3;
-/** The class odds of a CASE on this stage; an ELITE's are one class better (never E). */
-export function classOdds(stage: number, elite = false): number[] {
-  const row = ROLL_CLASS_ODDS[Math.min(ROLL_CLASS_ODDS.length - 1, Math.floor((Math.max(1, stage) - 1) / CLASS_ODDS_STAGES))];
+export const CLASS_ODDS_LEVELS = 6;
+/** The class odds of a CASE at this player level; an ELITE's are one class better (never E). */
+export function classOdds(level: number, elite = false): number[] {
+  const row = ROLL_CLASS_ODDS[Math.min(ROLL_CLASS_ODDS.length - 1, Math.floor((Math.max(1, level) - 1) / CLASS_ODDS_LEVELS))];
   if (!elite) return [...row];
   const out = [0, ...row.slice(0, MAX_LEVEL - 1)];
   out[MAX_LEVEL - 1] += row[MAX_LEVEL - 1];
@@ -569,7 +609,7 @@ export const TOP_ODDS: readonly number[] = [0, 0, 0, 0, 88, 10.5, 1.5];
 /** The case after this many in a row without an A-class item or a top unit is guaranteed one. */
 export const PITY = 25;
 
-/** The first cases of a new player are fixed, so the guide can teach fusing (Sprout + Sprout -> x2). */
+/** The first cases of a new player are fixed, so the guide can teach fusing (Pea + Pea -> x2). */
 export const SCRIPTED_ROLLS: readonly { type: PieceType; level: number }[] = [
   { type: 'sprout', level: 1 },
   { type: 'chili', level: 1 },
@@ -583,7 +623,7 @@ export const STARTER_KIT: readonly { type: PieceType; level: number }[] = [
   { type: 'helmet', level: 1 },
 ];
 
-/** Seconds of untouched prep before AUTO starts the wave. */
+/** Seconds of untouched prep before AUTO starts the next match. */
 export const AUTO_START = 3;
 
 export const TUTORIAL_DONE = 99;
