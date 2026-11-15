@@ -64,6 +64,7 @@ export const PAL: Pal[] = TEAM.map((c, i) => {
 
 export const INK = '#151c28';
 export const EYE = '#fffdf6';
+export const EYE_S = '#e4ddd0';
 /** swing arcs and impact stars */
 export const FX = '#ffd84a';
 export const FX_HI = '#fffbe8';

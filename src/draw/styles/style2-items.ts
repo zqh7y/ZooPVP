@@ -204,22 +204,32 @@ const PLUME = { lit: '#ff8a3d', shade: '#d6531c' };
  * plume takes the team's colours.
  */
 export function helmet(ctx: Ctx, plume: Pair = PLUME, face = false) {
-  // the plume: each blade rooted under the crown, standing out from the dome and swept back
-  ctx.fillStyle = round(ctx, plume, -0.25, -1.1, 0.8);
-  ctx.beginPath();
-  for (let i = 0; i < 4; i++) {
-    const th = 1.2 + i * 0.38;
-    const ox = Math.cos(th);
-    const oy = -Math.sin(th);
-    const rx = ox * 0.8;
-    const ry = oy * 0.76;
-    const sw = th + 0.95;
-    const h = 0.62 + i * 0.05;
-    const tx = -oy * 0.34;
-    const ty = ox * 0.34;
-    tri(ctx, rx - tx, ry - ty, rx + tx, ry + ty, rx + Math.cos(sw) * h, ry - Math.sin(sw) * h, 0.15);
+  // the plume: four rounded triangles stacked along the crown, each swept back over the one behind it and
+  // throwing a thin shadow on it, so the stack reads as a brush of horsehair
+  const blade = (i: number) => {
+    const bx = 0.5 - i * 0.36;
+    const yt = -0.92 * Math.sqrt(Math.max(0, 1 - bx * bx));
+    tri(ctx, bx + 0.1, yt + 0.16, bx - 0.04, yt - 0.44 + i * 0.03, bx - 0.74 + i * 0.02, yt - 0.2 + i * 0.1, 0.13);
+  };
+  const plumeFill = round(ctx, plume, -0.2, -1.05, 0.8);
+  for (let i = 3; i >= 0; i--) {
+    if (i < 3 && !SIL) {
+      ctx.save();
+      ctx.beginPath();
+      for (let j = i + 1; j < 4; j++) blade(j);
+      ctx.clip();
+      ctx.translate(LX * 0.07, LY * 0.07);
+      ctx.fillStyle = 'rgba(70, 20, 30, 0.22)';
+      ctx.beginPath();
+      blade(i);
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.fillStyle = plumeFill;
+    ctx.beginPath();
+    blade(i);
+    ctx.fill();
   }
-  ctx.fill();
   // the neck guard flaring out at the back
   ctx.fillStyle = bevel(ctx, IRON, 0.08);
   ctx.beginPath();
@@ -356,8 +366,8 @@ function place(ctx: Ctx, type: ItemType, h: number) {
     ctx.scale(h * 0.8, h * 0.8);
     shield(ctx);
   } else if (type === 'helmet') {
-    ctx.translate(h * 0.06, h * 0.12);
-    ctx.scale(h * 0.64, h * 0.64);
+    ctx.translate(h * 0.1, h * 0.12);
+    ctx.scale(h * 0.72, h * 0.72);
     helmet(ctx, PLUME, true);
   } else if (type === 'sneakers') {
     ctx.translate(0, -h * 0.04);

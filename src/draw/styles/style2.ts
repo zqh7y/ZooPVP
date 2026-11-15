@@ -1,6 +1,6 @@
 import type { ArtStyle, PetOpts, Pose } from './api';
 import type { PetType, Team, WeaponType } from '../../types';
-import { EYE, FX, FX_HI, INK, PAL, SUN, moon, type Ctx, type Pal } from './style2-kit';
+import { EYE, EYE_S, FX, FX_HI, INK, PAL, SUN, moon, type Ctx, type Pal } from './style2-kit';
 import { helmet, icon, itemLight, tri, weapon } from './style2-items';
 
 /*
@@ -131,11 +131,12 @@ const OUCH = 2;
  */
 function eyes(ctx: Ctx, e: number[], lid: string | CanvasGradient, cover: number, vee: number, state: number) {
   if (state === OPEN) {
-    ctx.fillStyle = EYE;
-    ctx.beginPath();
-    dot(ctx, e[0], e[1], e[2]);
-    dot(ctx, e[3], e[4], e[5]);
-    ctx.fill();
+    for (let i = 0; i < 6; i += 3) {
+      ctx.fillStyle = lit(ctx, e[i], e[i + 1], e[i + 2], EYE, EYE_S, 0.45);
+      ctx.beginPath();
+      dot(ctx, e[i], e[i + 1], e[i + 2]);
+      ctx.fill();
+    }
     ctx.fillStyle = INK;
     ctx.beginPath();
     for (let i = 0; i < 6; i += 3) dot(ctx, e[i] + e[i + 2] * 0.3, e[i + 1] + e[i + 2] * 0.08, e[i + 2] * 0.6);
@@ -539,10 +540,17 @@ function ant(ctx: Ctx, P: Pal, p: number, ph: number, o: PetOpts, blink: boolean
 
   // mandibles: two rounded triangles jutting from under the face, closed to a V, gaping for a bite
   const gape = p === 1 ? (w ? 0.5 : 1) : p === 2 ? 0.3 : 0;
+  /** a mandible: a rounded triangle rooted at (x, y), pointing along a, L long, its base 2 hw across */
+  const jaw = (x: number, y: number, a: number, L: number, hw: number) => {
+    const c = Math.cos(a);
+    const s = Math.sin(a);
+    tri(ctx, x - s * hw, y + c * hw, x + s * hw, y - c * hw, x + c * L, y + s * L, 0.06);
+  };
+  // at rest two small fangs under the chin; they swing forward and apart as the jaw opens
   ctx.fillStyle = P.limbS;
   ctx.beginPath();
-  tri(ctx, hx + 0.26, hy + 0.18, hx + 0.5, hy + 0.36, hx + 0.8 + gape * 0.02, hy + 0.28 - gape * 0.34, 0.07);
-  tri(ctx, hx + 0.2, hy + 0.34, hx + 0.4, hy + 0.52, hx + 0.68, hy + 0.5 + gape * 0.24, 0.07);
+  jaw(hx + 0.36, hy + 0.3, 0.95 - gape * 1.4, 0.28 + gape * 0.18, 0.1);
+  jaw(hx + 0.22, hy + 0.4, 1.3 - gape * 0.62, 0.26 + gape * 0.14, 0.09);
   ctx.fill();
   if (p === 0) {
     // a little smirk
@@ -744,7 +752,7 @@ function frog(ctx: Ctx, P: Pal, p: number, ph: number, o: PetOpts, blink: boolea
 
   // the near arm: upper arm from the shoulder, forearm, a three-pad hand; its shadow falls on the belly
   const sh = bf(FROG_SHOULDER[0], FROG_SHOULDER[1]);
-  const el = joint(sh[0], sh[1], hand[0], hand[1], 0.46, 0.46, 1);
+  const el = joint(sh[0], sh[1], hand[0], hand[1], 0.5, 0.48, 1);
   const arm = (c: Ctx, dx: number, dy: number) => {
     c.beginPath();
     limb(c, [sh[0] + dx, sh[1] + dy], [el[0] + dx, el[1] + dy], [hand[0] + dx, hand[1] + dy], 0.1, 0.085);
@@ -817,9 +825,16 @@ interface Sprite {
   ox: number;
   oy: number;
   n: number;
+  look?: string;
 }
 const FRAMES = 8;
 const SPRITES = new Map<string, Sprite>();
+/** the newest sprite of each look (any breath phase), to stand in while the build budget is spent */
+const LOOKS = new Map<string, Sprite>();
+/** ms of sprite building allowed per frame before a look falls back to another of its cached phases */
+const BUDGET = 4;
+let frameAt = 0;
+let spent = 0;
 const CAP = 14e6; // device pixels kept, all sprites together
 let heldPx = 0;
 /** sprite bounds around the ground point, in r, per pet and pose: back, front, up, down (facing right) */
@@ -905,20 +920,33 @@ function render(type: PetType, team: Team, p: number, ph: number, blink: boolean
 }
 
 function cached(type: PetType, team: Team, p: number, q: number, blink: boolean, o: PetOpts, R: number): Sprite {
-  const key = `${type}${team}${p}${q}${blink ? 1 : 0}${o.weapon ?? '-'}${o.helmet ? 1 : 0}${o.face ?? 1}${R}`;
+  const look = `${type}${team}${p}${o.weapon ?? '-'}${o.helmet ? 1 : 0}${o.face ?? 1}${R}`;
+  const key = `${look}|${q}${blink ? 1 : 0}`;
   const hit = SPRITES.get(key);
   if (hit) {
     SPRITES.delete(key);
     SPRITES.set(key, hit);
     return hit;
   }
+  const now = performance.now();
+  if (now - frameAt > 12) {
+    frameAt = now;
+    spent = 0;
+  }
+  const stand = LOOKS.get(look);
+  if (stand && spent > BUDGET) return stand;
   const s = render(type, team, p, ((q + 0.5) * TAU) / FRAMES, blink, o, R);
+  spent += performance.now() - now;
+  s.look = look;
   SPRITES.set(key, s);
+  LOOKS.set(look, s);
   heldPx += s.n;
   while (heldPx > CAP && SPRITES.size > 1) {
     const old = SPRITES.keys().next().value as string;
-    heldPx -= SPRITES.get(old)!.n;
+    const o2 = SPRITES.get(old)!;
+    heldPx -= o2.n;
     SPRITES.delete(old);
+    if (o2.look && LOOKS.get(o2.look) === o2) LOOKS.delete(o2.look);
   }
   return s;
 }
