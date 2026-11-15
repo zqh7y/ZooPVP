@@ -1,117 +1,177 @@
 import { ARENA } from '../data';
-import { FIELD, W } from '../theme';
+import { W } from '../theme';
 
 /*
- * The match camera: a broadcast view from behind the player's end, so the pitch is a trapezoid that narrows
- * toward the far (opponent's) end and everything on it shrinks with distance. The fight is simulated on a flat
- * ARENA.w x ARENA.h rectangle; this is the one place that turns an arena point into a screen point. The stadium
- * (arena.ts) draws the pitch with it and the battle screen draws every fighter and effect with it, so they
- * always line up.
+ * The match camera: flat and straight down. The fight is simulated on an ARENA.w x ARENA.h rectangle (ax across,
+ * ay deep: 0 = the far end line at the top, ARENA.h = your end line at the bottom) and an arena point lands on
+ * screen by one uniform scale and an offset. The stadium (arena.ts) draws the pitch with it and the battle view
+ * draws every fighter and effect with it, so they always line up.
  *
- * Depth is linear in arena y: scale s goes from FAR_SCALE at the far end line (arena y = 0) to 1 at the near end
- * line (arena y = ARENA.h). Screen y is the running sum of s, flattened by TILT because the camera looks down at
- * an angle, so rows bunch up toward the far end and a circle on the grass reads as an ellipse.
+ * The VIEW is the screen rectangle the arena is shown in; the main screen sets it every frame (setView). The pitch
+ * is fitted to the view's width, leaving VIEW_PAD.side on each side for the wall and the crowd, and:
+ *  - when the view is tall enough for the whole stadium (fitHeight), the pitch is centred in it;
+ *  - when it is shorter (the prep view), it shows a band around the focus depth (setFocus), never scrolling past
+ *    VIEW_PAD.top above the far end line or VIEW_PAD.bottom below the near one.
+ * The two cases meet exactly, so a view whose height is animated moves the pitch smoothly.
  */
 
-/** How big things are at the far end line compared with the near one. */
-export const FAR_SCALE = 0.82;
-/** How much the camera's tilt flattens distances up the pitch (1 = straight down). */
-export const TILT = 0.88;
+/** Room around the pitch in the view, in arena px (times the view scale on screen): the wall and the crowd at the
+ * sides, the scoreboard and the referee above, the bench below. */
+export const VIEW_PAD = { side: 40, top: 55, bottom: 55 } as const;
 
-const SPAN = TILT * ARENA.h * (FAR_SCALE + 1) * 0.5; // the pitch's height on screen
-const NEAR_LINE = 952; // screen y of the near end line
+/** Kept for code written for the old tilted camera: things are the same size everywhere (1) and the camera looks
+ * straight down (1). */
+export const FAR_SCALE = 1;
+export const TILT = 1;
 
-/** Where the pitch sits on screen. */
-export const PITCH = {
-  /** screen y of the far end line */
-  top: NEAR_LINE - Math.round(SPAN),
-  /** screen y of the near end line */
-  bottom: NEAR_LINE,
-  /** screen x of the centre line */
-  cx: W / 2,
-  /** half the pitch's width on screen at the far and at the near end line */
-  farHalf: (ARENA.w / 2) * FAR_SCALE,
-  nearHalf: ARENA.w / 2,
-};
-
-/** The scale things have at arena depth ay (0 = far end line, ARENA.h = near end line). Works past both ends. */
-export function depthScale(ay: number): number {
-  return FAR_SCALE + (1 - FAR_SCALE) * (ay / ARENA.h);
-}
-
-/** Screen y of arena depth ay. */
-export function screenY(ay: number): number {
-  return PITCH.top + TILT * (FAR_SCALE * ay + ((1 - FAR_SCALE) * ay * ay) / (2 * ARENA.h));
+export interface ViewRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
 export interface Projected {
   x: number;
   y: number;
-  /** how big a thing standing here is drawn (multiply every size by it) */
+  /** how big a thing standing here is drawn (multiply every size by it): the view scale, the same everywhere */
   s: number;
+}
+
+/** Where the pitch is on screen now (updated by setView / setFocus): its end lines, centre line and half width. */
+export const PITCH = {
+  /** screen y of the far end line (arena y = 0) */
+  top: 0,
+  /** screen y of the near end line (arena y = ARENA.h) */
+  bottom: 0,
+  /** screen x of the centre line */
+  cx: W / 2,
+  /** half the pitch's width on screen (the same at both ends now) */
+  farHalf: 0,
+  nearHalf: 0,
+};
+
+/** The default focus: your half, so your army standing in its rows is in the prep view. */
+export const FOCUS_HOME = ARENA.h - 195;
+
+const view: ViewRect = { x: 0, y: 90, w: W, h: 930 };
+let focus = FOCUS_HOME;
+let K = 1; // screen px per arena px
+let OX = 0; // screen x of arena x 0
+let OY = 0; // screen y of arena y 0
+
+function place() {
+  // the pitch and its side pads fill the width; the pads scale with the pitch
+  K = Math.max(0.05, view.w / (ARENA.w + 2 * VIEW_PAD.side));
+  OX = view.x + (view.w - ARENA.w * K) / 2;
+  const ph = ARENA.h * K;
+  const lo = view.y + view.h - ph - VIEW_PAD.bottom * K; // the near pad's edge on the view's bottom
+  const hi = view.y + VIEW_PAD.top * K; // the far pad's edge on the view's top
+  if (lo <= hi) OY = Math.min(hi, Math.max(lo, view.y + view.h / 2 - focus * K));
+  else OY = (lo + hi) / 2;
+  PITCH.top = OY;
+  PITCH.bottom = OY + ph;
+  PITCH.cx = OX + (ARENA.w * K) / 2;
+  PITCH.farHalf = PITCH.nearHalf = (ARENA.w * K) / 2;
+}
+place();
+
+/** Show the arena in this screen rectangle (call every frame, or whenever it changes). */
+export function setView(r: ViewRect) {
+  if (r.x === view.x && r.y === view.y && r.w === view.w && r.h === view.h) return;
+  view.x = r.x;
+  view.y = r.y;
+  view.w = r.w;
+  view.h = r.h;
+  place();
+}
+
+/** The arena depth a view shorter than the stadium centres on (default FOCUS_HOME, your half). */
+export function setFocus(ay: number) {
+  if (ay === focus) return;
+  focus = ay;
+  place();
+}
+
+/** The focus depth set by setFocus. */
+export function focusDepth(): number {
+  return focus;
+}
+
+/** The current view rectangle (do not change it: use setView). */
+export function viewRect(): Readonly<ViewRect> {
+  return view;
+}
+
+/** Screen px per arena px in the current view. */
+export function viewScale(): number {
+  return K;
+}
+
+/** The view height at which the whole stadium (pitch and pads) just fits a view of width w: shorter views show a band. */
+export function fitHeight(w: number = W): number {
+  return ((ARENA.h + VIEW_PAD.top + VIEW_PAD.bottom) * w) / (ARENA.w + 2 * VIEW_PAD.side);
+}
+
+/** The size scale things have: the view scale, the same at every depth (the argument is kept for old callers). */
+export function depthScale(_ay?: number): number {
+  return K;
+}
+
+/** Screen y of arena depth ay. */
+export function screenY(ay: number): number {
+  return OY + ay * K;
+}
+
+/** Screen x of arena x ax. */
+export function screenX(ax: number): number {
+  return OX + ax * K;
 }
 
 /** An arena point (ax across, ay deep) as a screen point and a size scale. */
 export function project(ax: number, ay: number): Projected {
-  const s = depthScale(ay);
-  return { x: PITCH.cx + (ax - ARENA.w / 2) * s, y: screenY(ay), s };
+  return { x: OX + ax * K, y: OY + ay * K, s: K };
 }
 
 /** The same as project(), written into an object you keep, for code that runs for every fighter every frame. */
 export function projectInto(out: Projected, ax: number, ay: number): Projected {
-  const s = depthScale(ay);
-  out.x = PITCH.cx + (ax - ARENA.w / 2) * s;
-  out.y = screenY(ay);
-  out.s = s;
+  out.x = OX + ax * K;
+  out.y = OY + ay * K;
+  out.s = K;
   return out;
 }
 
-/**
- * An arena direction (radians, in the flat arena) as seen on screen at depth ay: movement up the pitch looks
- * shorter than movement across it. Use it for things that point (a swing, a hit's push, a streak).
- */
+/** An arena direction (radians) as seen on screen: the camera looks straight down, so it is the same angle. */
 export function screenAngle(dir: number): number {
-  // across, a step of 1 is drawn s long; up the pitch, s x TILT long: only the tilt changes the angle
-  return Math.atan2(Math.sin(dir) * TILT, Math.cos(dir));
+  return dir;
 }
 
-/** The screen y back to arena depth (for a tap on the pitch). */
+/** A screen y back to arena depth (for a tap on the pitch). */
 export function arenaY(sy: number): number {
-  const a = (TILT * (1 - FAR_SCALE)) / (2 * ARENA.h);
-  const b = TILT * FAR_SCALE;
-  const c = PITCH.top - sy;
-  return (-b + Math.sqrt(Math.max(0, b * b - 4 * a * c))) / (2 * a);
+  return (sy - OY) / K;
 }
 
-/** The four corners of an arena rectangle on screen, clockwise from far-left (for drawing the pitch and its lines). */
+/** A screen x back to arena x. */
+export function arenaX(sx: number): number {
+  return (sx - OX) / K;
+}
+
+/** The four corners of an arena rectangle on screen, clockwise from top-left. */
 export function quad(ax: number, ay: number, aw: number, ah: number): [number, number][] {
-  const a = project(ax, ay);
-  const b = project(ax + aw, ay);
-  const c = project(ax + aw, ay + ah);
-  const d = project(ax, ay + ah);
+  const x0 = OX + ax * K;
+  const y0 = OY + ay * K;
+  const x1 = x0 + aw * K;
+  const y1 = y0 + ah * K;
   return [
-    [a.x, a.y],
-    [b.x, b.y],
-    [c.x, c.y],
-    [d.x, d.y],
+    [x0, y0],
+    [x1, y0],
+    [x1, y1],
+    [x0, y1],
   ];
 }
 
-/**
- * Traces an arena circle (centre cx, cy and radius r, in arena px) on screen, as the ellipse-like shape the
- * camera makes of it. Leaves the path open for the caller to stroke or fill.
- */
-export function circlePath(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, from = 0, to = Math.PI * 2, steps = 48) {
+/** Traces an arena circle (or arc, from..to radians) on screen. Leaves the path open for the caller to stroke or fill. */
+export function circlePath(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, from = 0, to = Math.PI * 2, _steps?: number) {
   ctx.beginPath();
-  for (let i = 0; i <= steps; i++) {
-    const a = from + ((to - from) * i) / steps;
-    const p = project(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
-    if (i === 0) ctx.moveTo(p.x, p.y);
-    else ctx.lineTo(p.x, p.y);
-  }
-}
-
-// theme.ts keeps FIELD as the pitch's box on screen; it cannot import this module, so check they agree here
-if (import.meta.env?.DEV && (FIELD.y !== PITCH.top || FIELD.y + FIELD.h !== PITCH.bottom || FIELD.w !== PITCH.nearHalf * 2)) {
-  console.warn('theme FIELD no longer matches the camera PITCH', FIELD, PITCH);
+  ctx.arc(OX + cx * K, OY + cy * K, Math.max(0, r * K), from, to);
 }

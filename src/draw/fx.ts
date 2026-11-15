@@ -5,8 +5,9 @@ import { clamp, easeOutBack, easeOutCubic, label, type Ctx } from '../util';
 
 /*
  * The one effects system every screen shares: pooled particles, rings, flashes, words, flying icons, marks on
- * the grass, camera shake, hit-stop and slow motion. Everything is in logical screen px (the battle passes
- * points it has already put through the match camera, with sizes times the depth scale).
+ * the grass, camera shake, hit-stop and slow motion. Positions and sizes are in whatever space the caller draws in:
+ * the screens use logical screen px; the battle view uses arena px (it draws under the camera's transform, so its
+ * effects stay on the pitch however the view moves) and draws drawScreen itself in screen px.
  *
  * One palette: light is white and warm sunny gold; a team colour only where something belongs to a team.
  * One sun from the upper left: a flying shard has a lit upper-left face and a shaded lower one, and anything
@@ -20,7 +21,7 @@ import { clamp, easeOutBack, easeOutCubic, label, type Ctx } from '../util';
  * layers: drawUnder (on the ground), drawOver (above the fighters), drawScreen (flashes and words on top).
  */
 
-export type FxShape = 'dot' | 'star' | 'petal' | 'shard' | 'confetti' | 'puff' | 'drop';
+export type FxShape = 'dot' | 'star' | 'petal' | 'shard' | 'confetti' | 'puff' | 'drop' | 'bubble';
 
 /** What a body or a blow leaves on the grass. */
 export type MarkKind = 'scuff' | 'divot' | 'flat';
@@ -67,7 +68,9 @@ const TAU = Math.PI * 2;
 const GROUND_RING = 0.5;
 /** marks on the grass: at most this many, the oldest fade out first */
 const MARKS = 70;
-const DUST = ['#fffdf6', '#f1ead8'];
+const DUST = ['#fbf8f1', '#ece4d4'];
+/** the sparkles round a dizzy head: a soft cream-wheat, never a glaring gold */
+const STAR_SOFT = '#efd99a';
 /** the colour of a shadow on sunlit grass: a deep cool green, never black */
 export const GRASS_SHADE = 'rgb(18, 58, 34)';
 /** marks lying on the grass are flattened this much (seen from the stands, a little less than a ring) */
@@ -96,7 +99,7 @@ interface Particle {
 }
 interface Ring { x: number; y: number; color: string; r0: number; r1: number; life: number; age: number; layer: number }
 interface Flash { color: string; alpha: number; life: number; age: number }
-interface Word { x: number; y: number; text: string; color: string; size: number; age: number; life: number; rise: boolean }
+interface Word { x: number; y: number; text: string; color: string; size: number; age: number; life: number; rise: boolean; over?: boolean }
 interface Flyer {
   x0: number; y0: number; x1: number; y1: number; cx: number; cy: number; age: number; life: number;
   draw: (ctx: Ctx, x: number, y: number, s: number) => void;
@@ -239,6 +242,7 @@ export class Fx {
       p.x += p.vx * pdt;
       p.y += p.vy * pdt;
       if (p.shape === 'petal' || p.shape === 'confetti') p.x += Math.sin(p.age * 3.2 + p.ph) * 34 * pdt;
+      else if (p.shape === 'bubble') p.x += Math.sin(p.age * 6 + p.ph) * 10 * pdt;
       p.rot += p.vr * pdt;
       if (p.y > p.floor && p.vy > 0) {
         p.y = p.floor;
@@ -310,7 +314,7 @@ export class Fx {
       p.color = o.colors[i % o.colors.length];
       p.shape = shape;
       p.rot = frand(0, TAU);
-      p.vr = shape === 'dot' || shape === 'puff' || shape === 'drop' ? 0 : frand(-9, 9);
+      p.vr = shape === 'dot' || shape === 'puff' || shape === 'drop' || shape === 'bubble' ? 0 : frand(-9, 9);
       p.grav = grav;
       p.drag = o.drag ?? (shape === 'petal' || shape === 'puff' ? 2.2 : 0);
       p.floor = depth ? floor + frand(-depth, depth) : floor;
@@ -342,6 +346,14 @@ export class Fx {
   floatText(x: number, y: number, text: string, color: string = COLOR.white, size: number = TYPE.body): void {
     if (this.words.length > 14) this.words.shift();
     this.words.push({ x: clamp(x, 40, W - 40), y, text, color, size, age: 0, life: 1.1, rise: true });
+  }
+
+  /** a small word on the pitch that pops in, rises a little and fades (MISS): drawn with drawOver, in the caller's space */
+  tag(x: number, y: number, text: string, color: string = COLOR.white, size: number = TYPE.tiny): void {
+    let n = 0;
+    for (const w of this.words) if (w.over) n++;
+    if (n > 10) return;
+    this.words.push({ x, y, text, color, size, age: 0, life: 0.7, rise: true, over: true });
   }
 
   /** an icon arcs across the screen with a trail and pops where it lands */
@@ -519,7 +531,7 @@ export class Fx {
 
   /** the little sparkles that circle a dizzy head (drawn by the caller where the head is); the far ones dim */
   orbitStars(ctx: Ctx, x: number, y: number, r: number, t: number): void {
-    ctx.fillStyle = UI.accent;
+    ctx.fillStyle = STAR_SOFT;
     for (let i = 0; i < 3; i++) {
       const a = t * 5 + (i * TAU) / 3;
       const near = Math.sin(a); // 1 in front of the head, -1 behind it
@@ -563,6 +575,7 @@ export class Fx {
   drawOver(ctx: Ctx): void {
     this.drawImpacts(ctx);
     this.drawLayer(ctx, OVER);
+    this.drawWords(ctx, true);
     for (const s of this.streaks) {
       const k = s.age / s.life;
       const reach = s.len * easeOutCubic(Math.min(1, k * 2.2));
@@ -686,14 +699,19 @@ export class Fx {
       const s = k < 0.2 ? 0.5 + 0.8 * easeOutBack(k / 0.2) : 1.3 - 0.5 * ((k - 0.2) / 0.8);
       f.draw(ctx, bez(f.x0, f.cx, f.x1, p), bez(f.y0, f.cy, f.y1, p), s);
     }
+    this.drawWords(ctx, false);
+  }
+
+  private drawWords(ctx: Ctx, over: boolean): void {
     for (const w of this.words) {
+      if (!!w.over !== over) continue;
       const k = w.age / w.life;
       const s = w.age < 0.12 ? 0.85 + 0.15 * easeOutCubic(w.age / 0.12) : 1;
       ctx.globalAlpha = clamp(w.age / 0.08, 0, 1) * clamp((1 - k) / 0.3, 0, 1);
       ctx.save();
-      ctx.translate(w.x, w.rise ? w.y - 26 * easeOutCubic(k) : w.y - 4 * k);
+      ctx.translate(w.x, w.rise ? w.y - (over ? 12 : 26) * easeOutCubic(k) : w.y - 4 * k);
       ctx.scale(s, s);
-      label(ctx, w.text, 0, 0, w.size, { color: w.color, weight: 700, onPitch: true });
+      label(ctx, w.text, 0, 0, w.size, { color: w.color, weight: 700, onPitch: true, track: over ? 1 : undefined });
       ctx.restore();
     }
     ctx.globalAlpha = 1;
@@ -772,6 +790,26 @@ export class Fx {
         ctx.lineTo(p.x + ux - vx, p.y + uy - vy);
         ctx.closePath();
         ctx.fill();
+        continue;
+      }
+      if (p.shape === 'bubble') {
+        // a soft bubble: its colour, a darker rim and a speck of light, that grows a little and fades at the top
+        const rad = s * (0.6 + 0.4 * easeOutCubic(Math.min(1, k * 3)));
+        ctx.globalAlpha = alpha = 0.85 * (k > 0.7 ? (1 - k) / 0.3 : 1);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, rad, 0, TAU);
+        ctx.fillStyle = p.color;
+        ctx.fill();
+        ctx.lineWidth = Math.max(0.6, s * 0.16);
+        ctx.strokeStyle = tone(p.color).dark;
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+        ctx.beginPath();
+        ctx.arc(p.x - rad * 0.35, p.y - rad * 0.35, rad * 0.28, 0, TAU);
+        ctx.fill();
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = COLOR.ink;
+        fill = '';
         continue;
       }
       if (p.color !== fill) ctx.fillStyle = fill = p.color;
@@ -920,7 +958,7 @@ function markSprites(): HTMLCanvasElement[] {
       soft(c, 32, 16, 24, 9, 0.32, '236, 232, 186');
       soft(c, 28 + rnd() * 8, 16 + (rnd() - 0.5) * 3, 13, 4.5, 0.3, '226, 214, 160');
       c.globalAlpha = 0.35;
-      c.strokeStyle = '#3f8a3a';
+      c.strokeStyle = '#6c8f60';
       c.lineWidth = 1;
       c.beginPath();
       for (let i = 0; i < 5; i++) {
@@ -930,7 +968,7 @@ function markSprites(): HTMLCanvasElement[] {
         c.lineTo(x + 4 + rnd() * 4, y + (rnd() - 0.5) * 2);
       }
       c.stroke();
-      for (let i = 0; i < 3; i++) blob(c, 18 + rnd() * 28, 9 + rnd() * 14, 1.2, 0.8, '#f4f0c8', 0.7);
+      for (let i = 0; i < 3; i++) blob(c, 18 + rnd() * 28, 9 + rnd() * 14, 1.2, 0.8, '#f1eedb', 0.7);
     });
   }
   // a divot: a little hole of warm earth with its sunlit lower lip, and the clod of turf it threw
@@ -941,7 +979,7 @@ function markSprites(): HTMLCanvasElement[] {
       blob(c, x, 16, 11, 5, '#9a6a3e', 0.95);
       blob(c, x - 1.5, 15, 8, 3.4, '#6e4526', 0.9);
       c.globalAlpha = 0.85;
-      c.strokeStyle = '#d8f2b0';
+      c.strokeStyle = '#dce6c9';
       c.lineWidth = 1.6;
       c.beginPath();
       c.ellipse(x, 16.4, 10.4, 4.6, 0, 0.15 * Math.PI, 0.85 * Math.PI);
@@ -951,17 +989,17 @@ function markSprites(): HTMLCanvasElement[] {
       const cy = 13 + rnd() * 8;
       blob(c, cx + 0.8, cy + 2.4, 5.5, 2, '#183a22', 0.22);
       blob(c, cx, cy + 0.6, 5, 3.2, '#8a5a32', 1);
-      blob(c, cx - 0.6, cy - 1, 4.2, 2.2, '#5fb046', 1);
-      blob(c, cx - 1.6, cy - 1.6, 2, 0.9, '#b9ea8a', 1);
+      blob(c, cx - 0.6, cy - 1, 4.2, 2.2, '#8cae78', 1);
+      blob(c, cx - 1.6, cy - 1.6, 2, 0.9, '#cadcb3', 1);
     });
   }
   // a flattened patch: grass pressed flat, its blades laid out from the middle and catching the sun
   for (let v = 0; v < 3; v++) {
     make((c) => {
       soft(c, 32, 16, 30, 14, 0.22);
-      blob(c, 32, 16.5, 22, 9, '#2f7a33', 0.16);
+      blob(c, 32, 16.5, 22, 9, '#5e7f56', 0.16);
       c.globalAlpha = 0.5;
-      c.strokeStyle = '#d6f4ae';
+      c.strokeStyle = '#e3ead2';
       c.lineWidth = 1.2;
       c.beginPath();
       for (let i = 0; i < 14; i++) {
@@ -986,43 +1024,55 @@ function age<T extends { age: number; life: number }>(list: T[], dt: number): vo
 
 // ------------------------------------------------------------------ the ground layer
 
-/** Kept at most this sharp: marks are soft shapes, and the layer is a full-width canvas. */
+/** Kept at most this sharp: marks are soft shapes, and the layer covers the whole pitch. */
 const GROUND_RATIO = 2;
 
 /**
  * Marks that stay on the ground for the whole fight, painted once into one cached canvas and drawn with a single
- * drawImage, so hundreds of them cost nothing per frame. In screen px, inside a horizontal band (band()); the
- * screen draws it under everything else on the pitch and clears it (Fx.clear) when a new fight starts.
+ * drawImage, so hundreds of them cost nothing per frame. It covers one rectangle (area()) in the caller's units: the
+ * battle view uses arena px, the whole pitch and its surrounds, so a mark stays put however the camera moves.
+ * Cleared by Fx.clear() (a new fight) or clear().
  */
 export class Ground {
   private cv: HTMLCanvasElement | null = null;
   private g: Ctx | null = null;
+  /** device px per unit */
   private ratio = 1;
-  private top = 0;
-  private h = H;
+  private x = -60;
+  private y = -90;
+  private w = 580;
+  private h = 1000;
   /** how many marks were painted since the last clear */
   count = 0;
 
-  /** the screen band the layer covers (marks outside it are cut off) */
-  band(top: number, bottom: number): void {
-    const h = Math.max(1, Math.round(bottom - top));
-    if (top === this.top && h === this.h) return;
-    this.top = Math.round(top);
-    this.h = h;
+  /** the rectangle the layer covers, in the caller's units (marks outside it are cut off); a change empties it */
+  area(x: number, y: number, w: number, h: number): void {
+    const ww = Math.max(1, Math.round(w));
+    const hh = Math.max(1, Math.round(h));
+    if (x === this.x && y === this.y && ww === this.w && hh === this.h) return;
+    this.x = x;
+    this.y = y;
+    this.w = ww;
+    this.h = hh;
     this.cv = this.g = null;
     this.count = 0;
   }
 
-  /** the device pixel ratio; a change keeps what is painted (redrawn at the new size) */
+  /** a horizontal band of the screen (the old way to place it) */
+  band(top: number, bottom: number): void {
+    this.area(0, Math.round(top), W, bottom - top);
+  }
+
+  /** device px per unit; a change keeps what is painted (redrawn at the new size) */
   setRatio(ratio: number): void {
-    const r = clamp(ratio, 1, GROUND_RATIO);
+    const r = clamp(Math.round(ratio * 8) / 8, 1, GROUND_RATIO);
     if (r === this.ratio) return;
     const old = this.cv;
     this.ratio = r;
     this.cv = this.g = null;
     if (old && this.count) {
       const g = this.paint();
-      g.drawImage(old, 0, this.top, W, this.h);
+      g.drawImage(old, this.x, this.y, this.w, this.h);
       this.count--;
     }
   }
@@ -1034,23 +1084,26 @@ export class Ground {
     this.g.clearRect(0, 0, this.cv.width, this.cv.height);
   }
 
-  /** The layer's context set up in screen px, to paint one mark into (leave its transform as you like). */
+  /** The layer's context set up in the caller's units, to paint one mark into (leave its transform as you like). */
   paint(): Ctx {
     if (!this.cv || !this.g) {
       this.cv = document.createElement('canvas');
-      this.cv.width = Math.ceil(W * this.ratio);
+      this.cv.width = Math.ceil(this.w * this.ratio);
       this.cv.height = Math.ceil(this.h * this.ratio);
       this.g = this.cv.getContext('2d')!;
     }
     const g = this.g;
-    g.setTransform(this.ratio, 0, 0, this.ratio, 0, -this.top * this.ratio);
+    g.setTransform(this.ratio, 0, 0, this.ratio, -this.x * this.ratio, -this.y * this.ratio);
     g.globalAlpha = 1;
     g.globalCompositeOperation = 'source-over';
     this.count++;
     return g;
   }
 
-  draw(ctx: Ctx): void {
-    if (this.count && this.cv) ctx.drawImage(this.cv, 0, this.top, W, this.h);
+  draw(ctx: Ctx, alpha = 1): void {
+    if (!this.count || !this.cv || alpha <= 0) return;
+    if (alpha < 1) ctx.globalAlpha = alpha;
+    ctx.drawImage(this.cv, this.x, this.y, this.w, this.h);
+    ctx.globalAlpha = 1;
   }
 }

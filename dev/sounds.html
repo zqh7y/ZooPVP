@@ -5,18 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ZooPVP sounds</title>
     <style>
-      body { margin: 0; padding: 16px; background: #1b1522; color: #f3e9ff; font: 15px system-ui, sans-serif; }
+      body { margin: 0; padding: 16px; background: #23262b; color: #e9eaec; font: 15px system-ui, sans-serif; }
       h1 { font-size: 20px; margin: 0 0 4px; }
-      h2 { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: #b9a5d6; margin: 22px 0 8px; }
+      h2 { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: #a9b1ba; margin: 22px 0 8px; }
       .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 6px; }
-      .name { min-width: 110px; font-size: 13px; color: #d9c9f0; }
-      button { background: #3a2c52; color: #fff; border: 1px solid #5b4780; border-radius: 8px; padding: 8px 12px; font: inherit; cursor: pointer; }
-      button:hover { background: #4b3a69; }
-      button.on { background: #e0507a; border-color: #ff8fb0; }
+      .name { min-width: 110px; font-size: 13px; color: #cfd4da; }
+      button { background: #363b42; color: #f1f2f3; border: 1px solid #4b525b; border-radius: 8px; padding: 8px 12px; font: inherit; cursor: pointer; }
+      button:hover { background: #424851; }
+      button.on { background: #4f7a9a; border-color: #79a3c2; }
       .lv { padding: 6px 9px; font-size: 13px; }
       .music { display: flex; flex-wrap: wrap; gap: 6px; }
       label { display: inline-flex; gap: 8px; align-items: center; margin: 10px 14px 0 0; }
-      #status { color: #b9a5d6; font-size: 13px; margin: 0 0 8px; }
+      #status { color: #a9b1ba; font-size: 13px; margin: 0 0 8px; }
     </style>
   </head>
   <body>
@@ -24,6 +24,8 @@
     <p id="status">Tap anything to start the sound.</p>
     <h2>Music</h2>
     <div class="music" id="music"></div>
+    <h2>Music: the v3 names (aliases)</h2>
+    <div class="music" id="legacy"></div>
     <label>Energy <input id="energy" type="range" min="0" max="1" step="0.01" value="0.3" /> <span id="energyv">0.30</span></label>
     <label><input id="muffle" type="checkbox" /> Muffle</label>
     <div id="sfx"></div>

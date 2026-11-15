@@ -1,10 +1,11 @@
+import { frand } from '../rng';
 import { music } from './music';
-import type { PlayAt, SoundName } from './names';
+import { MUSIC_ALIAS, petVoice, type MusicState, type PlayAt, type SoundName, type VoiceKind } from './names';
 import { SOUNDS } from './sounds';
 import { SAMPLE_RATE, renderRecipe } from './synth';
 
-export type { PlayAt, SoundName };
-export { music };
+export type { MusicState, PlayAt, SoundName, VoiceKind };
+export { MUSIC_ALIAS, music, petVoice };
 
 /**
  * The sound engine. Every effect is designed in sounds.ts and rendered once into a buffer as the page loads
@@ -16,7 +17,9 @@ export { music };
  */
 
 /** Rendered first, so the sounds heard in the first seconds are ready soonest. */
-const FIRST: SoundName[] = ['click', 'pick', 'drop', 'denied', 'link', 'merge', 'stack', 'hint', 'rollStart', 'tick', 'tock', 'reveal', 'collect', 'search', 'found', 'vsSlam', 'countdown', 'fight'];
+const FIRST: SoundName[] = ['click', 'pick', 'drop', 'denied', 'link', 'unlink', 'merge', 'stack', 'hint', 'whoosh', 'waveStart', 'spinTick', 'spinLand', 'collect', 'cellUnlock', 'sell', 'cashKill', 'unitReveal', 'itemReveal'];
+/** The v3 sounds the stage flow no longer needs: rendered last. */
+const LAST: SoundName[] = ['search', 'found', 'vsSlam', 'countdown', 'fight', 'rollStart', 'tick', 'tock', 'reveal', 'crack', 'breakthrough', 'meter', 'rollEarned', 'enrage', 'victory', 'defeat', 'trophyUp', 'trophyDown', 'leagueUp'];
 
 const SCREEN_W = 540;
 const MAX_VOICES = 40;
@@ -48,7 +51,8 @@ class Sfx {
   }
 
   private async renderAll() {
-    const names = [...new Set([...FIRST, ...(Object.keys(SOUNDS) as SoundName[])])];
+    const all = Object.keys(SOUNDS) as SoundName[];
+    const names = [...new Set([...FIRST, ...all.filter((n) => !LAST.includes(n)), ...LAST])];
     for (const name of names) {
       const def = SOUNDS[name];
       for (const level of def.levels ?? [0]) {
@@ -153,13 +157,13 @@ class Sfx {
     this.last.set(name, now);
 
     // a different variant from last time
-    let vi = Math.floor(Math.random() * list.length);
+    let vi = Math.floor(frand(0, list.length));
     if (list.length > 1 && vi === this.lastVariant.get(name)) vi = (vi + 1) % list.length;
     this.lastVariant.set(name, vi);
     const buf = list[vi];
 
-    let rate = (def.rate?.(n) ?? 1) * 2 ** (((Math.random() * 2 - 1) * (def.jitter ?? 0)) / 1200);
-    let vol = def.vol * (0.9 + Math.random() * 0.1);
+    let rate = (def.rate?.(n) ?? 1) * 2 ** ((frand(-1, 1) * (def.jitter ?? 0)) / 1200);
+    let vol = def.vol * frand(0.9, 1);
     if (at.enemy) {
       rate *= 0.86;
       vol *= 0.8;
@@ -220,7 +224,7 @@ function roomImpulse(ac: BaseAudioContext) {
       const t = (i - pre) / sr;
       const decay = Math.exp((-t * 6.9) / 1.3);
       const bright = 0.85 * Math.exp(-t * 2.2) + 0.08; // the tail loses its highs
-      lp += bright * (Math.random() * 2 - 1 - lp);
+      lp += bright * (frand(-1, 1) - lp);
       d[i] = lp * decay;
     }
     for (const [ms, a] of [

@@ -1,16 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { BENCH_SLOTS, BOT, GRID, MAX_COUNT, PITY, REWARD, SCRIPTED_ROLLS, TROPHY_ROAD, armyPower, footprint } from '../../src/data';
+import {
+  BENCH_SLOTS, CELL_LOCKS, CELL_PRICE, ECON, ENEMY, GRID, MAX_COUNT, PETS, PET_INFO, PET_TYPES, PITY, PIECE_NAME, SCRIPTED_ROLLS, START_OPEN, STARTER_KIT,
+  WAVES, armyPower, cellBit, classOdds, clearCash, footprint, homeRung, isPet, koCash, nextPet, petOdds, recommendedPower, rungOf, sellValue, squadPower,
+  stageGems, tierOf,
+} from '../../src/data';
 import { makeRng } from '../../src/rng';
-import type { Opponent, Piece, PieceType, SaveState } from '../../src/types';
+import type { PetType, Piece, PieceType, SaveState, SquadSpec, WaveOutcome } from '../../src/types';
 import type { SimSummary } from '../../src/sim/types';
-import { Inventory, cellsOf } from '../../src/logic/inventory';
-import { classOdds, rollOnce } from '../../src/logic/rolls';
-import { applyMatch, claimRoad } from '../../src/logic/progress';
-import { botFactor, kindsOf, makeOpponent, matchArmy, playerArmy } from '../../src/logic/bots';
-import { load, newSave, repair, save } from '../../src/logic/save';
+import { Inventory, LOCKED, TOP_OF_LADDER, cellsOf, isOpen, isOwned, ownedRungs } from '../../src/logic/inventory';
+import { caseBlock, caseOdds, casePrice, openCase } from '../../src/logic/rolls';
+import { applyWave, cellLock, cellPrice, cellProgress, openEarned, outcomeOf, unlockCell } from '../../src/logic/progress';
+import { enemyArmy, fightSeed, nextWave, waveFighters, waveInfo } from '../../src/logic/waves';
+import { SAVE_VERSION, load, newSave, repair, replacedOldSave, save } from '../../src/logic/save';
 import { autoArrange } from '../../src/logic/auto';
+import { runBattle } from '../../src/sim/battle';
 
-const empty = (): SaveState => ({ ...newSave(), pieces: [], nextId: 1 });
+const ALL_OPEN = (1 << (GRID.cols * GRID.rows)) - 1;
+/** a save with nothing in it and every cell open (the grid tests do not care about locks) */
+const empty = (extra: Partial<SaveState> = {}): SaveState => ({ ...newSave(), pieces: [], nextId: 1, open: ALL_OPEN, ...extra });
 const inv0 = () => new Inventory(empty());
 function put(inv: Inventory, type: PieceType, level: number, c: number, r: number, count = 1, turned?: boolean): Piece {
   const p = inv.add(type, level)!;
@@ -19,7 +26,7 @@ function put(inv: Inventory, type: PieceType, level: number, c: number, r: numbe
   expect(inv.place(p, { col: c, row: r }).kind).toBe('moved');
   return p;
 }
-/** every grid cell is covered by at most one piece, every piece is inside the grid or on its own bench slot */
+/** every grid cell is covered by at most one piece and is open, every piece is inside the grid or on its own tray slot */
 function valid(inv: Inventory) {
   const seen = new Set<string>();
   const slots = new Set<number>();
@@ -32,28 +39,55 @@ function valid(inv: Inventory) {
     }
     for (const c of cellsOf(p)) {
       expect(c.col >= 0 && c.col < GRID.cols && c.row >= 0 && c.row < GRID.rows).toBe(true);
+      expect(isOpen(inv.state, c.col, c.row)).toBe(true);
       expect(seen.has(`${c.col},${c.row}`)).toBe(false);
       seen.add(`${c.col},${c.row}`);
       expect(inv.at(c.col, c.row)).toBe(p);
     }
   }
 }
+const spec = (pet: PetType, count = 1, o: Partial<SquadSpec> = {}): SquadSpec => ({ key: 0, pet, count, weapon: null, weaponLevel: 0, helmet: 0, sneakers: 0, chili: 0, ...o });
+
+describe('the cast', () => {
+  it('twelve units in rung order, each with a name, a trait line and a kick-off row', () => {
+    expect(PET_TYPES).toEqual(['sprout', 'buzzy', 'ninja', 'snailor', 'roo', 'cacto', 'pogo', 'briar', 'angler', 'sumo', 'rhino', 'boulder']);
+    PET_TYPES.forEach((p, i) => {
+      expect(rungOf(p)).toBe(i + 1);
+      expect(PIECE_NAME[p]).toBe(PET_INFO[p].name);
+      expect(PET_INFO[p].trait.length).toBeGreaterThan(8);
+      expect(PET_INFO[p].row).toBe(PETS[p].row);
+    });
+    expect(nextPet('sprout')).toBe('buzzy');
+    expect(nextPet('boulder')).toBeNull();
+    expect(PET_TYPES.map((p) => tierOf(rungOf(p)))).toEqual([1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7]);
+  });
+  it('POWER doubles every rung (bare), and a boss is worth more than its unit', () => {
+    for (let k = 1; k < PET_TYPES.length; k++) {
+      const ratio = squadPower(spec(PET_TYPES[k])) / squadPower(spec(PET_TYPES[k - 1]));
+      expect(Math.abs(ratio - 2)).toBeLessThan(0.03);
+    }
+    // stacking keeps POWER exactly; evolving doubles it per cell
+    expect(squadPower(spec('roo', 2))).toBeCloseTo(2 * squadPower(spec('roo')), 6);
+    expect(squadPower(spec('cacto')) / squadPower(spec('roo', 4)) * 4).toBeGreaterThan(1.95);
+    expect(squadPower(spec('roo', 1, { boss: true }))).toBeGreaterThan(3 * squadPower(spec('roo')));
+  });
+});
 
 describe('footprints', () => {
-  it('weapons and gear 1 x 1, pets by count, a pair turns', () => {
+  it('weapons and gear 1 x 1, units by count, a pair turns', () => {
     expect(GRID).toEqual({ cols: 5, rows: 5 });
-    expect(BENCH_SLOTS).toBe(5);
+    expect(BENCH_SLOTS).toBe(4);
     expect(MAX_COUNT).toBe(4);
     expect(footprint({ type: 'knife', count: 1 })).toEqual({ w: 1, h: 1 });
     expect(footprint({ type: 'chili', count: 4 })).toEqual({ w: 1, h: 1 });
-    expect(footprint({ type: 'ant', count: 1 })).toEqual({ w: 1, h: 1 });
-    expect(footprint({ type: 'ant', count: 2 })).toEqual({ w: 2, h: 1 });
-    expect(footprint({ type: 'frog', count: 2, turned: true })).toEqual({ w: 1, h: 2 });
-    expect(footprint({ type: 'frog', count: 4, turned: true })).toEqual({ w: 2, h: 2 });
+    expect(footprint({ type: 'sprout', count: 1 })).toEqual({ w: 1, h: 1 });
+    expect(footprint({ type: 'sprout', count: 2 })).toEqual({ w: 2, h: 1 });
+    expect(footprint({ type: 'roo', count: 2, turned: true })).toEqual({ w: 1, h: 2 });
+    expect(footprint({ type: 'roo', count: 4, turned: true })).toEqual({ w: 2, h: 2 });
   });
   it('at() finds a piece by any of its cells', () => {
     const inv = inv0();
-    const big = put(inv, 'frog', 1, 1, 1, 4);
+    const big = put(inv, 'roo', 1, 1, 1, 4);
     for (const [c, r] of [[1, 1], [2, 1], [1, 2], [2, 2]]) expect(inv.at(c, r)).toBe(big);
     expect(inv.at(3, 1)).toBeNull();
     expect(inv.at(0, 0)).toBeNull();
@@ -62,13 +96,12 @@ describe('footprints', () => {
 });
 
 describe('inventory', () => {
-  it('moves, swaps grid and bench, fuses items', () => {
+  it('moves, swaps grid and tray, fuses items', () => {
     const inv = inv0();
-    const a = inv.add('ant', 1)!;
+    const a = inv.add('sprout', 1)!;
     expect(inv.place(a, { col: 2, row: 2 }).kind).toBe('moved');
     const k = inv.add('knife', 1)!;
-    const sw = inv.place(k, { col: 2, row: 2 });
-    expect(sw.kind).toBe('swapped');
+    expect(inv.place(k, { col: 2, row: 2 }).kind).toBe('swapped');
     expect(a.slot).toBe(0);
     expect(k.col).toBe(2);
     const k2 = inv.add('knife', 1)!;
@@ -79,8 +112,8 @@ describe('inventory', () => {
   });
   it('previews without change and denies bad targets', () => {
     const inv = inv0();
-    const a = inv.add('ant', 1)!;
-    const b = put(inv, 'ant', 1, 0, 0);
+    const a = inv.add('sprout', 1)!;
+    const b = put(inv, 'sprout', 1, 0, 0);
     expect(inv.preview(a, { col: 0, row: 0 })).toMatchObject({ kind: 'fused', fuse: 'stack' });
     expect(a.slot).toBe(0);
     expect(b.count).toBe(1);
@@ -90,374 +123,512 @@ describe('inventory', () => {
   });
   it('a pair must fit inside the grid and on free cells', () => {
     const inv = inv0();
-    const pair = inv.add('ant', 1)!;
+    const pair = inv.add('sprout', 1)!;
     pair.count = 2;
     const deny = inv.place(pair, { col: 4, row: 0 });
     expect(deny.kind).toBe('denied');
     expect(deny.reason).toBeTruthy();
-    expect(pair.slot).toBe(0);
     expect(inv.place(pair, { col: 3, row: 0 }).kind).toBe('moved');
     expect(inv.at(4, 0)).toBe(pair);
-    // shifting onto its own cell is fine
-    expect(inv.place(pair, { col: 2, row: 0 }).kind).toBe('moved');
+    expect(inv.place(pair, { col: 2, row: 0 }).kind).toBe('moved'); // shifting onto its own cell is fine
     expect(inv.at(4, 0)).toBeNull();
     put(inv, 'knife', 1, 1, 1);
     put(inv, 'helmet', 1, 2, 1);
-    const big = inv.add('frog', 1)!;
+    const big = inv.add('roo', 1)!;
     big.count = 4;
-    const two = inv.place(big, { col: 1, row: 0 }); // would cover the pair, the knife and the helmet
-    expect(two.kind).toBe('denied');
-    expect(two.reason).toBe('No room there');
+    const two = inv.place(big, { col: 1, row: 0 });
+    expect(two).toMatchObject({ kind: 'denied', reason: 'No room there' });
     valid(inv);
   });
-  it('fusing grows the pet in place: 1 -> 2 -> 4 cells', () => {
+  it('stacking grows the unit in place: 1 -> 2 -> 4 cells', () => {
     const inv = inv0();
-    const a = put(inv, 'ant', 2, 1, 1);
-    const b = inv.add('ant', 2)!;
+    const a = put(inv, 'sprout', 1, 1, 1);
+    const b = inv.add('sprout', 1)!;
     expect(inv.place(b, { col: 1, row: 1 })).toMatchObject({ kind: 'fused', fuse: 'stack', piece: a, gone: b.id });
     expect(a.count).toBe(2);
     expect(footprint(a)).toEqual({ w: 2, h: 1 });
-    expect([a.col, a.row]).toEqual([1, 1]);
-    const c = put(inv, 'ant', 2, 0, 4, 2);
-    // dropped so that only its second cell lands on the mate: still fuses
+    const c = put(inv, 'sprout', 1, 0, 4, 2);
     expect(inv.place(c, { col: 0, row: 1 })).toMatchObject({ kind: 'fused', piece: a });
     expect(a.count).toBe(4);
-    expect(footprint(a)).toEqual({ w: 2, h: 2 });
     expect([a.col, a.row]).toEqual([1, 1]);
-    expect(inv.at(0, 4)).toBeNull();
     valid(inv);
   });
-  it('a grown pet takes the nearest spot covering the mate, or the fuse is denied', () => {
+  it('a grown unit takes the nearest spot covering the mate, else the nearest spot anywhere, else the tray slot', () => {
     const inv = inv0();
-    const a = put(inv, 'frog', 1, 4, 4); // bottom-right corner: nothing fits anchored here
-    const b = inv.add('frog', 1)!;
-    expect(inv.place(b, { col: 4, row: 4 }).kind).toBe('fused');
-    expect(cellsOf(a).map((x) => `${x.col},${x.row}`).sort()).toContain('4,4');
-    expect(a.count).toBe(2);
-    valid(inv);
-    // a pair boxed in by items cannot grow into a square
+    const a = put(inv, 'roo', 1, 4, 4);
+    expect(inv.place(inv.add('roo', 1)!, { col: 4, row: 4 }).kind).toBe('fused');
+    expect(cellsOf(a).map((x) => `${x.col},${x.row}`)).toContain('4,4');
+    // a pair boxed in by items grows into a square elsewhere
     const inv2 = inv0();
-    const p = put(inv2, 'ant', 1, 0, 0, 2);
+    const p = put(inv2, 'sprout', 1, 0, 0, 2);
     put(inv2, 'knife', 1, 0, 1);
     put(inv2, 'bat', 1, 1, 1);
     put(inv2, 'spear', 1, 2, 0);
-    const q = inv2.add('ant', 1)!;
+    const q = inv2.add('sprout', 1)!;
     q.count = 2;
-    const res = inv2.place(q, { col: 0, row: 0 });
-    expect(res.kind).toBe('denied');
-    expect(res.reason).toBe('No room to grow here');
-    expect(p.count).toBe(2);
-    expect(inv2.piece(q.id)).toBe(q);
-    // with room it grows; on the bench a piece of any size just grows in its slot
-    const r = put(inv2, 'frog', 1, 3, 3, 2);
-    const r2 = inv2.add('frog', 1)!;
-    r2.count = 2;
-    expect(inv2.place(r2, { col: 3, row: 3 }).kind).toBe('fused');
-    expect(footprint(r)).toEqual({ w: 2, h: 2 });
-    const s1 = inv2.add('ant', 3)!;
-    const s2 = inv2.add('ant', 3)!;
-    expect(inv2.place(s2, { slot: s1.slot }).kind).toBe('fused');
-    expect(s1.count).toBe(2);
+    expect(inv2.place(q, { col: 0, row: 0 })).toMatchObject({ kind: 'fused', fuse: 'stack', piece: p });
+    expect(p.count).toBe(4);
+    expect([p.col, p.row]).toEqual([0, 2]); // the nearest free square to where it was
     valid(inv2);
+    // the starter's first fuse (Sprout in a corner of the 3 x 3 between its knife and helmet) never fails
+    const s = { ...newSave(), pieces: [], nextId: 1 };
+    const inv3 = new Inventory(s);
+    const sp = put(inv3, 'sprout', 1, 1, 3);
+    put(inv3, 'knife', 1, 1, 2);
+    put(inv3, 'helmet', 1, 2, 3);
+    for (const [c, r] of [[2, 1], [3, 1], [1, 1], [2, 2], [3, 2]]) put(inv3, 'chili', 1, c, r);
+    put(inv3, 'bat', 1, 3, 3); // the 3 x 3 is full
+    const t = inv3.add('sprout', 1)!;
+    const slot = t.slot;
+    expect(inv3.place(t, { col: 1, row: 3 })).toMatchObject({ kind: 'fused', fuse: 'stack', piece: sp });
+    expect(sp).toMatchObject({ count: 2, slot, col: -1 });
+    valid(inv3);
   });
-  it('swaps only when both fit the other spot', () => {
+  it('turns a pair on the grid when it fits', () => {
     const inv = inv0();
-    const k = put(inv, 'knife', 1, 0, 0);
-    const pair = put(inv, 'ant', 1, 2, 0, 2);
-    // the pair goes to the knife's old top-left cell (0,0)-(1,0); the knife to (3,0)
-    expect(inv.place(k, { col: 3, row: 0 })).toMatchObject({ kind: 'swapped', other: pair });
-    expect([pair.col, pair.row, k.col, k.row]).toEqual([0, 0, 3, 0]);
-    valid(inv);
-    // a square cannot take the knife's single cell when its other cells are taken
-    const sq = put(inv, 'frog', 1, 3, 3, 4);
-    put(inv, 'helmet', 1, 4, 0);
-    const res = inv.place(k, { col: 3, row: 3 });
-    expect(res.kind).toBe('denied');
-    expect(res.reason).toContain('Frog');
-    expect([sq.col, sq.row]).toEqual([3, 3]);
-    // bench <-> grid: a big piece from the bench swaps with a grid item; any piece goes to the bench
-    const bench = inv.add('frog', 2)!;
-    bench.count = 4;
-    const g = put(inv, 'chili', 1, 1, 3);
-    expect(inv.place(bench, { col: 0, row: 3 })).toMatchObject({ kind: 'swapped', other: g });
-    expect(g.slot).toBeGreaterThanOrEqual(0);
-    expect(inv.place(sq, { slot: g.slot })).toMatchObject({ kind: 'swapped' }); // the chili lands at (3,3)
-    expect(sq.slot).toBeGreaterThanOrEqual(0);
-    expect(inv.at(3, 3)).toBe(g);
-    valid(inv);
-  });
-  it('turns a pair on the grid when it fits, keeping its top-left cell', () => {
-    const inv = inv0();
-    const p = put(inv, 'ant', 1, 1, 1, 2);
-    expect(inv.canTurn(p)).toBe(true);
+    const p = put(inv, 'sprout', 1, 1, 1, 2);
     expect(inv.turn(p)).toEqual({ ok: true });
     expect(footprint(p)).toEqual({ w: 1, h: 2 });
-    expect([p.col, p.row]).toEqual([1, 1]);
-    expect(inv.at(1, 2)).toBe(p);
-    expect(inv.at(2, 1)).toBeNull();
     put(inv, 'knife', 1, 2, 1);
     expect(inv.turn(p)).toMatchObject({ ok: false, reason: 'No room to turn it' });
-    expect(p.turned).toBe(true);
-    const edge = put(inv, 'frog', 1, 4, 3, 2, true);
-    expect(inv.turn(edge).ok).toBe(false); // lying across would leave the grid
-    const one = put(inv, 'ant', 1, 0, 0);
-    expect(inv.turn(one).ok).toBe(false);
-    const bench = inv.add('ant', 1)!;
-    bench.count = 2;
-    expect(inv.turn(bench).ok).toBe(false);
     valid(inv);
   });
-  it('fuse limits: max count, max level, different count or class', () => {
+  it('the tray has 4 slots of any size', () => {
     const inv = inv0();
-    const a = inv.add('ant', 1)!; a.count = 4;
-    const b = inv.add('ant', 1)!; b.count = 4;
-    expect(inv.canFuse(a, b)).toBeNull();
-    const c = inv.add('ant', 1)!; c.count = 2;
-    expect(inv.canFuse(b, c)).toBeNull();
-    const k = inv.add('knife', 7)!;
-    const k2 = inv.add('knife', 7)!;
-    expect(inv.canFuse(k, k2)).toBeNull();
-    expect(inv.place(k, { slot: k2.slot }).kind).toBe('swapped');
-  });
-  it('the bench has 5 slots of any size', () => {
-    const inv = inv0();
-    for (let i = 0; i < BENCH_SLOTS; i++) expect(inv.add(i % 2 ? 'frog' : 'knife', 1)).not.toBeNull();
+    for (let i = 0; i < BENCH_SLOTS; i++) expect(inv.add(i % 2 ? 'roo' : 'knife', 1)).not.toBeNull();
     expect(inv.freeBenchSlot()).toBe(-1);
-    expect(inv.add('ant', 1)).toBeNull();
-    const frog = inv.benchAt(1)!;
-    frog.count = 4;
-    expect(inv.place(frog, { col: 0, row: 0 }).kind).toBe('moved');
-    expect(inv.place(frog, { slot: 1 }).kind).toBe('moved');
+    expect(inv.add('sprout', 1)).toBeNull();
   });
-  it('links: from every cell of a pet to what touches it; the used one is active', () => {
+  it('links: the used weapon and gear are active; POWER is the squads', () => {
     const inv = inv0();
-    const pet = put(inv, 'frog', 2, 1, 1, 4); // (1,1)-(2,2)
-    put(inv, 'spear', 2, 1, 0); // above the left top cell
-    put(inv, 'knife', 3, 3, 2); // right of the right bottom cell
-    put(inv, 'bat', 1, 0, 2);
+    const pet = put(inv, 'roo', 1, 1, 1, 4);
+    put(inv, 'spear', 2, 1, 0);
+    put(inv, 'knife', 3, 3, 2);
     put(inv, 'helmet', 1, 2, 3);
     put(inv, 'helmet', 2, 1, 3);
-    put(inv, 'chili', 1, 4, 4); // not touching
+    put(inv, 'chili', 1, 4, 4);
     const s = inv.squadOf(pet);
-    expect(s).toMatchObject({ weapon: 'knife', weaponLevel: 3, helmet: 2, chili: 0, count: 4 });
-    const edges = inv.links();
-    expect(edges.length).toBe(5);
-    expect(edges.filter((e) => e.active).length).toBe(2);
-    expect(edges.find((e) => e.c2 === 3 && e.r2 === 2)).toMatchObject({ c1: 2, r1: 2, active: true });
-    expect(edges.find((e) => e.c2 === 1 && e.r2 === 0)).toMatchObject({ c1: 1, r1: 1, active: false });
-    for (const e of edges) expect(Math.abs(e.c1 - e.c2) + Math.abs(e.r1 - e.r2)).toBe(1);
+    expect(s).toMatchObject({ pet: 'roo', weapon: 'knife', weaponLevel: 3, helmet: 2, chili: 0, count: 4 });
+    expect(inv.links().filter((e) => e.active).length).toBe(2);
     expect(inv.power()).toBe(armyPower([s]));
+    inv.add('sprout', 1); // tray units do not fight
     expect(inv.squads().length).toBe(1);
   });
-  it('one item serves every pet around it, whatever their size', () => {
+});
+
+describe('evolve', () => {
+  it('canFuse: stack under x4, evolve at x4, nothing for two x4 Boulders', () => {
     const inv = inv0();
-    const sw = put(inv, 'spear', 3, 2, 2);
-    const pets = [put(inv, 'ant', 1, 1, 0, 2, true), put(inv, 'frog', 1, 3, 1, 4), put(inv, 'frog', 1, 2, 3, 2), put(inv, 'ant', 1, 1, 2)];
-    expect(inv.servedBy(sw).map((p) => p.id).sort()).toEqual(pets.slice(1).map((p) => p.id).sort()); // the standing pair only touches it corner to corner
-    expect(inv.squads().filter((s) => s.weapon === 'spear').length).toBe(3);
+    const mk = (t: PieceType, count: number) => Object.assign(inv.add(t, 1) ?? inv.add('knife', 1)!, { count });
+    const a = mk('sprout', 2);
+    const b = mk('sprout', 2);
+    expect(inv.canFuse(a, b)).toBe('stack');
+    a.count = b.count = 4;
+    expect(inv.canFuse(a, b)).toBe('evolve');
+    a.type = b.type = 'boulder';
+    expect(inv.canFuse(a, b)).toBeNull();
+    a.type = 'sprout';
+    expect(inv.canFuse(a, b)).toBeNull();
+    // on the tray two x4 Boulders say why
+    expect(inv.place(Object.assign(a, { type: 'boulder' }), { slot: b.slot })).toEqual({ kind: 'denied', reason: TOP_OF_LADDER });
   });
-  it('bench pets do not fight', () => {
-    const inv = inv0();
-    inv.add('ant', 1);
-    expect(inv.squads()).toEqual([]);
-  });
-});
-
-describe('rolls', () => {
-  it('returns null with no rolls, scripts the first ones', () => {
-    const s = newSave();
-    s.rolls = 0;
-    expect(rollOnce(s, makeRng(1))).toBeNull();
-    s.rolls = 5;
-    const rng = makeRng(2);
-    for (let i = 0; i < SCRIPTED_ROLLS.length; i++) expect(rollOnce(s, rng)).toEqual(SCRIPTED_ROLLS[i]);
-    expect(s.rolls).toBe(2);
-    expect(s.rolled).toBe(3);
-  });
-  it('pity guarantees A-class after PITY misses', () => {
-    const s = newSave();
-    s.rolled = 10;
-    s.rolls = 1;
-    s.pity = PITY;
-    const r = rollOnce(s, makeRng(3))!;
-    expect(r.pity).toBe(true);
-    expect(r.level).toBeGreaterThanOrEqual(5);
-    expect(s.pity).toBe(0);
-  });
-  it('class odds follow the league and the draw matches them', () => {
-    const s = newSave();
-    s.rolled = 10;
-    expect(classOdds(s)[0]).toBe(70);
-    s.trophies = 1500;
-    expect(classOdds(s)[0]).toBe(22);
-    const rng = makeRng(5);
-    let e = 0;
-    for (let i = 0; i < 2000; i++) {
-      s.rolls = 1;
-      s.pity = 0;
-      if (rollOnce(s, rng)!.level === 1) e++;
-    }
-    expect(e / 2000).toBeGreaterThan(0.18);
-    expect(e / 2000).toBeLessThan(0.27);
+  it('two x4 on the grid become one x1 of the next rung on the drop cell, freeing 7 cells', () => {
+    const s = empty();
+    const inv = new Inventory(s);
+    const mate = put(inv, 'sprout', 1, 1, 1, 4);
+    const other = put(inv, 'sprout', 1, 3, 3, 4);
+    expect(isOwned(s, 'buzzy')).toBe(false);
+    const pre = inv.preview(other, { col: 2, row: 2 });
+    expect(pre).toMatchObject({ kind: 'fused', fuse: 'evolve', from: 'sprout', to: 'buzzy', fresh: true });
+    expect(mate.type).toBe('sprout');
+    const res = inv.place(other, { col: 2, row: 2 });
+    expect(res).toMatchObject({ kind: 'fused', fuse: 'evolve', to: 'buzzy', fresh: true, gone: other.id });
+    expect(mate).toMatchObject({ type: 'buzzy', count: 1, level: 1, col: 2, row: 2 });
+    expect(inv.pieces.length).toBe(1);
+    expect(s.evolves).toBe(1);
+    expect(isOwned(s, 'buzzy')).toBe(true);
+    expect(ownedRungs(s)).toEqual([1, 2]);
+    valid(inv);
+    // dropped so the drop cell is outside the mate: the mate's top-left cell
+    const m2 = put(inv, 'ninja', 1, 0, 0, 4);
+    const o2 = inv.add('ninja', 1)!;
+    o2.count = 4;
+    expect(inv.place(o2, { col: 1, row: 0 })).toMatchObject({ fuse: 'evolve', to: 'snailor' });
+    expect([m2.col, m2.row, m2.type]).toEqual([1, 0, 'snailor']);
+    // on the tray the new unit keeps the mate's slot
+    const t1 = inv.add('roo', 1)!;
+    const t2 = inv.add('roo', 1)!;
+    t1.count = t2.count = 4;
+    const slot = t1.slot;
+    expect(inv.place(t2, { slot })).toMatchObject({ fuse: 'evolve', to: 'cacto' });
+    expect(t1).toMatchObject({ type: 'cacto', count: 1, slot });
+    valid(inv);
   });
 });
 
-const summary = (winner: 0 | 1 | -1, k0: number, size1: number): SimSummary => ({ winner, byTime: false, time: 30, kills: [k0, 3], size: [10, size1], hpLeft: [0.5, 0] });
-const opp = {} as Opponent;
-
-describe('progress', () => {
-  it('win gives trophies, record and win roll', () => {
+describe('cells', () => {
+  it('the middle 3 x 3 is open; every other cell has a lock', () => {
     const s = newSave();
-    s.trophies = 200;
-    const r = applyMatch(s, summary(0, 10, 10), opp, makeRng(1));
-    expect(r.won).toBe(true);
-    expect(r.trophies).toBeGreaterThanOrEqual(REWARD.trophiesWin - REWARD.trophyJitter);
-    expect(s.streak).toBe(1);
-    expect(r.rolls).toBe(REWARD.rollsForKills + REWARD.rollsForWin);
-  });
-  it('defeat never goes below 0 and is gentle near 0', () => {
-    const s = newSave();
-    s.trophies = 0;
-    expect(applyMatch(s, summary(1, 0, 10), opp, makeRng(1)).trophies).toBe(0);
-    s.trophies = 500;
-    expect(applyMatch(s, summary(1, 0, 10), opp, makeRng(1)).trophies).toBeLessThanOrEqual(-17);
-    expect(s.streak).toBe(-2);
-  });
-  it('roll meter keeps fractions; league up and road', () => {
-    const s = newSave();
-    s.rolls = 0;
-    applyMatch(s, summary(1, 3, 10), opp, makeRng(1));
-    expect(s.rollMeter).toBeCloseTo(0.6);
-    s.trophies = 95;
-    s.bestTrophies = 95;
-    expect(applyMatch(s, summary(0, 1, 10), opp, makeRng(1)).leagueUp).toBe(1);
-    const c = claimRoad(s);
-    expect(c.reached).toEqual([0, 1]);
-    expect(c.rolls).toBe(TROPHY_ROAD[0].rolls + TROPHY_ROAD[1].rolls);
-  });
-});
-
-/** a save whose grid holds these pieces: [type, level, count, col, row] */
-function stateWith(list: [PieceType, number, number, number, number][], extra: Partial<SaveState> = {}): SaveState {
-  const s: SaveState = { ...empty(), matches: 10, ...extra };
-  s.pieces = list.map(([type, level, count, col, row], i) => ({ id: i + 1, type, level, count, col, row, slot: -1 }));
-  s.nextId = list.length + 1;
-  valid(new Inventory(s));
-  return s;
-}
-
-describe('bots', () => {
-  const armies: [string, [PieceType, number, number, number, number][]][] = [
-    ['tutorial', [['ant', 1, 1, 0, 0], ['knife', 1, 1, 1, 0]]],
-    ['two pairs', [['ant', 1, 2, 0, 0], ['knife', 1, 1, 2, 0], ['frog', 1, 2, 0, 1]]],
-    ['mid', [['frog', 3, 4, 0, 0], ['shield', 3, 1, 2, 0], ['ant', 2, 4, 3, 0], ['spear', 2, 1, 2, 1], ['ant', 3, 2, 0, 2], ['bat', 3, 1, 2, 2]]],
-    ['big', [['ant', 4, 4, 0, 0], ['knife', 4, 1, 2, 0], ['frog', 4, 4, 3, 0], ['bat', 4, 1, 2, 1], ['ant', 5, 4, 0, 2], ['spear', 5, 1, 2, 2], ['frog', 3, 2, 3, 2]]],
-    ['huge', [['ant', 6, 4, 0, 0], ['knife', 6, 1, 2, 0], ['ant', 6, 4, 3, 0], ['bat', 6, 1, 2, 1], ['frog', 6, 4, 0, 2], ['spear', 6, 1, 2, 2], ['frog', 5, 4, 3, 2], ['shield', 5, 1, 2, 3], ['ant', 7, 2, 0, 4], ['knife', 7, 1, 2, 4], ['ant', 7, 1, 3, 4], ['ant', 7, 1, 4, 4]]],
-  ];
-  it('fields about as many fighters as the player, at the player power x the difficulty', () => {
-    for (const [label, army] of armies) {
-      const s = stateWith(army, { matches: 10, trophies: 600 });
-      const me = playerArmy(s);
-      expect(me.fighters).toBe(army.filter((q) => q[0] === 'ant' || q[0] === 'frog').reduce((a, q) => a + q[2], 0));
-      const counts: number[] = [];
-      const errs: number[] = [];
-      for (let i = 0; i < 25; i++) {
-        const o = makeOpponent(s, makeRng(i + 1));
-        const n = o.army.squads.reduce((a, q) => a + q.count, 0);
-        counts.push(n);
-        expect(n).toBeGreaterThanOrEqual(Math.max(1, Math.ceil(me.fighters * (1 - BOT.countSpread) - 1e-9)));
-        expect(n).toBeLessThanOrEqual(Math.max(1, Math.floor(me.fighters * (1 + BOT.countSpread) + 1e-9)));
-        const target = me.power * botFactor(s);
-        errs.push(o.power / target - 1);
-        expect(o.power).toBe(armyPower(o.army.squads));
-        expect(o.army.squads.length).toBeLessThanOrEqual(BOT.maxSquads);
-        for (const q of o.army.squads) {
-          expect([1, 2, 4]).toContain(q.count);
-          expect(q.level >= 1 && q.level <= 7).toBe(true);
-          expect(q.weaponLevel >= (q.weapon ? 1 : 0) && q.weaponLevel <= 7).toBe(true);
+    expect(s.open).toBe(START_OPEN);
+    let n = 0;
+    for (let r = 0; r < 5; r++)
+      for (let c = 0; c < 5; c++) {
+        const mid = c >= 1 && c <= 3 && r >= 1 && r <= 3;
+        expect(isOpen(s, c, r)).toBe(mid);
+        if (!mid) {
+          expect(cellLock(s, c, r)).toEqual(CELL_LOCKS[`${c},${r}`]);
+          n++;
         }
       }
-      // the target already carries the +-BOT.spread; the build lands within BOT.tolerance of it
-      const off = errs.filter((e) => Math.abs(e) > BOT.spread + BOT.tolerance + 1e-9).length;
-      console.log(`${label}: ${me.fighters} fighters, power ${me.power} -> bot fighters ${Math.min(...counts)}..${Math.max(...counts)}, power ${errs.map((e) => Math.round(e * 100)).sort((a, b) => a - b).filter((_, i) => i % 6 === 0).join('/')}%`);
-      if (label !== 'tutorial') expect(off).toBe(0);
+    expect(n).toBe(16);
+    expect(Object.keys(CELL_LOCKS).length).toBe(16);
+  });
+  it('nothing goes on a locked cell: placing, growing, AUTO', () => {
+    const s = { ...newSave(), pieces: [], nextId: 1 };
+    const inv = new Inventory(s);
+    const k = inv.add('knife', 1)!;
+    expect(inv.place(k, { col: 0, row: 0 })).toMatchObject({ kind: 'denied', reason: LOCKED });
+    expect(inv.place(k, { col: 1, row: 1 }).kind).toBe('moved');
+    const pair = inv.add('sprout', 1)!;
+    pair.count = 2;
+    expect(inv.place(pair, { col: 3, row: 2 })).toMatchObject({ kind: 'denied', reason: LOCKED });
+    for (let i = 0; i < 3; i++) inv.add(i ? 'roo' : 'chili', 1);
+    autoArrange(inv);
+    valid(inv);
+    expect(inv.spotFor(inv.add('helmet', 1) ?? s.pieces[0])).not.toBeNull();
+  });
+  it('cash cells cost more each time; stage and knock-out cells open when earned', () => {
+    const s = newSave();
+    s.cash = 0;
+    expect(unlockCell(s, 0, 1)).toMatchObject({ ok: false, reason: 'Not enough cash' });
+    s.cash = 1000;
+    expect(cellPrice(s)).toBe(CELL_PRICE.cost);
+    expect(unlockCell(s, 0, 1)).toEqual({ ok: true, cost: CELL_PRICE.cost });
+    expect(cellPrice(s)).toBe(CELL_PRICE.cost + CELL_PRICE.step);
+    expect(isOpen(s, 0, 1)).toBe(true);
+    expect(unlockCell(s, 0, 1).ok).toBe(false);
+    expect(s.cash).toBe(1000 - CELL_PRICE.cost);
+    expect(unlockCell(s, 1, 0)).toMatchObject({ ok: false, reason: 'Opens at stage 2' });
+    expect(cellProgress(s, 1, 4)).toMatchObject({ lock: { kind: 'ko', count: 30 }, have: 0, need: 30 });
+    s.stage = 3;
+    s.kos = 30;
+    const opened = openEarned(s).map((c) => `${c.col},${c.row}`).sort();
+    expect(opened).toEqual(['1,0', '1,4', '2,0']);
+    expect(openEarned(s)).toEqual([]);
+  });
+});
+
+describe('trash and auto-place', () => {
+  it('sells a piece for a little cash, never the last unit', () => {
+    const s = empty();
+    const inv = new Inventory(s);
+    const knife = put(inv, 'knife', 3, 0, 0);
+    const pet = put(inv, 'roo', 1, 1, 0, 2);
+    s.cash = 0;
+    expect(inv.trash(knife)).toEqual({ ok: true, cash: sellValue(knife) });
+    expect(s.cash).toBe(4);
+    expect(inv.trash(pet)).toMatchObject({ ok: false, reason: 'Keep at least one unit' });
+    const two = inv.add('sprout', 1)!;
+    expect(inv.trash(pet)).toEqual({ ok: true, cash: 10 });
+    expect(s.pieces).toEqual([two]);
+  });
+  it('spotFor finds the first open spot that fits, the bottom rows first', () => {
+    const inv = new Inventory({ ...newSave(), pieces: [], nextId: 1 });
+    const big = inv.add('roo', 1)!;
+    big.count = 4;
+    expect(inv.spotFor(big)).toEqual({ col: 1, row: 2, turned: false });
+    const pair = inv.add('sprout', 1)!;
+    pair.count = 2;
+    inv.place(big, { col: 1, row: 2 });
+    put(inv, 'knife', 1, 2, 1);
+    expect(inv.spotFor(pair)).toEqual({ col: 3, row: 2, turned: true });
+    expect(inv.autoPlace(pair)).toMatchObject({ kind: 'moved' });
+    expect(pair).toMatchObject({ col: 3, row: 2, turned: true, slot: -1 });
+    const k = inv.add('knife', 1)!;
+    expect(inv.autoPlace(k)).toMatchObject({ kind: 'moved' });
+    expect(inv.autoPlace(inv.add('bat', 1)!)).toMatchObject({ kind: 'moved' }); // the last free open cell
+    expect(inv.autoPlace(inv.add('spear', 1)!)).toMatchObject({ kind: 'denied', reason: 'No room on the grid' });
+  });
+});
+
+describe('cases', () => {
+  it('the first CASEs are the scripted ones and teach Sprout + Sprout -> x2', () => {
+    const s = newSave();
+    expect(s.cash).toBe(ECON.startCash);
+    // the guide first puts the starter kit on the grid, so the tray has room for the cases
+    autoArrange(new Inventory(s));
+    expect(s.pieces.every((p) => p.slot < 0)).toBe(true);
+    const got = [];
+    for (let i = 0; i < SCRIPTED_ROLLS.length; i++) {
+      const r = openCase(s, 'case', makeRng(i))!;
+      expect(r).not.toBeNull();
+      got.push({ type: r.type, level: r.level });
+      expect(r.piece.slot).toBeGreaterThanOrEqual(0);
+    }
+    expect(got).toEqual(SCRIPTED_ROLLS);
+    const inv = new Inventory(s);
+    const [a, b] = s.pieces.filter((p) => p.type === 'sprout');
+    expect(inv.place(b, { col: a.col, row: a.row })).toMatchObject({ fuse: 'stack' });
+    expect(a.count).toBe(2);
+  });
+  it('CASE costs cash and climbs; ELITE costs gems; a full tray or no money blocks', () => {
+    const s = empty({ cash: 1000, gems: 100 });
+    const p0 = casePrice(s, 'case');
+    openCase(s, 'case', makeRng(1));
+    openCase(s, 'case', makeRng(2));
+    expect(s.cash).toBe(1000 - p0 - casePrice({ cases: 1 }, 'case'));
+    expect(casePrice(s, 'case')).toBeGreaterThanOrEqual(p0);
+    expect(casePrice({ cases: 40 }, 'case')).toBeGreaterThan(p0 + 10);
+    const g = s.gems;
+    const e = openCase(s, 'elite', makeRng(3))!;
+    expect(e.case).toBe('elite');
+    expect(s.gems).toBe(g - ECON.eliteCost);
+    expect(e.price).toBe(ECON.eliteCost);
+    openCase(s, 'case', makeRng(4));
+    expect(caseBlock(s, 'case')).toBe('The tray is full');
+    expect(openCase(s, 'case', makeRng(5))).toBeNull();
+    expect(caseBlock(empty({ cash: 0 }), 'case')).toBe('Not enough cash');
+    expect(caseBlock(empty({ gems: 0 }), 'elite')).toBe('Not enough gems');
+  });
+  it('a roll says what it gave: type, class or rung, and whether the unit is new', () => {
+    const s = empty({ cash: 1e9, cases: 10 });
+    const seen = new Set<string>();
+    for (let i = 0; i < 300; i++) {
+      const r = openCase(s, 'case', makeRng(i + 7))!;
+      seen.add(r.type);
+      if (isPet(r.type)) {
+        expect(r.rung).toBe(rungOf(r.type));
+        expect(r.level).toBe(1);
+      } else {
+        expect(r.rung).toBe(0);
+        expect(r.level >= 1 && r.level <= 7).toBe(true);
+        expect(r.fresh).toBe(false);
+      }
+      expect(s.pieces).toContain(r.piece);
+      new Inventory(s).remove(r.piece);
+    }
+    expect(seen.size).toBeGreaterThan(8);
+    // fresh only the first time a unit is owned
+    const t = empty({ cash: 1e9, cases: 10, owned: 1 });
+    let fresh = 0;
+    for (let i = 0; i < 200; i++) {
+      const r = openCase(t, 'case', makeRng(i))!;
+      if (r.fresh) fresh++;
+      new Inventory(t).remove(r.piece);
+    }
+    expect(fresh).toBe(ownedRungs(t).length - 1);
+  });
+  it('the odds improve with the stage; an ELITE is never E-class and never a Sprout', () => {
+    const mean = (o: number[]) => o.reduce((a, p, i) => a + p * (i + 1), 0) / 100;
+    expect(mean(petOdds(homeRung(1)))).toBeLessThan(mean(petOdds(homeRung(5))));
+    expect(mean(petOdds(homeRung(5)))).toBeLessThan(mean(petOdds(homeRung(12))));
+    expect(classOdds(1)[0]).toBeGreaterThan(classOdds(10)[0]);
+    expect(classOdds(4, true)[0]).toBe(0);
+    expect(classOdds(4, true).reduce((a, b) => a + b, 0)).toBeCloseTo(100, 6);
+    expect(caseOdds({ stage: 3 }, 'elite').rungs[0]).toBe(0);
+    expect(mean(caseOdds({ stage: 3 }, 'elite').rungs)).toBeGreaterThan(mean(caseOdds({ stage: 3 }, 'case').rungs));
+    const s = empty({ cash: 0, gems: 1e9 });
+    for (let i = 0; i < 300; i++) {
+      const r = openCase(s, 'elite', makeRng(i))!;
+      expect(r.type).not.toBe('sprout');
+      if (!isPet(r.type)) expect(r.level).toBeGreaterThanOrEqual(2);
+      new Inventory(s).remove(r.piece);
     }
   });
-  it('matchArmy lands within the tolerance of its own target', () => {
-    const r = makeRng(77);
-    for (let i = 0; i < 120; i++) {
-      const n = r.int(4, 25);
-      const power = n * r.range(12, 400);
-      const bot = matchArmy(n, power, 1, r);
-      expect(Math.abs(armyPower(bot.squads) / bot.target - 1)).toBeLessThanOrEqual(BOT.tolerance);
+  it('pity: after PITY cases without a top piece the next one is guaranteed', () => {
+    const s = empty({ cash: 1e9, cases: 10, pity: PITY });
+    const r = openCase(s, 'case', makeRng(3))!;
+    expect(r.pity).toBe(true);
+    expect(isPet(r.type) ? r.rung >= 3 : r.level >= 5).toBe(true);
+    expect(s.pity).toBe(0);
+  });
+  it('is seeded by the save when no rng is given', () => {
+    const a = empty({ cash: 1e6, cases: 10 });
+    const b = empty({ cash: 1e6, cases: 10 });
+    for (let i = 0; i < 3; i++) expect(openCase(a, 'case')!.type).toBe(openCase(b, 'case')!.type);
+  });
+});
+
+describe('waves', () => {
+  it('recommended power rises through a stage, peaks at the boss, and keeps rising stage by stage', () => {
+    for (let stage = 1; stage <= 15; stage++) {
+      for (let w = 2; w <= WAVES; w++) expect(recommendedPower(stage, w)).toBeGreaterThanOrEqual(recommendedPower(stage, w - 1));
+      expect(recommendedPower(stage + 1, 1)).toBeGreaterThan(recommendedPower(stage, 1));
+      // a new stage opens below the boss it follows (stage 1 is the starter's ramp: its boss is gentler)
+      if (stage >= 2) expect(recommendedPower(stage + 1, 1)).toBeLessThan(recommendedPower(stage, WAVES));
+    }
+    expect(recommendedPower(1, 1)).toBeLessThan(20);
+  });
+  it('the enemy army: about share x recommended POWER, more fighters and higher rungs later, the same for the same seed', () => {
+    let lastTop = 0;
+    for (let stage = 1; stage <= 12; stage++) {
+      const w = enemyArmy(stage, 5, 77);
+      expect(w).toEqual(enemyArmy(stage, 5, 77));
+      const p = armyPower(w.squads);
+      expect(Math.abs(p / (recommendedPower(stage, 5) * ENEMY.share) - 1)).toBeLessThan(ENEMY.tolerance + 0.02);
+      expect(w.squads.every((q) => !q.boss && [1, 2, 4].includes(q.count))).toBe(true);
+      expect(w.squads.length).toBeLessThanOrEqual(ENEMY.maxSquads);
+      const top = Math.max(...w.squads.map((q) => rungOf(q.pet)));
+      expect(top).toBeGreaterThanOrEqual(lastTop - 1);
+      lastTop = Math.max(lastTop, top);
+    }
+    expect(lastTop).toBeGreaterThanOrEqual(5);
+    expect(waveFighters(1, 1)).toBe(1);
+    expect(waveFighters(8, 9)).toBeGreaterThan(waveFighters(2, 9));
+    // armies differ from seed to seed
+    const kinds = new Set<string>();
+    for (let seed = 0; seed < 20; seed++) kinds.add(enemyArmy(6, 4, seed).squads.map((q) => q.pet + q.count + q.weapon).join());
+    expect(kinds.size).toBeGreaterThan(10);
+  });
+  it('wave 10 has one boss, a rung above its escort, worth its share of the POWER', () => {
+    for (let stage = 1; stage <= 12; stage++) {
+      const info = waveInfo(stage, WAVES, 5);
+      expect(info.boss).toBe(true);
+      const bosses = info.army.squads.filter((q) => q.boss);
+      expect(bosses).toHaveLength(1);
+      expect(bosses[0].count).toBe(1);
+      const escort = info.army.squads.filter((q) => !q.boss);
+      if (escort.length) expect(rungOf(bosses[0].pet)).toBeGreaterThan(Math.max(...escort.map((q) => rungOf(q.pet))));
+      expect(rungOf(bosses[0].pet)).toBeGreaterThanOrEqual(2);
+      expect(Math.abs(info.power / (info.recommended * ENEMY.bossShare) - 1)).toBeLessThan(0.15);
+      expect(info.fighters).toBe(info.army.squads.reduce((a, q) => a + q.count, 0));
+      // the boss is the same unit whatever the seed and tries
+      expect(enemyArmy(stage, WAVES, 99, 3).squads.find((q) => q.boss)!.pet).toBe(bosses[0].pet);
     }
   });
-  it('a one-on-one bot is the same pet with the same weapon, and weaker in the first match', () => {
-    const s = stateWith([['ant', 1, 1, 0, 0], ['knife', 1, 1, 1, 0], ['helmet', 1, 1, 0, 1]], { matches: 0 });
-    for (let i = 0; i < 10; i++) {
-      const o = makeOpponent(s, makeRng(i + 3));
-      expect(o.army.squads).toHaveLength(1);
-      expect(o.army.squads[0]).toMatchObject({ pet: 'ant', count: 1, weapon: 'knife' });
-      expect(o.power).toBeLessThan(playerArmy(s).power);
-    }
-    expect(kindsOf([{ key: 0, pet: 'frog', level: 1, count: 2, weapon: null, weaponLevel: 0, helmet: 0, sneakers: 0, chili: 0 }])).toHaveLength(2);
+  it('a retry rolls a new, softer army (mercy) of the same wave', () => {
+    const p0 = armyPower(enemyArmy(4, 6, 3, 0).squads);
+    const p3 = armyPower(enemyArmy(4, 6, 3, 3).squads);
+    expect(p3 / p0).toBeLessThan(1 - ENEMY.mercy * 2);
+    const s = newSave();
+    s.stage = 4;
+    s.wave = 6;
+    expect(nextWave(s).army).toEqual(enemyArmy(4, 6, s.seed, 0));
+    s.tries = 2;
+    expect(nextWave(s).army).toEqual(enemyArmy(4, 6, s.seed, 2));
+    expect(fightSeed(s)).not.toBe(fightSeed({ ...s, fights: 1 }));
   });
-  it('difficulty: easy first matches, rising with trophies, mercy and heat', () => {
-    expect(botFactor({ matches: 0, trophies: 0, streak: 0 })).toBeCloseTo(0.8);
-    expect(botFactor({ matches: 1, trophies: 0, streak: 0 })).toBeCloseTo(0.9);
-    expect(botFactor({ matches: 2, trophies: 0, streak: 0 })).toBeCloseTo(0.9);
-    expect(botFactor({ matches: 3, trophies: 0, streak: 0 })).toBeCloseTo(0.95);
-    expect(botFactor({ matches: 30, trophies: 3000, streak: 0 })).toBeCloseTo(1.1);
-    const mid = botFactor({ matches: 30, trophies: 700, streak: 0 });
-    expect(mid > 0.95 && mid < 1.1).toBe(true);
-    expect(botFactor({ matches: 30, trophies: 700, streak: -2 })).toBeCloseTo(mid * BOT.mercy);
-    expect(botFactor({ matches: 30, trophies: 700, streak: 3 })).toBeCloseTo(mid * BOT.heat);
-  });
-  it('is varied, repeatable, never empty', () => {
-    const s = stateWith([['ant', 3, 4, 0, 0], ['knife', 3, 1, 2, 0], ['frog', 3, 4, 3, 0], ['bat', 3, 1, 2, 1], ['ant', 2, 4, 0, 2]]);
-    const mixes = new Set<string>();
-    const names = new Set<string>();
-    for (let i = 0; i < 60; i++) {
-      const o = makeOpponent(s, makeRng(i));
-      const ants = o.army.squads.filter((q) => q.pet === 'ant').reduce((a, q) => a + q.count, 0);
-      mixes.add(String(Math.round((ants / o.army.squads.reduce((a, q) => a + q.count, 0)) * 4)));
-      names.add(o.name);
+  it('the first waves are easy for the starter army (Sprout, knife, helmet), and with the guide\'s first cases', () => {
+    for (const seed of [1, 2, 3, 4]) {
+      const s = newSave(seed);
+      const inv = new Inventory(s);
+      autoArrange(inv);
+      expect(inv.squads()).toHaveLength(1);
+      expect(inv.squads()[0]).toMatchObject({ pet: 'sprout', weapon: 'knife', helmet: 1 });
+      const wins = (wave: number) => {
+        const enemy = enemyArmy(1, wave, s.seed);
+        expect(enemy.squads.every((q) => q.weapon === null || q.weapon === 'knife')).toBe(true);
+        let n = 0;
+        for (let k = 0; k < 12; k++) if (runBattle([inv.army(), enemy], k).winner === 0) n++;
+        return n;
+      };
+      for (const wave of [1, 2]) {
+        expect(inv.power()).toBeGreaterThan(armyPower(enemyArmy(1, wave, s.seed).squads) * 1.25);
+        expect(wins(wave)).toBeGreaterThanOrEqual(11);
+      }
+      // the three scripted cases (Sprout, chili, Sprout), AUTO: waves 1 to 3 are easy
+      for (let i = 0; i < 3; i++) openCase(s, 'case');
+      autoArrange(inv);
+      for (const wave of [1, 2, 3]) expect(wins(wave)).toBe(12);
     }
-    expect(mixes.size).toBeGreaterThanOrEqual(4);
-    expect(names.size).toBeGreaterThan(50);
-    expect(makeOpponent(s, makeRng(9))).toEqual(makeOpponent(s, makeRng(9)));
-    const none = makeOpponent(empty(), makeRng(1));
-    expect(none.army.squads.length).toBeGreaterThan(0);
+  });
+});
+
+const sum = (winner: 0 | 1 | -1, alive0: number, size0: number, dead1: number, size1: number, bossKo = 0): SimSummary => ({
+  winner, byTime: false, time: 20, kills: [dead1, size0 - alive0], size: [size0, size1], alive: [alive0, size1 - dead1], hpLeft: [0.5, 0], bossKos: [bossKo, 0],
+});
+
+describe('progress', () => {
+  it('outcomeOf reads a fight', () => {
+    expect(outcomeOf(sum(0, 3, 4, 5, 5, 1))).toEqual({ won: true, kos: 5, boss: true, survived: 0.75 });
+    expect(outcomeOf(sum(1, 0, 4, 2, 5))).toEqual({ won: false, kos: 2, boss: false, survived: 0 });
+  });
+  it('a win pays knock-outs and the clear bonus and moves on; a loss pays knock-outs and keeps the wave', () => {
+    const s = newSave();
+    s.cash = 0;
+    const r = applyWave(s, { won: true, kos: 3, boss: false, survived: 1 });
+    expect(r).toMatchObject({ won: true, stage: 1, wave: 1, koCash: 3 * koCash(1), clearCash: clearCash(1, 1), stageClear: false, stars: 0, gems: 0, next: { stage: 1, wave: 2 } });
+    expect(s.cash).toBe(r.cash);
+    expect(s.wave).toBe(2);
+    const before = { ...s, pieces: [...s.pieces] };
+    const l = applyWave(s, { won: false, kos: 1, boss: false, survived: 0 });
+    expect(l).toMatchObject({ won: false, clearCash: 0, koCash: koCash(1), next: { stage: 1, wave: 2 } });
+    expect(s.wave).toBe(2);
+    expect(s.tries).toBe(1);
+    expect(s.pieces).toEqual(before.pieces);
+    expect(s.kos).toBe(4);
+    expect(s.fights).toBe(2);
+    expect(s.wins).toBe(1);
+    applyWave(s, { won: true, kos: 0, boss: false, survived: 1 });
+    expect(s.tries).toBe(0);
+  });
+  it('winning wave 10 clears the stage: stars by survivors, gems, the next stage, earned cells open', () => {
+    const s = newSave();
+    s.wave = WAVES;
+    s.gems = 0;
+    const r = applyWave(s, { won: true, kos: 4, boss: true, survived: 0.5 });
+    expect(r).toMatchObject({ stageClear: true, stars: 2, gems: stageGems(1, 2), next: { stage: 2, wave: 1 } });
+    expect(r.koCash).toBe(koCash(1) * (4 - 1 + ECON.bossKo));
+    expect(s.gems).toBe(stageGems(1, 2));
+    expect(s.stars).toEqual([2]);
+    expect(r.cells).toEqual([{ col: 1, row: 0 }]);
+    expect(isOpen(s, 1, 0)).toBe(true);
+    // replaying a stage never lowers its stars
+    s.stage = 1;
+    s.wave = WAVES;
+    applyWave(s, { won: true, kos: 4, boss: true, survived: 0.1 });
+    expect(s.stars).toEqual([2]);
+    s.wave = WAVES;
+    expect(applyWave(s, { won: true, kos: 4, boss: true, survived: 1 }).stars).toBe(3);
+    expect(s.stars[1]).toBe(3);
+  });
+  it('a lost boss wave keeps the stage and wave', () => {
+    const s = newSave();
+    s.wave = WAVES;
+    const r = applyWave(s, { won: false, kos: 2, boss: false, survived: 0 } satisfies WaveOutcome);
+    expect(r).toMatchObject({ stageClear: false, gems: 0, next: { stage: 1, wave: WAVES } });
   });
 });
 
 describe('save', () => {
-  it('new save: version 2, the starter kit on the bench, the scripted rolls to come', () => {
+  it('new save: version 4, stage 1 wave 1, the starter kit on the tray, cash for the first cases', () => {
     const s = newSave();
-    expect(s.version).toBe(2);
-    expect(s.pieces.map((p) => p.type)).toEqual(['ant', 'knife', 'helmet']);
+    expect(s.version).toBe(4);
+    expect(SAVE_VERSION).toBe(4);
+    expect(s).toMatchObject({ stage: 1, wave: 1, tries: 0, stars: [], cases: 0, elites: 0, kos: 0, cellBuys: 0, open: START_OPEN, auto: false, tutorial: 0 });
+    expect(s.pieces.map((p) => ({ type: p.type, level: p.level }))).toEqual(STARTER_KIT);
     expect(s.pieces.every((p) => p.slot >= 0 && p.slot < BENCH_SLOTS)).toBe(true);
-    expect(s.rolled).toBe(0);
-    expect(s.rolls).toBeGreaterThanOrEqual(SCRIPTED_ROLLS.length);
-    expect(s.name).toMatch(/^Player\d{5}$/);
+    expect(isOwned(s, 'sprout')).toBe(true);
+    expect(isOwned(s, 'buzzy')).toBe(false);
+    let cash = s.cash;
+    for (let i = 0; i < SCRIPTED_ROLLS.length; i++) cash -= casePrice({ cases: i }, 'case');
+    expect(cash).toBeGreaterThanOrEqual(0);
   });
   it('loads in node without storage, never throws', () => {
     expect(load().pieces.length).toBe(3);
     expect(save(newSave())).toBe(false);
   });
-  it('a version 1 save (the 8 x 8 grid) is replaced by a fresh start', () => {
-    const old = { ...newSave(), version: 1, trophies: 640, pieces: [{ id: 1, type: 'frog', level: 5, count: 8, col: 7, row: 7, slot: -1 }] };
-    const r = repair(JSON.parse(JSON.stringify(old)));
-    expect(r).toEqual(newSave());
+  it('any older version (the trophy saves) is replaced by a fresh start', () => {
+    for (const v of [1, 2, 3]) {
+      const old = { version: v, trophies: 640, rolls: 9, pieces: [{ id: 1, type: 'ant', level: 5, count: 4, col: 0, row: 0, slot: -1 }] };
+      expect(repair(JSON.parse(JSON.stringify(old)))).toEqual(newSave());
+      expect(replacedOldSave(old)).toBe(true);
+    }
+    expect(replacedOldSave(newSave())).toBe(false);
+    expect(replacedOldSave(null)).toBe(false);
   });
-  it('round trips and repairs a damaged version 2 save', () => {
+  it('round trips and repairs a damaged version 4 save', () => {
     const mem: Record<string, string> = {};
     (globalThis as Record<string, unknown>).localStorage = { getItem: (k: string) => mem[k] ?? null, setItem: (k: string, v: string) => (mem[k] = v) };
     try {
       const s = newSave();
-      s.trophies = 123;
-      s.bestTrophies = 123;
-      new Inventory(s).place(s.pieces[0], { col: 0, row: 0 });
+      s.cash = 123;
+      s.stage = 3;
+      s.wave = 4;
+      s.stars = [3, 1];
+      s.auto = true;
+      s.open |= cellBit(0, 1);
+      new Inventory(s).place(s.pieces[0], { col: 1, row: 1 });
       s.pieces[0].count = 2;
       s.pieces[0].turned = true;
       expect(save(s)).toBe(true);
@@ -465,31 +636,31 @@ describe('save', () => {
       mem['zoopvp-save'] = '{not json';
       expect(load().pieces.length).toBe(3);
       mem['zoopvp-save'] = JSON.stringify({
-        version: 2, trophies: -5, rolls: 'x',
+        version: 4, cash: -5, gems: 'x', stage: 2, wave: 99, stars: [5, 2, 2], open: 0, owned: 0,
         pieces: [
-          { id: 1, type: 'ant', level: 99, count: 3, col: 1, row: 1, slot: -1 }, // count 2: (1,1)-(2,1)
+          { id: 1, type: 'sprout', level: 99, count: 3, col: 1, row: 1, slot: -1 }, // a pair at (1,1)-(2,1)
           { id: 1, type: 'nope' },
-          { id: 1, type: 'frog', level: 1, count: 4, col: 2, row: 0, slot: -1 }, // overlaps the pair: to the bench
-          { id: 5, type: 'frog', level: 1, count: 4, col: 4, row: 4, slot: -1 }, // off the grid: to the bench
+          { id: 1, type: 'roo', level: 1, count: 4, col: 2, row: 1, slot: -1 }, // overlaps the pair: to the tray
+          { id: 5, type: 'knife', level: 2, count: 1, col: 0, row: 0, slot: -1 }, // a locked cell: to the tray
+          { id: 6, type: 'ant', level: 1, count: 1, col: 3, row: 3, slot: -1 }, // an old unit: dropped
           null,
         ],
       });
       const r = load();
-      expect(r.trophies).toBe(0);
-      expect(r.rolls).toBe(0);
+      expect(r).toMatchObject({ cash: 0, gems: 0, stage: 2, wave: WAVES, stars: [3], open: START_OPEN });
       expect(r.pieces.length).toBe(3);
-      expect(r.pieces[0]).toMatchObject({ level: 7, count: 2, col: 1, row: 1 });
+      expect(r.pieces[0]).toMatchObject({ type: 'sprout', level: 1, count: 2, col: 1, row: 1 });
       expect(r.pieces[1].slot).toBeGreaterThanOrEqual(0);
-      expect(r.pieces[2].slot).toBeGreaterThanOrEqual(0);
+      expect(r.pieces[2]).toMatchObject({ type: 'knife', col: -1 });
+      expect(isOwned(r, 'roo')).toBe(true);
       expect(new Set(r.pieces.map((p) => p.id)).size).toBe(3);
-      expect(r.nextId).toBeGreaterThan(5);
       valid(new Inventory(r));
     } finally {
       delete (globalThis as Record<string, unknown>).localStorage;
     }
   });
   it('repair handles junk', () => {
-    for (const j of [null, 5, 'x', [], {}, { pieces: 'x' }, { version: 2, pieces: 'x' }]) expect(repair(j).version).toBe(2);
+    for (const j of [null, 5, 'x', [], {}, { pieces: 'x' }, { version: 4, pieces: 'x' }]) expect(repair(j).version).toBe(4);
   });
 });
 
@@ -497,45 +668,57 @@ describe('autoArrange', () => {
   it('fuses, packs shapes, links the best kit and loses nothing', () => {
     const s = empty();
     const inv = new Inventory(s);
-    const kit = [['ant', 1], ['ant', 1], ['frog', 1], ['knife', 1], ['knife', 1], ['bat', 1], ['helmet', 1], ['chili', 2], ['sneakers', 1]] as const;
-    kit.forEach(([t, l], i) => inv.place(inv.add(t, l)!, { col: i % 5, row: Math.floor(i / 5) }));
+    const kit = [['sprout', 1], ['sprout', 1], ['roo', 1], ['knife', 1], ['knife', 1], ['bat', 1], ['helmet', 1], ['chili', 2], ['sneakers', 1]] as const;
+    kit.forEach(([t, l], i) => inv.place(inv.add(t, l) ?? inv.add(t, l)!, { col: i % 5, row: Math.floor(i / 5) }));
+    while (s.pieces.length < kit.length) {
+      const [t, l] = kit[s.pieces.length];
+      const p = inv.add(t, l)!;
+      inv.place(p, inv.spotFor(p)!);
+    }
     const before = inv.power();
     autoArrange(inv);
     valid(inv);
-    expect(s.pieces.length).toBe(7); // ants and knives fused
-    const pair = s.pieces.find((p) => p.type === 'ant')!;
-    expect(pair.count).toBe(2);
-    expect(inv.squads().length).toBe(2);
+    expect(s.pieces.length).toBe(7); // the Sprouts and the knives fused
+    expect(s.pieces.find((p) => p.type === 'sprout')!.count).toBe(2);
     expect(inv.squads().every((q) => q.weapon !== null)).toBe(true);
-    expect(inv.squadOf(pair)).toMatchObject({ weapon: 'knife', weaponLevel: 2, chili: 2 }); // the biggest pet gets the best
     expect(inv.power()).toBeGreaterThan(before);
     const again = JSON.stringify(s.pieces);
     autoArrange(inv);
     expect(JSON.stringify(s.pieces)).toBe(again);
   });
-  it('a full grid and bench: everything stays, nothing overlaps', () => {
-    for (let seed = 1; seed <= 12; seed++) {
+  it('evolves surplus squads from the tray, never leaving the army weaker', () => {
+    const s = empty({ open: START_OPEN });
+    const inv = new Inventory(s);
+    put(inv, 'sprout', 1, 1, 1, 4);
+    put(inv, 'knife', 1, 3, 1);
+    for (let i = 0; i < 2; i++) inv.add('sprout', 1)!.count = 4;
+    const was = inv.power();
+    const res = autoArrange(inv);
+    expect(res.evolves).toEqual([{ from: 'sprout', to: 'buzzy', fresh: true }]);
+    expect(s.evolves).toBe(1);
+    expect(inv.power()).toBeGreaterThanOrEqual(was);
+    expect(s.pieces.filter((p) => p.type === 'sprout')).toHaveLength(1);
+    valid(inv);
+  });
+  it('a full grid and tray: everything stays, nothing overlaps, never weaker', () => {
+    for (let seed = 1; seed <= 10; seed++) {
       const r = makeRng(seed);
       const s = empty();
+      if (seed % 2) s.open = START_OPEN | cellBit(0, 1) | cellBit(4, 4);
       const inv = new Inventory(s);
-      // fill the grid and bench randomly with what fits
-      const types: PieceType[] = ['ant', 'frog', 'knife', 'bat', 'shield', 'spear', 'helmet', 'sneakers', 'chili'];
+      const types: PieceType[] = ['sprout', 'buzzy', 'roo', 'knife', 'bat', 'shield', 'spear', 'helmet', 'sneakers', 'chili'];
       for (let i = 0; i < 60; i++) {
         const p = inv.add(r.pick(types), r.int(1, 4));
         if (!p) break;
-        if (p.type === 'ant' || p.type === 'frog') p.count = r.pick([1, 2, 4]);
+        if (isPet(p.type)) p.count = r.pick([1, 2, 4]);
         for (let k = 0; k < 30; k++) if (inv.place(p, { col: r.int(0, 4), row: r.int(0, 4) }).kind === 'moved') break;
       }
-      const ids = s.pieces.map((p) => p.id).sort();
-      const cells = s.pieces.reduce((a, p) => a + (p.slot >= 0 ? 0 : footprint(p).w * footprint(p).h), 0);
-      expect(cells).toBeGreaterThan(5);
-      const powerBefore = inv.power();
+      const ids = s.pieces.map((p) => p.id);
+      const was = inv.power();
       autoArrange(inv);
       valid(inv);
-      // pieces are only ever fused, never dropped: every id left is an old one and fighters are kept
       for (const p of s.pieces) expect(ids).toContain(p.id);
-      expect(s.pieces.filter((p) => p.slot >= 0).length).toBeLessThanOrEqual(BENCH_SLOTS);
-      expect(inv.power()).toBeGreaterThan(powerBefore * 0.7);
+      expect(inv.power()).toBeGreaterThanOrEqual(was);
     }
   });
 });

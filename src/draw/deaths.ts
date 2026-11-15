@@ -1,10 +1,11 @@
 import { sfx } from '../audio/engine';
 import { fchance, fpick, frand } from '../rng';
 import { ARENA } from '../data';
-import { COLOR, UI, W } from '../theme';
+import { COLOR } from '../theme';
 import type { DeathKind, PetType, WeaponType } from '../types';
+import type { Blow, DeathCause } from '../sim/types';
 import { clamp, easeOutCubic, lerp, smooth, type Ctx } from '../util';
-import { PITCH, project, TILT } from './camera';
+import { screenX, viewScale } from './camera';
 import { drawShard, GROUND_FLAT, GRASS_SHADE, type Fx } from './fx';
 import { restPose, type PetLook, type PetPose } from './petTypes';
 import { PET_COLORS, petArt } from './pets';
@@ -15,8 +16,9 @@ import { PET_COLORS, petArt } from './pets';
  * petArt.drawPet with a pose driven here; what flies off goes through the shared Fx in the game's one palette
  * (white, gold, the pet's own tones), with a shadow on the grass while it flies.
  *
- * A death happens at an arena point and is placed on screen by the match camera: everything about it is
- * drawn at that depth's scale, and what leaves the ground rises toward screen-up while its shadow stays down.
+ * Everything here is in ARENA px: the battle view draws it under the camera's flat transform, so a body, what flies
+ * off it and the mark it leaves stay on the pitch however the view moves. What leaves the ground rises toward
+ * screen-up while its shadow stays down.
  *
  * Every knock-out leaves its mark on the pitch for the rest of the fight, painted once into the ground layer
  * (fx.ground): a flat splat in the pet's colours, the pancake a squish leaves, a ring of settled petals, a little
@@ -37,14 +39,29 @@ export interface DeathHit {
   dir: number;
   /** how hard, 0..1+ */
   power: number;
+  /** what took its last health (a hit, a Buzzy's poison, a Briar's thorns) */
+  cause?: DeathCause;
+  /** the special blow that did it */
+  blow?: Blow;
 }
 
 const DUR: Record<DeathKind, number> = { pop: 0.44, squish: 1.15, launch: 0.64, slice: 0.82, spin: 1.08, deflate: 1.2, shatter: 0.29, petals: 0.14 };
 /** how long after the start the sound begins, so its accent lands on the pay-off frame */
 const SOUND_AT: Record<DeathKind, number> = { pop: 0.28, squish: 0.1, launch: 0, slice: 0, spin: 0, deflate: 0, shatter: 0.25, petals: 0.06 };
+/** each character's own favourite ways to go (picked when the blow has no say) */
 const OWN: Record<PetType, readonly DeathKind[]> = {
-  frog: ['pop', 'pop', 'pop', 'deflate', 'deflate', 'deflate', 'petals', 'spin'],
-  ant: ['squish', 'squish', 'squish', 'squish', 'petals', 'pop', 'spin', 'deflate'],
+  sprout: ['petals', 'petals', 'pop', 'squish', 'spin'],
+  buzzy: ['deflate', 'deflate', 'pop', 'spin', 'launch'],
+  ninja: ['spin', 'spin', 'petals', 'launch', 'slice'],
+  snailor: ['squish', 'squish', 'spin', 'shatter', 'pop'],
+  roo: ['launch', 'launch', 'spin', 'squish', 'deflate'],
+  cacto: ['petals', 'shatter', 'spin', 'pop', 'squish'],
+  pogo: ['launch', 'launch', 'spin', 'pop', 'deflate'],
+  briar: ['petals', 'petals', 'petals', 'spin', 'shatter'],
+  angler: ['spin', 'launch', 'squish', 'deflate', 'pop'],
+  sumo: ['squish', 'deflate', 'deflate', 'launch', 'spin'],
+  rhino: ['launch', 'shatter', 'squish', 'spin', 'launch'],
+  boulder: ['shatter', 'shatter', 'shatter', 'squish', 'spin'],
 };
 /** body tones of the two teams, exactly as the pets are painted: [main, light, shade] */
 const BODY = PET_COLORS;
@@ -56,7 +73,7 @@ const MARK_INK = 'rgba(20, 24, 31, 0.55)';
 /** worn, sun-bleached grass (a skid, a swirl, a cut) */
 const WORN = 'rgba(246, 242, 200, 0.62)';
 const TAU = Math.PI * 2;
-const SPARK = [UI.accent, COLOR.white];
+const SPARK = ['#efd99a', COLOR.white];
 const INFLATE = DEATH_PAYOFF.pop;
 const ZIP = 0.8; // the let-go balloon zips about this long
 const ZIP_LEGS = 7;
@@ -64,20 +81,25 @@ const MANY = 26; // more bodies than this at once: the rest go the quick ways
 const SPECK = 1.2; // a body drawn smaller than this radius (px) is just a speck
 const SMALL = 5; // below this radius a body is drawn at this size and scaled down
 
-/** Picks the death a blow has earned: mostly the weapon's, sometimes the pet's own. */
+/** Picks the death a blow has earned: poison and thorns their own, a special blow its own, else mostly the weapon's. */
 export function chooseDeath(pet: PetType, hit: DeathHit): DeathKind {
-  if (fchance(0.14)) return fpick(OWN[pet]);
+  const own = OWN[pet] ?? OWN.sprout;
+  if (hit.cause === 'poison') return fchance(0.65) ? 'deflate' : 'pop';
+  if (hit.cause === 'spike') return fchance(0.5) ? 'pop' : 'petals';
+  if (hit.blow === 'charge' || hit.blow === 'slam') return 'launch';
+  if (hit.blow === 'stomp' || hit.blow === 'landing') return fchance(0.8) ? 'squish' : 'spin';
+  if (fchance(0.16)) return fpick(own);
   switch (hit.weapon) {
     case 'bat':
       return hit.power >= 0.55 ? 'launch' : 'squish';
     case 'knife':
       return 'slice';
     case 'spear':
-      return fchance(0.8) ? 'spin' : fpick(OWN[pet]);
+      return fchance(0.8) ? 'spin' : fpick(own);
     case 'shield':
-      return fchance(0.8) ? 'shatter' : fpick(OWN[pet]);
+      return fchance(0.8) ? 'shatter' : fpick(own);
     default:
-      return fpick(OWN[pet]);
+      return fpick(own);
   }
 }
 
@@ -85,9 +107,9 @@ interface Body {
   kind: DeathKind;
   look: PetLook;
   pose: PetPose;
-  /** radius on screen (the fighter's radius times the depth scale) */
+  /** its drawn radius, arena px */
   r: number;
-  /** where it died: its feet on screen, and the depth scale there */
+  /** where it died: its feet, arena px (s is 1: kept so the sizes read as before) */
   x: number;
   y: number;
   s: number;
@@ -107,7 +129,7 @@ interface Body {
   shx: number;
   shy: number;
   lift: number;
-  /** a launch: where its shadow ends up on screen, and how high and how small it is by then */
+  /** a launch: where its shadow ends up, and how high and how small it is by then */
   tx: number;
   ty: number;
   ts: number;
@@ -144,19 +166,20 @@ export class Deaths {
   }
 
   /**
-   * A fighter dies at arena point (ax, ay) (its feet; the match camera puts it on screen). r is its radius in
-   * arena px. Give `kind` to force one (the dev page does); otherwise it is chosen from the pet and the blow.
+   * A fighter dies at arena point (ax, ay) (its feet). radius is its drawn radius in arena px. Give `kind` to
+   * force one (the dev page does); otherwise it is chosen from the pet and the blow.
    * Returns the kind that plays.
    */
   start(look: PetLook, radius: number, ax: number, ay: number, face: 1 | -1, hit: DeathHit, kind?: DeathKind): DeathKind {
     let k = kind ?? chooseDeath(look.pet, hit);
     if (!kind) {
       if (this.list.length > MANY) k = fchance(0.5) ? 'petals' : 'pop';
-      else if (k === 'slice' && this.list.reduce((n, b) => n + (b.kind === 'slice' ? 1 : 0), 0) >= 6) k = fpick(OWN[look.pet]);
+      else if (k === 'slice' && this.list.reduce((n, b) => n + (b.kind === 'slice' ? 1 : 0), 0) >= 6) k = fpick(OWN[look.pet] ?? OWN.sprout);
     }
-    const at = project(ax, ay);
-    const { x, y, s } = at;
-    const r = radius * s;
+    const x = ax;
+    const y = ay;
+    const s = 1;
+    const r = radius;
     const pose = restPose();
     pose.face = face;
     pose.t = look.seed;
@@ -171,12 +194,11 @@ export class Deaths {
       // up and away along the blow, its shadow racing over the grass (and off it, toward the stands)
       const gx = clamp(ax + Math.cos(hit.dir) * (90 + 70 * b.power), -26, ARENA.w + 26);
       const gy = clamp(ay + Math.sin(hit.dir) * (60 + 40 * b.power), -24, ARENA.h + 16);
-      const end = project(gx, gy);
-      b.tx = clamp(end.x, 26, W - 26);
-      b.ty = end.y;
-      b.ts = end.s;
-      // high enough to read as gone, never up into the score bar
-      b.th = Math.min((170 + 60 * b.power) * end.s, end.y - (PITCH.top - 150));
+      b.tx = gx;
+      b.ty = gy;
+      b.ts = 1;
+      // high enough to read as gone, never far past the stands at the top
+      b.th = Math.min(170 + 60 * b.power + r, gy + 120);
       b.b = Math.cos(hit.dir) >= 0 ? 1 : -1;
       fx.streak(x, y - r, Math.atan2(b.ty - b.th - y, b.tx - x), (70 + 40 * b.power) * s, COLOR.white, r * 0.4, 0.22);
       // where it took off: a skid along the blow and a few drops of its colour
@@ -186,7 +208,7 @@ export class Deaths {
     } else if (k === 'slice') {
       pose.mood = 'scared';
       b.a = b.b * frand(0.18, 0.5);
-      b.snap = petArt.snapshot(look, pose, r, this.ratio);
+      b.snap = petArt.snapshot(look, pose, r, this.ratio * viewScale());
       // a bright edge where the cut goes, only on the pet's own pixels
       const c = b.snap.canvas.getContext('2d')!;
       c.globalCompositeOperation = 'source-atop';
@@ -197,12 +219,11 @@ export class Deaths {
       c.lineTo(Math.cos(b.a) * r * 5, -r + Math.sin(b.a) * r * 5);
       c.stroke();
       fx.streak(x - Math.cos(b.a) * r * 2.8, y - r - Math.sin(b.a) * r * 2.8, b.a, r * 5.6, COLOR.white, r * 0.3, 0.24);
-      fx.burst(x, y - r, { colors: [COLOR.white, COLOR.goldLight], n: 3, speed: 120 * s, size: r * 0.45 + 2, life: 0.3, gravity: 0, shape: 'star' });
+      fx.burst(x, y - r, { colors: [COLOR.white, '#f1e3bf'], n: 3, speed: 120 * s, size: r * 0.45 + 2, life: 0.3, gravity: 0, shape: 'star' });
     } else if (k === 'deflate') {
       // a zig-zag over the pitch (never past its edges at this depth), each leg shorter than the last
-      const half = (ARENA.w / 2) * s;
-      const x0 = PITCH.cx - half + 18 * s;
-      const x1 = PITCH.cx + half - 18 * s;
+      const x0 = 18;
+      const x1 = ARENA.w - 18;
       let px = 0;
       let py = -r * 1.2;
       let side = b.b;
@@ -215,7 +236,7 @@ export class Deaths {
         side = -side;
       }
     }
-    sfx.play(k, 0, { x, enemy: look.team === 0, delay: SOUND_AT[k] });
+    sfx.play(k, 0, { x: screenX(x), enemy: look.team === 0, delay: SOUND_AT[k] });
     this.list.push(b);
     return k;
   }
@@ -382,7 +403,7 @@ export class Deaths {
           const tx = b.tx;
           const ty = b.ty - b.th;
           fx.burst(tx, ty, { colors: [COLOR.white], n: 1, speed: 0, size: 14, life: 0.4, gravity: 0, shape: 'star' });
-          fx.burst(tx, ty, { colors: [COLOR.goldLight], n: 3, speed: 50, size: 3.5, life: 0.35, gravity: 0, shape: 'star' });
+          fx.burst(tx, ty, { colors: ['#f1e3bf'], n: 3, speed: 50, size: 3.5, life: 0.35, gravity: 0, shape: 'star' });
           fx.ring(tx, ty, COLOR.white, 2, 14, 0.3);
         }
         break;
@@ -417,7 +438,7 @@ export class Deaths {
           // it skids over the grass the way it was hit, foreshortened up the pitch
           const d = (16 + 26 * b.power) * s * easeOutCubic(k);
           b.ox = Math.cos(b.dir) * d + Math.sin(b.a * 0.5) * r * 0.45 * k;
-          b.oy = Math.sin(b.dir) * d * TILT * 0.7;
+          b.oy = Math.sin(b.dir) * d * 0.7;
           b.puffT -= dt;
           if (b.puffT <= 0) {
             b.puffT = 0.13;
@@ -706,14 +727,14 @@ function splat(g: Ctx, x: number, y: number, size: number, dir: number, tones: T
  */
 function pancake(g: Ctx, x: number, y: number, r: number, tones: Tones, pet: PetType, letDown: boolean): void {
   const [main, light, shade] = tones;
-  const rx = r * (pet === 'frog' ? 1.75 : 1.55) * (letDown ? 0.85 : 1);
+  const rx = r * (pet === 'boulder' || pet === 'sumo' ? 1.7 : 1.55) * (letDown ? 0.85 : 1);
   const ry = rx * GROUND_FLAT * 0.6;
   const lip = Math.max(0.8, r * 0.14);
   g.save();
   g.translate(x, y);
   // the little legs: short rounded strokes out of each side
   g.lineCap = 'round';
-  const legs = pet === 'frog' ? [-0.35, 0.45] : [-0.45, 0.05, 0.5];
+  const legs = pet === 'buzzy' || pet === 'briar' ? [-0.45, 0.05, 0.5] : [-0.35, 0.45];
   for (const pass of [0, 1]) {
     g.strokeStyle = pass ? shade : MARK_INK;
     g.lineWidth = Math.max(1.2, r * 0.24) + (pass ? 0 : 1.6);

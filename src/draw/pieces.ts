@@ -1,8 +1,8 @@
 import type { Ctx, Rect } from '../util';
 import type { Piece, PieceType, PetType, WeaponType, GearType } from '../types';
-import { footprint, isPet, isWeapon } from '../data';
+import { footprint, isPet, isWeapon, petTier, rungOf } from '../data';
 import { clamp } from '../util';
-import { TILE_LIFT, classBadge, classFx, countBadge, tileDepth, tileFrame } from './ui';
+import { TILE_LIFT, classBadge, classFx, countBadge, rungBadge, tileDepth, tileFrame } from './ui';
 import { petArt } from './pets';
 import { restPose } from './petTypes';
 import type { PetLook } from './petTypes';
@@ -56,10 +56,9 @@ function drawPetGroup(ctx: Ctx, pet: PetType, level: number, count: number, cx: 
   // a square box's pair stands closer, overlapping a little like friends instead of floating apart
   const close = f.cols > 1 && f.rows === 1 && w < h * 1.4;
   const squeeze = close ? 0.78 : 1;
-  // an ant is long and low, a frog round: fit each by the side that limits it
-  const ant = pet === 'ant';
+  // fit each by the side that limits it (the cast has big heads on small bodies: about as tall as wide)
   const fitW = (cw / squeeze) * (close ? 0.62 : 1);
-  const r1 = Math.min(fitW / (ant ? 2.6 : 2.45), ch / (ant ? 2.3 : 2.55)) * 0.94;
+  const r1 = Math.min(fitW / 2.45, ch / 2.55) * 0.94;
   let i = 0;
   for (let row = 0; row < f.rows; row++) {
     const back = f.rows > 1 && row < f.rows - 1;
@@ -69,7 +68,7 @@ function drawPetGroup(ctx: Ctx, pet: PetType, level: number, count: number, cx: 
       pose.t = t + i * 0.37;
       pose.face = 1;
       const x = cx + (col - (f.cols - 1) / 2) * cw * squeeze + (f.rows > 1 ? (row % 2 ? 0.06 : -0.06) * cw : 0);
-      const y = cy - h / 2 + ch * (row + 0.5) + ch * (ant ? 0.26 : 0.34);
+      const y = cy - h / 2 + ch * (row + 0.5) + ch * 0.34;
       const rr1 = r1 * (back ? 0.95 : 1);
       ctx.save();
       ctx.translate(x, y);
@@ -110,18 +109,21 @@ export function pieceIcon(ctx: Ctx, type: PieceType, level: number, cx: number, 
 }
 
 /**
- * A piece on its class tile: picture, class badge, count badge, and the shine of A-class and better. r is the
- * whole tile: a piece covering two or four cells is one wide tile, its fighters posed across it.
+ * A piece on its class tile: picture, class badge (a unit: its rung), count badge, and the shine of A-class and
+ * better (a unit's tile takes the tier its rung looks like). r is the whole tile: a piece covering two or four cells
+ * is one wide tile, its fighters posed across it.
  */
 export function drawPiece(ctx: Ctx, p: Piece | PieceLike, r: Rect, o: PieceOpts) {
   const count = p.count ?? 1;
+  const pet = isPet(p.type);
+  const tier = pet ? petTier(p.type as PetType) : p.level;
   const lift = o.lifted ? TILE_LIFT : 0;
   const fp = footprint({ type: p.type, count, turned: (p as Piece).turned });
   // one cell's size inside this tile: the badges are sized by it, so they read the same on every tile
   const unit = Math.min(r.w / fp.w, r.h / fp.h);
   const face = r.h - tileDepth(Math.min(r.w, r.h)); // the top face; the side face is below it
-  tileFrame(ctx, r, p.level, { idle: o.idle, lifted: o.lifted, t: o.t });
-  if (p.level >= 5 && !o.idle) classFx(ctx, { x: r.x, y: r.y - lift, w: r.w, h: r.h }, p.level, o.t);
+  tileFrame(ctx, r, tier, { idle: o.idle, lifted: o.lifted, t: o.t });
+  if (tier >= 5 && !o.idle) classFx(ctx, { x: r.x, y: r.y - lift, w: r.w, h: r.h }, tier, o.t);
   ctx.save();
   if (o.idle) ctx.globalAlpha *= 0.6;
   const pad = unit * 0.1;
@@ -145,7 +147,8 @@ export function drawPiece(ctx: Ctx, p: Piece | PieceLike, r: Rect, o: PieceOpts)
   ctx.save();
   if (o.idle) ctx.globalAlpha *= 0.8;
   // the class plate in the top-left corner, the head count in the bottom-right one, both just inside the rim
-  classBadge(ctx, p.level, r.x + 6 * k, r.y + 6 * k + 13 * k - lift, k, o.t);
-  if (isPet(p.type) && count > 1) countBadge(ctx, count, r.x + r.w - 20 * k, r.y + face - 15 * k - lift, k);
+  if (pet) rungBadge(ctx, rungOf(p.type as PetType), r.x + 6 * k, r.y + 6 * k + 13 * k - lift, k);
+  else classBadge(ctx, p.level, r.x + 6 * k, r.y + 6 * k + 13 * k - lift, k, o.t);
+  if (pet && count > 1) countBadge(ctx, count, r.x + r.w - 20 * k, r.y + face - 15 * k - lift, k);
   ctx.restore();
 }

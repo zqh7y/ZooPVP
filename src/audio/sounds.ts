@@ -1,5 +1,4 @@
 import type { SoundDef, SoundName } from './names';
-import { SAMPLE_RATE, YO_SCALE, crash, drum, m, pad, semi, sparkle, whoosh, type Synth } from './synth';
 
 /*
  * Every sound effect of the game, as a small synth recipe. Each one is rendered once into a buffer when the
@@ -12,282 +11,16 @@ import { SAMPLE_RATE, YO_SCALE, crash, drum, m, pad, semi, sparkle, whoosh, type
  *
  * Tuning: tunes use the yo scale on D (D E G A B, which is also G major pentatonic), and the big chords sit
  * on G, so any two sounds that ring together agree.
+ *
+ * v4 (docs/v4.md): the building blocks now live in kit.ts; the twelve characters' voices and the trait sounds
+ * are in cast.ts, the stage / wave / roll / evolve sounds in flow.ts, and all of them join this table. The v3
+ * sounds below stay (some are legacy: matchmaking, trophies, leagues).
  */
 
-/** D4: the note the yo scale starts from. */
-const ROOT = 62;
-/** G3: the home chord of the fanfares. */
-const HOME = 55;
-/** A major chord spread wide, from its root. */
-const WIDE = [0, 7, 12, 16, 19];
-
-/** Step i of the yo scale as a MIDI note (5 steps to the octave; step 0 is D4). */
-const yo = (i: number) => ROOT + 12 * Math.floor(i / 5) + YO_SCALE[((i % 5) + 5) % 5];
-const chord = (root: number) => WIDE.map((x) => root + x);
-const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
-
-// ------------------------------------------------------------------ hit building blocks
-/** The crisp transient: a few milliseconds of bright noise. */
-function click(s: Synth, t: number, f: number, v: number) {
-  s.noise({ t, filter: 'highpass', f, a: 0.0002, d: 0.007, v: v * 0.8 });
-  s.noise({ t, filter: 'bandpass', f: f * 0.55, q: 1.2, a: 0.0002, d: 0.012, v });
-}
-/** The body: a sine that drops fast, driven, felt more than heard. */
-function thump(s: Synth, t: number, f: number, d: number, v: number) {
-  s.tone({ t, f: [[0, f * 2.2], [0.03, f], [d, f * 0.45]], a: 0.0006, d, v, to: s.drive(2.2) });
-}
-
-/** A value, or [time, value] points joined by exponential ramps (as in the synth). */
-type Pts = number | [number, number][];
-
-// ------------------------------------------------------------------ wiring by hand
-// A few sounds (the spinning top, the raspberry) need one thing to bend another, which the synth's ready-made
-// voices cannot do. These helpers build such voices straight from Web Audio nodes.
-
-function along(p: AudioParam, t: number, v: Pts) {
-  if (typeof v === 'number') {
-    p.setValueAtTime(v, t);
-    return;
-  }
-  p.setValueAtTime(v[0][1], t + v[0][0]);
-  for (let i = 1; i < v.length; i++) p.exponentialRampToValueAtTime(Math.max(1e-4, v[i][1]), t + v[i][0]);
-}
-
-/** A running oscillator whose pitch travels along points. */
-function osc(s: Synth, type: OscillatorType, f: Pts, t: number, stop: number) {
-  const o = s.ac.createOscillator();
-  o.type = type;
-  along(o.frequency, t, f);
-  o.start(t);
-  o.stop(stop);
-  return o;
-}
-
-/** A gain that swells, holds and dies like the synth's own voices. */
-function shape(s: Synth, t: number, a: number, h: number, d: number, v: number, to?: AudioNode) {
-  const g = s.ac.createGain();
-  g.gain.setValueAtTime(0, t);
-  g.gain.linearRampToValueAtTime(v, t + a);
-  g.gain.setValueAtTime(v, t + a + h);
-  g.gain.exponentialRampToValueAtTime(1e-4, t + a + h + d);
-  g.gain.setValueAtTime(0, t + a + h + d + 0.002);
-  g.connect(to ?? s.ac.destination);
-  return g;
-}
-
-/** A gate that another oscillator opens and shuts: whatever is routed into it flutters. */
-function chopper(s: Synth, by: AudioNode, to?: AudioNode) {
-  const g = s.ac.createGain();
-  g.gain.value = 0.5;
-  const depth = s.ac.createGain();
-  depth.gain.value = 0.5;
-  by.connect(depth);
-  depth.connect(g.gain);
-  g.connect(to ?? s.ac.destination);
-  return g;
-}
-
-function band(s: Synth, f: number, q: number) {
-  const b = s.ac.createBiquadFilter();
-  b.type = 'bandpass';
-  b.frequency.value = f;
-  b.Q.value = q;
-  return b;
-}
-
-// ------------------------------------------------------------------ the instruments
-
-/**
- * A plucked string (Karplus-Strong): a burst of noise going round a delay one period long, losing a little on
- * every turn, the highs fastest. So it starts bright and mellows as it rings, like a real string.
- * bright 0..1: how sharp the pluck is. pos: where along the string it is plucked (near the end = thin and nasal).
- */
-function pluck(s: Synth, o: { t?: number; f: number; d: number; v: number; bright?: number; pos?: number; to?: AudioNode }) {
-  const t = o.t ?? 0;
-  const bright = o.bright ?? 0.7;
-  const N = Math.max(2, Math.round(SAMPLE_RATE / o.f));
-  const len = Math.max(N + 2, Math.ceil(o.d * SAMPLE_RATE));
-  const buf = s.ac.createBuffer(1, len, SAMPLE_RATE);
-  const y = buf.getChannelData(0);
-  // the pluck itself: one turn of noise, softened for a duller string, hollowed by the plucking point
-  const hit = new Float32Array(N);
-  let lp = 0;
-  for (let i = 0; i < N; i++) {
-    lp += (0.3 + 0.7 * bright) * (s.rnd() * 2 - 1 - lp);
-    hit[i] = lp;
-  }
-  const gap = Math.max(1, Math.round(N * (o.pos ?? 0.15)));
-  let peak = 1e-6;
-  for (let i = 0; i < N; i++) {
-    y[i] = hit[i] - hit[(i + N - gap) % N];
-    peak = Math.max(peak, Math.abs(y[i]));
-  }
-  for (let i = 0; i < N; i++) y[i] /= peak;
-  // round and round the string
-  const dull = 0.5 - 0.4 * bright;
-  const keep = 10 ** (-3 / (o.f * o.d)); // 60 dB down after d seconds
-  y[N] = keep * y[0];
-  for (let i = N + 1; i < len; i++) y[i] = keep * ((1 - dull) * y[i - N] + dull * y[i - N - 1]);
-  const src = s.ac.createBufferSource();
-  src.buffer = buf;
-  src.playbackRate.value = (o.f * (N + dull)) / SAMPLE_RATE; // the loop is N + dull samples long: tune it exactly
-  const g = s.ac.createGain();
-  g.gain.value = o.v;
-  src.connect(g);
-  g.connect(o.to ?? s.ac.destination);
-  src.start(t);
-}
-
-/** A koto note: a bright silk string, the pick's tick, and the long wooden body humming under it. */
-function koto(s: Synth, t: number, note: number, d: number, v: number, bright = 0.7) {
-  const f = m(note);
-  pluck(s, { t, f, d, v, bright, pos: 0.14 });
-  s.tone({ t, f, a: 0.002, d: d * 0.5, v: v * 0.2 });
-  s.noise({ t, filter: 'bandpass', f: Math.min(9000, f * 5), q: 1.2, a: 0.0004, d: 0.006, v: v * 0.3 });
-}
-
-/** A shamisen note: a buzzing string that dies fast, and the plectrum slapping the skin. */
-function shami(s: Synth, t: number, note: number, d: number, v: number) {
-  pluck(s, { t, f: m(note), d, v: v * 0.8, bright: 0.95, pos: 0.07, to: s.drive(3) });
-  s.noise({ t, filter: 'bandpass', f: 420, q: 1.5, a: 0.0005, d: 0.03, v: v * 0.6 });
-  s.tone({ t, f: [[0, 230], [0.04, 140]], a: 0.0008, d: 0.05, v: v * 0.5 });
-  s.noise({ t, filter: 'highpass', f: 3500, a: 0.0003, d: 0.006, v: v * 0.35 });
-}
-
-/** Koto notes running up the yo scale from step `from`, a little louder each. */
-function run(s: Synth, t: number, from: number, count: number, step: number, v: number, d = 0.4) {
-  for (let i = 0; i < count; i++) koto(s, t + i * step, yo(from + i), d, v * (0.7 + (0.3 * i) / Math.max(1, count - 1)));
-}
-
-/** A wooden clack: a woodblock when high and dry, a bamboo tube when lower, longer and hollow. */
-function wood(s: Synth, t: number, f: number, v: number, d = 0.05, hollow = 0) {
-  s.tone({ t, f: [[0, f * 1.06], [d, f]], a: 0.0005, d, v });
-  s.tone({ t, f: f * 2.71, a: 0.0005, d: d * 0.4, v: v * 0.3 });
-  s.noise({ t, filter: 'bandpass', f: f * 1.6, q: 3, a: 0.0003, d: 0.012, v: v * 0.7 });
-  if (hollow) s.noise({ t, filter: 'bandpass', f: f * 0.5, q: 6, a: 0.001, d: d * 1.5, v: v * hollow });
-}
-
-/** The kabuki clappers (hyoshigi): two hard sticks, a hair apart. */
-function clack(s: Synth, t: number, v: number) {
-  wood(s, t, 1480, v, 0.03);
-  wood(s, t + 0.005, 2050, v * 0.7, 0.022);
-}
-
-/** A taiko: the stick slaps the skin, the barrel booms and sags. */
-function taiko(s: Synth, t: number, f: number, d: number, v: number) {
-  drum(s, t, f, d, v, 2.5);
-  s.noise({ t, color: 'pink', filter: 'lowpass', f: [[0, 1500], [d * 0.5, 180]], q: 0.6, a: 0.001, d: d * 0.6, v: v * 0.5 });
-  s.tone({ t, f: [[0, f * 1.55], [d * 0.6, f * 1.46]], a: 0.002, d: d * 0.6, v: v * 0.22 });
-}
-
-/** The little high drum (shime-daiko): tight and dry. */
-function shime(s: Synth, t: number, v: number) {
-  drum(s, t, 290, 0.07, v, 2);
-  s.noise({ t, filter: 'bandpass', f: 1900, q: 1.5, a: 0.0005, d: 0.03, v: v * 0.5 });
-}
-
-/**
- * A gong: the soft mallet's thump, a cluster of partials that do not quite agree and beat against each other,
- * and the wash of highs that blooms a moment after the strike.
- */
-function gong(s: Synth, t: number, f: number, d: number, v: number) {
-  s.tone({ t, f: [[0, f * 1.15], [0.25, f * 0.5]], a: 0.004, d: 0.3, v: v * 0.6 });
-  for (const [r, lvl] of [
-    [1, 1],
-    [1.48, 0.5],
-    [2.02, 0.6],
-    [2.53, 0.4],
-    [3.04, 0.34],
-    [4.11, 0.24],
-    [5.37, 0.16],
-    [6.62, 0.1],
-  ]) {
-    const ring = d / (0.55 + r * 0.45);
-    for (const side of [-1, 1]) s.tone({ t, f: f * r + side * s.rand(0.3, 1.4), a: 0.004 + r * 0.012, d: ring, v: (v * lvl) / 2 });
-  }
-  s.bell({ t, f: f * 2.76, ratio: 1.41, index: 3, a: 0.1, d: d * 0.6, v: v * 0.28 });
-  s.bell({ t, f: f * 5.13, ratio: 1.67, index: 2.4, a: 0.18, d: d * 0.45, v: v * 0.15 });
-  s.noise({ t, filter: 'bandpass', f: [[0, 2000], [0.3, 4400], [d, 2600]], q: 0.8, a: 0.25, d: d * 0.5, v: v * 0.13 });
-}
-
-/** A furin, the little glass wind bell: one clear note, glassy overtones, a slow shimmer between two close pitches. */
-function furin(s: Synth, t: number, f: number, d: number, v: number) {
-  s.tone({ t, f, a: 0.001, d, v: v * 0.6 });
-  s.tone({ t, f: f * 1.002 + 1.2, a: 0.001, d: d * 0.9, v: v * 0.35 });
-  s.tone({ t, f: Math.min(15000, f * 2.76), a: 0.001, d: d * 0.45, v: v * 0.28 });
-  s.tone({ t, f: Math.min(17000, f * 5.4), a: 0.0005, d: d * 0.2, v: v * 0.12 });
-  s.noise({ t, filter: 'highpass', f: 6000, a: 0.0003, d: 0.006, v: v * 0.22 });
-}
-
-/** Wind bells falling like rain: `count` of them over `span` seconds, thick at first. */
-function shower(s: Synth, t: number, span: number, count: number, v: number) {
-  for (let i = 0; i < count; i++) furin(s, t + span * s.rnd() ** 1.4, m(yo(10 + Math.floor(s.rand(0, 10)))), s.rand(0.35, 0.7), v * s.rand(0.5, 1));
-}
-
-/** A rubber toy's squeak: a reedy note that jumps up and sags, through a nasal filter. */
-function squeak(s: Synth, t: number, f: number, d: number, v: number) {
-  s.tone({ t, type: 'sawtooth', f: [[0, f * 0.6], [d * 0.25, f], [d, f * 0.72]], lp: f * 3.2, q: 6, hp: f * 0.8, a: d * 0.12, d: d * 0.88, v, vib: [38, 35] });
-  s.tone({ t, f: [[0, f * 1.2], [d * 0.25, f * 2], [d, f * 1.44]], a: d * 0.12, d: d * 0.7, v: v * 0.35 });
-}
-
-/** A spring's boing: a note that wobbles wide and fast as it climbs (a ruler twanged on a desk). */
-function boing(s: Synth, t: number, f: number, d: number, v: number, rate = 24, depth = 450) {
-  s.tone({ t, type: 'triangle', f: [[0, f], [d, f * 1.5]], lp: f * 6, a: 0.003, d, v, vib: [rate, depth] });
-}
-
-/** Something soft landing: a dull thump with no click. */
-function thud(s: Synth, t: number, f: number, v: number) {
-  s.tone({ t, f: [[0, f], [0.08, f * 0.45]], a: 0.002, d: 0.1, v });
-  s.noise({ t, color: 'pink', filter: 'lowpass', f: [[0, 800], [0.07, 220]], a: 0.002, d: 0.07, v: v * 0.6 });
-}
-
-/** A water drop: a tiny note that leaps up. */
-function drip(s: Synth, t: number, f: number, v: number) {
-  s.tone({ t, f: [[0, f], [0.028, f * 2.6]], a: 0.002, d: 0.035, v });
-}
-
-/** A metal cup clinking (trophies): a hard bright bell on a yo note. */
-function clink(s: Synth, t: number, note: number, v: number, d = 0.3) {
-  const f = m(note);
-  s.bell({ t, f, ratio: 2.4, index: 1.3, d, v });
-  s.bell({ t, f: f * 2.01, ratio: 2, index: 0.6, d: d * 0.6, v: v * 0.35 });
-  s.noise({ t, filter: 'highpass', f: 5000, a: 0.0003, d: 0.006, v: v * 0.4 });
-}
-
-/** Something hard breaking into bits: a snap, then shards ringing and skittering away. */
-function shards(s: Synth, t: number, span: number, v: number, count = 10) {
-  s.noise({ t, filter: 'highpass', f: [[0, 6500], [span * 0.8, 3200]], q: 0.6, a: 0.001, d: span * 0.8, v: v * 0.7 });
-  s.noise({ t, filter: 'bandpass', f: [[0, 2600], [0.25, 1100]], q: 1, a: 0.0005, d: 0.22, v: v * 0.5 });
-  for (let i = 0; i < count; i++) s.bell({ t: t + s.rand(0, span * 0.8), f: s.rand(2500, 7000), ratio: s.rand(1.3, 2.9), index: 1, d: s.rand(0.07, 0.28), v: v * s.rand(0.06, 0.16) });
-  s.crackle({ t: t + 0.02, density: 170, filter: 'highpass', f: 3500, a: 0.004, d: span, v: v * 0.45 });
-}
-
-/** One chord of a fanfare: a drum, brass opening up, a cymbal. */
-function stab(s: Synth, t: number, root: number, hold: number, v: number) {
-  taiko(s, t, 58, 0.5, v);
-  s.brass({ t, notes: chord(root), cut: [[0, 450], [0.08, 2800], [hold + 0.35, 700]], a: 0.022, h: hold, d: 0.3, v: v * 0.45 });
-  crash(s, t, 0.6, v * 0.2);
-}
-
-/**
- * The big finish that rare things share, on the home chord. rank 0 (A class): brass, a deep drum, a cymbal, a
- * run up the koto. rank 1 (S): a choir joins. rank 2 (SSS): a gong, high voices and a long rain of glass bells.
- */
-function glory(s: Synth, t: number, rank: number, hold: number) {
-  taiko(s, t, 46, 0.9 + rank * 0.2, 1);
-  s.tone({ t, f: [[0, 72], [1.2, 30]], a: 0.004, d: 0.9 + rank * 0.4, v: 0.55 });
-  s.brass({ t, notes: chord(HOME - 12), cut: [[0, 450], [0.1, 3200 + rank * 300], [hold + 1, 850]], a: 0.03, h: hold, d: 1.2, v: 0.45 });
-  crash(s, t, 1.4 + rank * 0.3, 0.42);
-  run(s, t + 0.05, 2, 8 + rank * 2, 0.048, 0.32);
-  sparkle(s, t + 0.25, 1.2 + rank * 0.4, 0.5, 10 + rank * 3);
-  if (rank >= 1) s.choir({ t: t + 0.03, notes: [HOME, HOME + 4, HOME + 7, HOME + 12], a: 0.22, h: hold + 0.3, d: 1.3, v: 0.34 });
-  if (rank >= 2) {
-    gong(s, t, m(HOME - 12), 3.2, 0.7);
-    s.choir({ t: t + 0.35, notes: [HOME + 16, HOME + 19, HOME + 24], a: 0.4, h: hold, d: 1.4, v: 0.16 });
-    shower(s, t + 0.4, 2.2, 26, 0.17);
-    furin(s, t + hold + 1.1, m(yo(15)), 1.2, 0.3);
-  } else shower(s, t + 0.3, 1 + rank * 0.5, 7 + rank * 5, 0.15);
-}
+import { YO_SCALE, crash, m, pad, semi, sparkle, whoosh, type Synth } from './synth';
+import { HOME, along, band, boing, chopper, clack, clamp, click, clink, drip, furin, glory, gong, koto, osc, run, shami, shape, shards, shime, shower, squeak, stab, taiko, thud, thump, wood, yo } from './kit';
+import { CAST_SOUNDS, TRAIT_SOUNDS } from './cast';
+import { FLOW_SOUNDS } from './flow';
 
 // ------------------------------------------------------------------ the sounds that grow with their number
 
@@ -643,7 +376,7 @@ export const SOUNDS: Record<SoundName, SoundDef> = {
   },
   collect: {
     // the prize flies off (fwip) and lands on the bench with a pluck
-    dur: 0.55, vars: 2, vol: 0.3, cat: 'ui', verb: 0.3, gap: 0.05, max: 3, jitter: 30,
+    dur: 0.62, vars: 2, vol: 0.3, cat: 'ui', verb: 0.3, gap: 0.05, max: 3, jitter: 30,
     make: (s) => {
       whoosh(s, 0, 600, 3000, 5200, 0.2, 0.5, 2.2);
       s.tone({ f: [[0, 500], [0.2, 2400]], a: 0.05, d: 0.16, v: 0.12 });
@@ -1198,4 +931,9 @@ export const SOUNDS: Record<SoundName, SoundDef> = {
     vol: 0.62, cat: 'ui', verb: 0.5, gap: 1, duck: 0.55,
     make: leagueUp,
   },
+
+  // ================ v4
+  ...CAST_SOUNDS, // the twelve characters' attack, hurt and death voices (cast.ts)
+  ...TRAIT_SOUNDS, // the traits (cast.ts)
+  ...FLOW_SOUNDS, // stages and waves, cash, cells, the roll, the evolve (flow.ts)
 };

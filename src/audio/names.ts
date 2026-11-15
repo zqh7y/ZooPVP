@@ -1,3 +1,4 @@
+import type { PetType } from '../types';
 import type { Synth } from './synth';
 
 /*
@@ -66,16 +67,75 @@ export type SoundName =
   | 'defeat' // the defeat sting (sad but funny, not harsh)
   | 'trophyUp' // trophies fly in. n = how many (the more, the richer)
   | 'trophyDown' // trophies lost
-  | 'leagueUp'; // promoted to a new league. n = the league index
+  | 'leagueUp' // promoted to a new league. n = the league index
+  // ================ v4: stages and waves (the names above stay working; trophies, leagues and matchmaking are legacy)
+  // ---------------- the cast: every character's own attack, hurt and death voice (see petVoice below)
+  | PetVoiceName
+  // ---------------- the traits
+  | 'poison' // a poison tick on a stung foe (Buzzy). Heard often: tiny
+  | 'dodge' // a hit whiffs past (Ninja)
+  | 'shellClose' // Snailor hides in its shell
+  | 'shellOpen' // ...and pops back out
+  | 'thorns' // a hit on Briar pricks the attacker back
+  | 'hookPull' // Angler's hook reels a foe in
+  | 'bellySlide' // Sumo belly-slides through the line
+  | 'chargeImpact' // Rhino's charged strike lands
+  | 'leapLaunch' // Pogo springs off for the back line
+  | 'leapLand' // ...and lands (the stun follows)
+  | 'doubleJab' // Cacto's two jabs
+  | 'armourClank' // armour soaks a hit (Boulder; also any plated unit)
+  | 'bossStomp' // the boss (or Boulder) stomps: up to 4 foes around it are hit
+  // ---------------- the stage flow
+  | 'waveStart' // START WAVE: the referee's whistle and an air horn. Short and punchy
+  | 'waveClear' // a wave is won: the final whistle and a bright jingle
+  | 'stageClear' // wave 10 is won: the big joyful fanfare with the crowd
+  | 'star' // one stage-clear star lands. n = which star, 1..3 (each one higher)
+  | 'gems' // gems are paid out
+  | 'bossArrives' // the boss walks onto the pitch: a heavy sting
+  | 'waveLost' // a wave is lost: the crowd's soft "aww" (never harsh)
+  | 'cashKill' // the small cash payout of one knock-out (a single coin; heard many times in a row)
+  | 'cashWave' // the wave's cash payout: a pour of coins
+  | 'cellUnlock' // a locked grid cell opens
+  | 'sell' // TRASH: a piece is sold for a little cash
+  // ---------------- the roll (plain: the prize spins in the middle of the screen)
+  | 'spinTick' // a prize flicks past. n = the spin's progress 0..1 (it climbs a scale as the spin slows)
+  | 'spinLand' // the spin stops on the prize: a soft landing thump
+  | 'unitReveal' // the prize pops: a unit. n = its rung 1..12 (bigger every rung, and the unit says hello)
+  | 'itemReveal' // the prize pops: a weapon or gear. n = its class 1..7 (E..SSS)
+  | 'evolve'; // x4 + x4 -> the next unit x1. n = the NEW unit's rung 2..12. The most satisfying sound in the game
+
+/** The three things every character says. */
+export type VoiceKind = 'attack' | 'hurt' | 'death';
+/** One sound per character and voice: sproutAttack, sproutHurt, sproutDeath, buzzyAttack ... boulderDeath. */
+export type PetVoiceName = `${PetType}${'Attack' | 'Hurt' | 'Death'}`;
+
+const KIND: Record<VoiceKind, 'Attack' | 'Hurt' | 'Death'> = { attack: 'Attack', hurt: 'Hurt', death: 'Death' };
+
+/** The sound of a character's voice: sfx.play(petVoice('sprout', 'attack'), 0, { x, enemy }). */
+export function petVoice(pet: PetType, kind: VoiceKind): SoundName {
+  return `${pet}${KIND[kind]}`;
+}
 
 export type MusicState =
   | 'off'
-  | 'lobby' // calm and catchy: you could arrange your grid to it for an hour
-  | 'search' // looking for an opponent: suspended, expectant
-  | 'battle' // the fight
-  | 'overtime' // the fight after it turns to overtime: faster, more urgent
-  | 'victory' // after the victory fanfare
-  | 'defeat'; // the music fades out
+  | 'prep' // between waves (most of the time): calm, cheerful, low-key. Never tires the ear
+  | 'wave' // a wave is being fought: driving (music.energy adds layers)
+  | 'boss' // the boss wave: bigger and tenser
+  | 'stageClear' // after the stage-clear fanfare: a bright victory loop
+  | 'defeat' // a lost wave: a soft, slow, sparse loop until the retry
+  | LegacyMusicState;
+
+/** The v3 state names. They keep working: each one plays its v4 state (see MUSIC_ALIAS). */
+export type LegacyMusicState = 'lobby' | 'search' | 'battle' | 'overtime' | 'victory';
+
+/** What each v3 state name plays now. */
+export const MUSIC_ALIAS: Record<LegacyMusicState, Exclude<MusicState, LegacyMusicState>> = {
+  lobby: 'prep',
+  search: 'prep',
+  battle: 'wave',
+  overtime: 'boss',
+  victory: 'stageClear',
+};
 
 /** One sound effect's recipe and how it sits in the mix. */
 export interface SoundDef {

@@ -1,35 +1,35 @@
 import { sfx } from './audio/engine';
 import { Arena } from './draw/arena';
 import { Inventory } from './logic/inventory';
-import { load, save } from './logic/save';
-import type { App, Match, Screen, ScreenName } from './screen';
-import { createBattleScreen } from './screens/battle';
+import { load, replacedOldSave, save, SAVE_KEY } from './logic/save';
+import type { App, Screen } from './screen';
 import { createLobby } from './screens/lobby';
-import { createMatch } from './screens/match';
-import { createResult } from './screens/result';
-import { createRoll } from './screens/roll';
 import { COLOR, H, W } from './theme';
-import { easeInOutCubic, type Ctx } from './util';
 
 const MAX_DT = 0.05;
-const WIPE_OUT = 0.16; // the old screen fades to the page colour
-const WIPE_IN = 0.2; // and the new one fades in
 
-/** The one game: canvas, save, screens, the frame loop and the shared screen transition. */
+/** true when the stored save was of an older version (the main screen shows FRESH_START_TOAST once). */
+function hadOldSave(): boolean {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    return !!raw && replacedOldSave(JSON.parse(raw));
+  } catch {
+    return false;
+  }
+}
+
+/** The one game: canvas, save, the main screen and the frame loop. */
 export function createApp(canvas: HTMLCanvasElement): App {
   const ctx = canvas.getContext('2d')!;
-  // the page around the canvas takes the game's warm cream, so a wide window never frames it in a dark band
+  // the page around the canvas takes the game's soft greige, so a wide window never frames it in a dark band
   document.body.style.background = COLOR.page;
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', COLOR.page);
+  const fresh = hadOldSave();
   const state = load();
   const inv = new Inventory(state);
   const arena = new Arena();
   let ratio = 1;
   let time = 0;
-  let current: Screen | null = null;
-  let name: ScreenName = 'lobby';
-  // transition: 'out' covers the old screen, then the switch, then 'in' uncovers the new one
-  let wipe: { phase: 'out' | 'in'; age: number; to: ScreenName } | null = null;
   let finger: number | null = null;
 
   const app: App = {
@@ -42,47 +42,12 @@ export function createApp(canvas: HTMLCanvasElement): App {
     get ratio() {
       return ratio;
     },
-    match: null as Match | null,
-    go(to) {
-      if (!current) {
-        show(to);
-        return;
-      }
-      if (wipe) {
-        if (wipe.phase === 'out') wipe.to = to;
-        else {
-          show(to);
-          wipe = { phase: 'in', age: 0, to };
-        }
-        return;
-      }
-      wipe = { phase: 'out', age: 0, to };
-      sfx.play('whoosh');
-    },
     save() {
       save(state);
     },
   };
 
-  const screens: Record<ScreenName, Screen> = {
-    lobby: createLobby(app),
-    roll: createRoll(app),
-    match: createMatch(app),
-    battle: createBattleScreen(app),
-    result: createResult(app),
-  };
-
-  function show(to: ScreenName) {
-    if (current) {
-      if (finger !== null) current.pointerCancel?.();
-      current.leave?.();
-    }
-    finger = null;
-    name = to;
-    current = screens[to];
-    current.resize?.(ratio);
-    current.enter?.();
-  }
+  const screen: Screen = createLobby(app, { freshStart: fresh });
 
   function resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -93,28 +58,28 @@ export function createApp(canvas: HTMLCanvasElement): App {
     canvas.width = Math.round(W * ratio);
     canvas.height = Math.round(H * ratio);
     arena.build(ratio);
-    for (const s of Object.values(screens)) s.resize?.(ratio);
+    screen.resize?.(ratio);
   }
   window.addEventListener('resize', resize);
   resize();
 
-  // pointers: one finger at a time, in logical px; none while the curtain moves
+  // pointers: one finger at a time, in logical px
   const local = (e: PointerEvent) => {
     const r = canvas.getBoundingClientRect();
     return { x: ((e.clientX - r.left) * W) / r.width, y: ((e.clientY - r.top) * H) / r.height };
   };
   canvas.addEventListener('pointerdown', (e) => {
     e.preventDefault();
-    if (finger !== null || wipe) return;
+    if (finger !== null) return;
     finger = e.pointerId;
     canvas.setPointerCapture(e.pointerId);
     const p = local(e);
-    current?.pointerDown?.(p.x, p.y);
+    screen.pointerDown?.(p.x, p.y);
   });
   canvas.addEventListener('pointermove', (e) => {
     if (e.pointerId !== finger) return;
     const p = local(e);
-    current?.pointerMove?.(p.x, p.y);
+    screen.pointerMove?.(p.x, p.y);
   });
   canvas.addEventListener('pointerup', (e) => {
     // phones only let sound start when a finger lifts
@@ -122,12 +87,12 @@ export function createApp(canvas: HTMLCanvasElement): App {
     if (e.pointerId !== finger) return;
     finger = null;
     const p = local(e);
-    current?.pointerUp?.(p.x, p.y);
+    screen.pointerUp?.(p.x, p.y);
   });
   canvas.addEventListener('pointercancel', (e) => {
     if (e.pointerId !== finger) return;
     finger = null;
-    current?.pointerCancel?.();
+    screen.pointerCancel?.();
   });
   canvas.addEventListener('touchend', () => sfx.unlock(), { passive: true });
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -138,42 +103,21 @@ export function createApp(canvas: HTMLCanvasElement): App {
     last = performance.now();
   });
 
-  /** The screen change: a short fade to the page colour and back. */
-  function drawWipe(c: Ctx) {
-    if (!wipe) return;
-    const k = wipe.phase === 'out' ? easeInOutCubic(Math.min(1, wipe.age / WIPE_OUT)) : 1 - easeInOutCubic(Math.min(1, wipe.age / WIPE_IN));
-    if (k <= 0) return;
-    c.save();
-    c.globalAlpha = k;
-    c.fillStyle = COLOR.page;
-    c.fillRect(0, 0, W, H);
-    c.restore();
-  }
-
   function frame(now: number) {
     const dt = document.hidden ? 0 : Math.min(MAX_DT, Math.max(0, (now - last) / 1000));
     last = now;
     time += dt;
-    if (wipe) {
-      wipe.age += dt;
-      if (wipe.phase === 'out' && wipe.age >= WIPE_OUT) {
-        show(wipe.to);
-        wipe = { phase: 'in', age: 0, to: wipe.to };
-      } else if (wipe.phase === 'in' && wipe.age >= WIPE_IN) wipe = null;
-    }
     arena.update(dt);
-    current?.update(dt);
+    screen.update(dt);
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     ctx.fillStyle = COLOR.page;
     ctx.fillRect(0, 0, W, H);
-    current?.render(ctx);
-    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-    drawWipe(ctx);
+    screen.render(ctx);
     requestAnimationFrame(frame);
   }
 
-  show(name);
+  screen.enter?.();
   requestAnimationFrame(frame);
-  if (import.meta.env.DEV) Object.assign(window as object, { app, sfx, screenName: () => name });
+  if (import.meta.env.DEV) Object.assign(window as object, { app, sfx, screen });
   return app;
 }

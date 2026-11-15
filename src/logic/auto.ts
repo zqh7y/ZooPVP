@@ -1,35 +1,86 @@
-import { BENCH_SLOTS, GEAR_TYPES, GRID, footprint, isGear, isPet, isWeapon, squadPower } from '../data';
-import type { GearType, Piece, SquadSpec, WeaponType } from '../types';
-import { aroundShape, betterWeapon, shapeCells, type Cell, type Inventory } from './inventory';
+import { BENCH_SLOTS, GEAR_TYPES, GRID, footprint, isGear, isPet, isWeapon, nextPet, rungOf, squadPower } from '../data';
+import type { GearType, PetType, Piece, SquadSpec, WeaponType } from '../types';
+import { aroundShape, betterWeapon, isOpen, markOwned, shapeCells, type Cell, type Inventory } from './inventory';
 
 /*
- * The AUTO button: a simple, repeatable layout that never loses a piece.
- * 1. Every pair that can fuse is fused (to a fixed point).
- * 2. Everything leaves the grid. Pets go back biggest first (then the highest class), each where it gets the
+ * The AUTO arrange: a simple, repeatable layout that never loses a piece and never leaves the army weaker.
+ * 1. Every pair that can stack or lift a class is fused (to a fixed point).
+ * 2. Everything leaves the grid. Units go back biggest first (then the highest rung), each where it gets the
  *    most power from its best free weapon and gear placed touching it (items already on the grid count too, so
- *    one item can serve several pets), as long as the pets still waiting keep room to fit.
- * 3. Items still unused go where they lift some pet the most. Pets that found no room go to the bench; items
- *    left over fill free cells first (keeping the bench free for new rolls), then the bench. If that still
+ *    one item can serve several units), as long as the units still waiting keep room to fit. Locked cells stay
+ *    empty.
+ * 3. Items still unused go where they lift some unit the most. Units that found no room go to the bench; items
+ *    left over fill free cells first (keeping the bench free for new cases), then the bench. If that still
  *    cannot hold everything, the layout is not changed at all.
+ * 4. Then evolves, one pair of x4 squads at a time, lowest rung first (then the lowest ids): each is kept only when
+ *    the re-stacked, re-packed army is at least as strong as before it (so surplus squads on the bench evolve, and
+ *    a full grid is not hollowed out).
+ * The result is kept only when POWER >= what AUTO found; else it tries stacks only, then no fusing at all.
  */
-export function autoArrange(inv: Inventory): void {
+
+/** An evolve AUTO did (show the NEW UNIT reveal when fresh). */
+export interface AutoEvolve {
+  from: PetType;
+  to: PetType;
+  fresh: boolean;
+}
+
+export function autoArrange(inv: Inventory): { evolves: AutoEvolve[] } {
+  const snap = () => ({ objs: [...inv.state.pieces], copy: inv.state.pieces.map((p) => ({ ...p })) });
   // the same objects come back on a failed try (the lobby may hold on to them)
-  const objs = [...inv.state.pieces];
-  const before = objs.map((p) => ({ ...p }));
-  const restore = () => {
+  const restoreTo = (s: ReturnType<typeof snap>) => {
     inv.state.pieces.length = 0;
-    objs.forEach((o, i) => {
+    s.objs.forEach((o, i) => {
       delete o.turned;
-      Object.assign(o, before[i]);
+      Object.assign(o, s.copy[i]);
       inv.state.pieces.push(o);
     });
   };
-  // AUTO never leaves the army weaker than it found it
+  const start = snap();
   const was = inv.power();
-  if (pack(inv, true) && inv.power() >= was) return;
-  restore();
-  if (pack(inv, false) && inv.power() >= was) return;
-  restore();
+  const evolves: AutoEvolve[] = [];
+  if (pack(inv, true) && inv.power() >= was) {
+    // evolves, one pair at a time, each kept only when the packed army did not get weaker
+    for (let tries = 0; tries < 24; tries++) {
+      const pair = evolvePair(inv);
+      if (!pair) break;
+      const before = snap();
+      const power = inv.power();
+      const owned = inv.state.owned;
+      const [a, b] = pair;
+      const from = a.type as PetType;
+      const to = nextPet(from)!;
+      a.type = to;
+      a.count = 1;
+      a.level = 1;
+      delete a.turned;
+      inv.remove(b);
+      const fresh = markOwned(inv.state, to);
+      if (pack(inv, true) && inv.power() >= power) {
+        inv.state.evolves += 1;
+        evolves.push({ from, to, fresh });
+      } else {
+        restoreTo(before);
+        inv.state.owned = owned;
+        break;
+      }
+    }
+    return { evolves };
+  }
+  restoreTo(start);
+  if (pack(inv, false) && inv.power() >= was) return { evolves };
+  restoreTo(start);
+  return { evolves };
+}
+
+/** The x4 pair AUTO would evolve next: the lowest rung, then the lowest ids. */
+function evolvePair(inv: Inventory): [Piece, Piece] | null {
+  const fours = inv.state.pieces.filter((p) => isPet(p.type) && p.count === 4 && nextPet(p.type as PetType)).sort((a, b) => rungOf(a.type as PetType) - rungOf(b.type as PetType) || a.id - b.id);
+  for (let i = 0; i < fours.length; i++) {
+    const mate = fours.slice(i + 1).find((q) => q.type === fours[i].type);
+    if (mate) return [fours[i], mate];
+  }
+  return null;
 }
 
 const KEY = (c: number, r: number) => r * GRID.cols + c;
@@ -41,7 +92,10 @@ function pack(inv: Inventory, fuse: boolean): boolean {
       again = false;
       const sorted = [...all].sort((a, b) => a.id - b.id);
       for (const a of sorted) {
-        const b = sorted.find((x) => inv.canFuse(a, x));
+        const b = sorted.find((x) => {
+          const k = inv.canFuse(a, x);
+          return k === 'stack' || k === 'class';
+        });
         if (!b) continue;
         if (inv.canFuse(a, b) === 'stack') {
           a.count *= 2;
@@ -60,8 +114,7 @@ function pack(inv: Inventory, fuse: boolean): boolean {
     p.slot = -1;
   }
   const occ: (Piece | null)[] = new Array(GRID.cols * GRID.rows).fill(null);
-  const inGrid = (c: number, r: number) => c >= 0 && c < GRID.cols && r >= 0 && r < GRID.rows;
-  const isFree = (c: number, r: number) => inGrid(c, r) && !occ[KEY(c, r)];
+  const isFree = (c: number, r: number) => isOpen(inv.state, c, r) && !occ[KEY(c, r)];
   const fits = (cells: readonly Cell[]) => cells.every((x) => isFree(x.col, x.row));
   const put = (p: Piece, c: number, r: number) => {
     p.col = c;
@@ -71,13 +124,14 @@ function pack(inv: Inventory, fuse: boolean): boolean {
     for (const x of shapeCells(f.w, f.h, c, r)) occ[KEY(x.col, x.row)] = p;
   };
 
-  const pets = order.filter((p) => isPet(p.type)).sort((a, b) => b.count - a.count || b.level - a.level || a.id - b.id);
+  const rung = (p: Piece) => rungOf(p.type as PetType);
+  const pets = order.filter((p) => isPet(p.type)).sort((a, b) => b.count - a.count || rung(b) - rung(a) || a.id - b.id);
   const weapons = order.filter((p) => isWeapon(p.type)).sort((a, b) => (betterWeapon(a, b) ? -1 : betterWeapon(b, a) ? 1 : a.id - b.id));
   const gears = order.filter((p) => isGear(p.type)).sort((a, b) => b.level - a.level || a.id - b.id);
   const used = new Set<Piece>();
   const shapesOf = (p: Piece) => (p.count === 2 ? [false, true] : [false]);
 
-  /** can these pets still all be put on the free cells (first fit, biggest first)? */
+  /** can these units still all be put on the free cells (first fit, biggest first)? */
   const roomFor = (rest: readonly Piece[], extra: ReadonlySet<number>) => {
     const taken = new Set(extra);
     const ok = (cells: readonly Cell[]) => cells.every((x) => isFree(x.col, x.row) && !taken.has(KEY(x.col, x.row)));
@@ -99,9 +153,9 @@ function pack(inv: Inventory, fuse: boolean): boolean {
     return true;
   };
 
-  /** the pet's squad with the best items touching it */
+  /** the unit's squad with the best items touching it */
   const specOf = (pet: Piece, w: Piece | null, g: Partial<Record<GearType, Piece>>): SquadSpec => ({
-    key: pet.id, pet: pet.type as 'ant' | 'frog', level: pet.level, count: pet.count,
+    key: pet.id, pet: pet.type as PetType, count: pet.count,
     weapon: w ? (w.type as WeaponType) : null, weaponLevel: w ? w.level : 0,
     helmet: g.helmet?.level ?? 0, sneakers: g.sneakers?.level ?? 0, chili: g.chili?.level ?? 0,
   });
@@ -113,7 +167,8 @@ function pack(inv: Inventory, fuse: boolean): boolean {
     for (const e of aroundShape(w, h, c, r)) {
       const n = occ[KEY(e.cell.col, e.cell.row)];
       if (!n) {
-        if (!freeCells.some((x) => x.col === e.cell.col && x.row === e.cell.row)) freeCells.push(e.cell);
+        // a locked cell is never a spot for an item
+        if (isFree(e.cell.col, e.cell.row) && !freeCells.some((x) => x.col === e.cell.col && x.row === e.cell.row)) freeCells.push(e.cell);
       } else if (isWeapon(n.type)) {
         if (betterWeapon(n, weapon)) weapon = n;
       } else if (isGear(n.type)) {

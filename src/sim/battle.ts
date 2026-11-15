@@ -9,25 +9,26 @@ import type { Battle, Blow, DeathCause, HitEvent, SimEvent, SimSummary, SimUnit 
  * are summed before they are applied, and every trait that could depend on the order units are looked at is
  * collected first and applied in one fixed order (see applyHits), so the order never favours a team.
  *
- * The twelve pets' traits (docs/pets.md, section 3; numbers in TRAIT):
- * - ant: +10% per other friendly ant within 100 px when it strikes (up to +30%)
- * - bee: a landed sting poisons for 80% of its damage over 3 s; it flies over its own side (no collisions there)
- * - mouse: 30% of hits aimed at it miss (a seeded hash per attacker, victim, step and hit number)
- * - snail: once per life below half health it hides for 2.5 s: 85% less damage, no push or stun, regrows 15%
- * - frog: +30 knock on every hit, and its hits interrupt the wind-up of lighter foes
- * - crab: every attack lands as two pinches of 55%
- * - grasshopper: at the whistle it leaps onto the enemy back line; the landing hits and stuns round it
- * - hedgehog: whoever hits it takes 30% of that damage back
- * - chameleon: reach 52; its hits pull light foes in instead of pushing them
- * - penguin: belly-slides at 3x speed toward a far target and slams the first foe it touches
- * - beetle: after walking 90 px its next strike is a charge: 2.5x damage, a big shove and a stun
- * - turtle: armour cuts 35% of everything; its attack is a stomp all round it, shared among up to 4 foes
+ * The twelve units' traits (docs/pets.md section 3, rung for rung; numbers in TRAIT):
+ * - sprout: +10% per other friendly Sprout within 100 px when it strikes (up to +30%)
+ * - buzzy: a landed sting poisons for 80% of its damage over 3 s; it flies over its own side (no collisions there)
+ * - ninja: 30% of hits aimed at it miss (a seeded hash per attacker, victim, step and hit number)
+ * - snailor: once per life below half health it hides for 2.5 s: 85% less damage, no push or stun, regrows 15%
+ * - roo: +30 knock on every punch, and its punches interrupt the wind-up of lighter foes
+ * - cacto: every attack lands as two jabs of 55%
+ * - pogo: at the whistle it leaps onto the enemy back line; the landing hits and stuns round it
+ * - briar: whoever hits it takes 30% of that damage back (thorns)
+ * - angler: reach 52; its hook pulls light foes in instead of pushing them
+ * - sumo: belly-slides at 3x speed toward a far target and slams the first foe it touches
+ * - rhino: after walking 90 px its next strike is a charge: 2.5x damage, a big shove and a stun
+ * - boulder: armour cuts 35% of everything; its attack is a stomp all round it, shared among up to 4 foes
+ * A boss (SquadSpec.boss) is a giant of its unit (unitStats); it fights by the same rules.
  */
 
 const DT = 1 / 60;
 /** how fast a shove dies away, per second */
 const KNOCK_DECAY = 5;
-/** a hop (frogs, grasshoppers after their leap): seconds in the air, then seconds resting */
+/** a hop (Roos, Pogos after their leap): seconds in the air, then seconds resting */
 const HOP_AIR = 0.36;
 const HOP_REST = 0.2;
 /** bat swing arc, half angle */
@@ -35,7 +36,7 @@ const ARC = 1.05;
 /** shield-bearers look this much closer to nearby foes */
 const TAUNT = 0.6;
 const TAUNT_RANGE = 150;
-/** a heavy hit (bat, slam, charge) or a frog slap interrupts the wind-up of a foe lighter than this x its mass */
+/** a heavy hit (bat, slam, charge) or a Roo punch interrupts the wind-up of a foe lighter than this x its mass */
 const HEAVY_MASS = 0.8;
 /** seconds a broken-off wind-up costs */
 const INTERRUPT = 0.2;
@@ -45,7 +46,7 @@ interface Pool {
   rate: number;
   /** seconds left */
   left: number;
-  /** the bee that stung */
+  /** the buzzy that stung */
   by: number;
 }
 
@@ -57,7 +58,7 @@ interface Brain {
   /** the shove velocity */
   kx: number;
   ky: number;
-  /** in a hop (frogs, grasshoppers) */
+  /** in a hop (Roos, Pogos) */
   air: boolean;
   hopT: number;
   rest: number;
@@ -85,19 +86,19 @@ interface Brain {
   stunIn: number;
   intIn: boolean;
   // ---- traits
-  /** bee poison it carries */
+  /** Buzzy poison it carries */
   poison: Pool[];
   /** poison damage since its last poison event, and when that event was */
   poisonAcc: number;
   poisonT: number;
-  /** snail: its one hide is used */
+  /** snailor: its one hide is used */
   shellUsed: boolean;
-  /** beetle: px walked since its last strike, and whether its horn is down */
+  /** rhino: px walked since its last strike, and whether its horn is down */
   run: number;
   charged: boolean;
-  /** penguin: seconds until its slide is ready */
+  /** sumo: seconds until its slide is ready */
   slideCd: number;
-  /** grasshopper: the opening leap's end points */
+  /** pogo: the opening leap's end points */
   lx0: number;
   ly0: number;
   lx1: number;
@@ -111,11 +112,11 @@ interface Hit {
   dir: number;
   /** a bat-sized hit for the view (a bat swing, a slam, a charge) */
   heavy: boolean;
-  /** it breaks off a lighter foe's wind-up (heavy hits and frog slaps) */
+  /** it breaks off a lighter foe's wind-up (heavy hits and Roo punches) */
   interrupt: boolean;
   stun: number;
   knock: number;
-  /** the knock pulls it toward the attacker, not divided by its mass (chameleon) */
+  /** the knock pulls it toward the attacker, not divided by its mass (the Angler's hook) */
   pull: boolean;
   weapon: WeaponType | null;
   pack: number;
@@ -125,7 +126,7 @@ interface Hit {
 }
 
 interface Spike {
-  /** the hedgehog */
+  /** the briar */
   from: number;
   /** its attacker */
   to: number;
@@ -140,32 +141,33 @@ interface Shove {
 
 /** within a kind: shield-bearers first, spears last */
 const rankOf = (w: WeaponType | null) => (w === 'shield' ? 0 : w === 'bat' ? 2 : w === 'spear' ? 3 : 1);
-/** The kick-off order, front to back: kinds stand in contiguous rows in this order, each in its band. */
+/** The kick-off order, front to back: kinds stand in contiguous rows in this order, each in its band (PETS[pet].row). */
 export const LINE_ORDER: readonly PetType[] = [
-  'turtle', 'beetle', 'penguin', 'hedgehog', 'frog', 'snail', // front band, front to back
-  'crab', 'mouse', 'ant', // middle band
-  'chameleon', 'grasshopper', 'bee', // back band
+  'boulder', 'rhino', 'sumo', 'briar', 'roo', 'snailor', // front band, front to back
+  'cacto', 'ninja', 'sprout', // middle band
+  'angler', 'pogo', 'buzzy', // back band
 ];
 const LINE_RANK: Record<string, number> = Object.fromEntries(LINE_ORDER.map((p, i) => [p, i]));
 const BANDS: readonly LineRow[] = ['front', 'middle', 'back'];
-/** these set off at the whistle whatever their band */
-const NO_WAIT: ReadonlySet<PetType> = new Set<PetType>(['grasshopper', 'penguin']);
+/** these set off at the whistle whatever their band (the Pogo leaps, the Sumo slides) */
+const NO_WAIT: ReadonlySet<PetType> = new Set<PetType>(['pogo', 'sumo']);
 /** px kept free along the side lines */
 const SIDE = 10;
 
 /**
- * Lines a team up in clean rows by kind, in LINE_ORDER: the front band (turtles, beetles, penguins, hedgehogs,
- * frogs, snails), then the middle (crabs, mice, ants), then the back (chameleons, grasshoppers, bees). Each kind
- * stands in rows of its own (shield squads first, spears last, then by squad); only when that would be deeper
- * than the half-pitch do the kinds of one band share rows. Rows are filled evenly and spaced evenly across the
- * width; nobody overlaps. The top team is the mirror image of the bottom one. The first band that has fighters
- * sets off at the whistle, the next FIGHT.wave seconds later, the next after that (or as soon as a foe comes
- * close); grasshoppers and penguins go at the whistle whatever their band.
+ * Lines a team up in clean rows by kind, in LINE_ORDER: the front band (Boulders, Rhinos, Sumos, Briars, Roos,
+ * Snailors), then the middle (Cactos, Ninjas, Sprouts), then the back (Anglers, Pogos, Buzzies). Each kind stands
+ * in rows of its own (a boss in a row of its own ahead of its kind, then shield squads first, spears last, then by
+ * squad); only when that would be deeper than the half-pitch do the kinds of one band share rows. Rows are filled
+ * evenly and spaced evenly across the width; nobody overlaps. The top team is the mirror image of the bottom one.
+ * The first band that has fighters sets off at the whistle, the next FIGHT.wave seconds later, the next after
+ * that (or as soon as a foe comes close); Pogos and Sumos go at the whistle whatever their band.
  */
 function lineUp(list: SimUnit[], team: Team, brains: Brain[]) {
   const usable = ARENA.w - SIDE * 2;
   const gap = FIGHT.lineGap;
-  const order = (a: SimUnit, b: SimUnit) => LINE_RANK[a.pet] - LINE_RANK[b.pet] || rankOf(a.weapon) - rankOf(b.weapon) || a.squad - b.squad || a.id - b.id;
+  const order = (a: SimUnit, b: SimUnit) =>
+    LINE_RANK[a.pet] - LINE_RANK[b.pet] || Number(b.boss) - Number(a.boss) || rankOf(a.weapon) - rankOf(b.weapon) || a.squad - b.squad || a.id - b.id;
   const build = (shared: boolean) => {
     const rows: SimUnit[][] = [];
     /** the band each row sets off with: 0 for the first band that has fighters, then 1, 2 */
@@ -179,7 +181,7 @@ function lineUp(list: SimUnit[], team: Team, brains: Brain[]) {
       if (shared) blocks.push(inBand);
       else for (const u of inBand) {
         const last = blocks[blocks.length - 1];
-        if (last && last[0].pet === u.pet) last.push(u);
+        if (last && last[0].pet === u.pet && last[0].boss === u.boss) last.push(u);
         else blocks.push([u]);
       }
       for (const block of blocks) {
@@ -250,7 +252,7 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
           x: 0, y: 0, vx: 0, vy: 0, r: st.radius, face: 1,
           aim: team === 0 ? -Math.PI / 2 : Math.PI / 2,
           hp: st.hp, maxHp: st.hp, alive: true,
-          phase: 'wait', phaseT: 0, phaseDur: 0, target: -1, rung: st.rung, hop: 0, poison: 0, charged: false,
+          phase: 'wait', phaseT: 0, phaseDur: 0, target: -1, rung: st.rung, boss: st.boss, hop: 0, poison: 0, charged: false,
           walked: 0, sinceHit: 99, hitDir: 0,
         });
         const rng = makeRng(hashSeed(seed, team, si, k));
@@ -269,7 +271,7 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
   }
   for (const team of [0, 1] as Team[]) lineUp(units.filter((u) => u.team === team), team, brains);
   const maxR = units.reduce((m, u) => Math.max(m, u.r), 0);
-  const snails = units.filter((u) => u.pet === 'snail');
+  const snails = units.filter((u) => u.pet === 'snailor');
 
   // the neighbour grid: a cell is at least as wide as the two biggest bodies, so touching pairs are in next cells
   const CELL = Math.max(32, maxR * 2 + 1);
@@ -306,6 +308,8 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
   let summary: SimSummary | null = null;
   let acc = 0;
   const kills: [number, number] = [0, 0];
+  /** bosses each team knocked out */
+  const bossKos: [number, number] = [0, 0];
   const alive: [number, number] = [size[0], size[1]];
   const hpShare: [number, number] = [1, 1];
   const living: [SimUnit[], SimUnit[]] = [[], []];
@@ -331,7 +335,12 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
     return o;
   };
 
-  const airborne = (u: SimUnit) => u.phase === 'air';
+  /** who is in the air (a Pogo's leap), as the step began: every unit sees the same answer whatever the think order */
+  const inAir = new Uint8Array(Math.max(1, units.length));
+  const snapAir = () => {
+    for (const u of units) inAir[u.id] = u.alive && u.phase === 'air' ? 1 : 0;
+  };
+  const airborne = (u: SimUnit) => inAir[u.id] === 1;
   const mulNow = () => (enraged ? 1 + FIGHT.enrageRamp * (time - FIGHT.enrageAt) : 1);
 
   const chooseTarget = (u: SimUnit) => {
@@ -357,14 +366,14 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
     u.target = best;
   };
 
-  /** Queues one hit of u on v, with u's own traits (frog slap, chameleon pull) added. */
+  /** Queues one hit of u on v, with u's own traits (Roo punch, angler pull) added. */
   const pushHit = (u: SimUnit, b: Brain, v: SimUnit, dmg: number, dir: number, o: Partial<Hit> = {}) => {
     let knock = o.knock ?? b.st.knock;
     let pull = false;
-    const slap = u.pet === 'frog';
-    if (slap) knock += TRAIT.frog.knock;
-    if (u.pet === 'chameleon' && brains[v.id].st.mass < b.st.mass * TRAIT.chameleon.pullMass) {
-      knock = TRAIT.chameleon.pull;
+    const slap = u.pet === 'roo';
+    if (slap) knock += TRAIT.roo.knock;
+    if (u.pet === 'angler' && brains[v.id].st.mass < b.st.mass * TRAIT.angler.pullMass) {
+      knock = TRAIT.angler.pull;
       pull = true;
     }
     const heavy = o.heavy ?? u.weapon === 'bat';
@@ -383,9 +392,9 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
     const ax = Math.cos(u.aim);
     const ay = Math.sin(u.aim);
     const slack = (f: SimUnit) => hyp(f.x - u.x, f.y - u.y) <= (u.r + f.r + st.reach) * 1.2 + 4;
-    const stomp = u.pet === 'turtle';
+    const stomp = u.pet === 'boulder';
     if (stomp || u.weapon === 'bat') {
-      // a bat swings an arc in front; a turtle's stomp lands all round it
+      // a bat swings an arc in front; a boulder's stomp lands all round it
       const found: [number, SimUnit][] = [];
       near(u.x, u.y, u.r + st.reach + maxR, (f) => {
         if (f.team === u.team || airborne(f)) return;
@@ -395,7 +404,7 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
         found.push([d, f]);
       });
       found.sort((a, c) => a[0] - c[0] || a[1].id - c[1].id);
-      const most = stomp ? Math.max(TRAIT.turtle.stompMax, st.splash) : st.splash;
+      const most = stomp ? Math.max(TRAIT.boulder.stompMax, st.splash) : st.splash;
       for (const [, f] of found.slice(0, most)) victims.push(f);
       if (stomp && tgOk && !victims.includes(tg!) && slack(tg!)) victims.push(tg!);
     } else if (u.weapon === 'spear') {
@@ -416,21 +425,21 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
     }
     events.push({ type: 'swing', unit: u.id, weapon: u.weapon, hit: victims.length > 0 });
     let mul = mulNow();
-    // ant teamwork: the other living ants of its team close by, from the step's start positions
+    // sprout teamwork: the other living Sprouts of its team close by, from the step's start positions
     let pack = 0;
-    if (u.pet === 'ant') {
-      const R = TRAIT.ant.range;
+    if (u.pet === 'sprout') {
+      const R = TRAIT.sprout.range;
       near(u.x, u.y, R + maxR, (f) => {
-        if (f !== u && f.team === u.team && f.pet === 'ant' && hyp(f.x - u.x, f.y - u.y) <= R) pack++;
+        if (f !== u && f.team === u.team && f.pet === 'sprout' && hyp(f.x - u.x, f.y - u.y) <= R) pack++;
       });
-      pack = Math.min(TRAIT.ant.max, pack);
-      mul *= 1 + TRAIT.ant.per * pack;
+      pack = Math.min(TRAIT.sprout.max, pack);
+      mul *= 1 + TRAIT.sprout.per * pack;
     }
     let o: Partial<Hit> = { pack };
-    if (u.pet === 'beetle') {
+    if (u.pet === 'rhino') {
       if (b.charged) {
-        mul *= TRAIT.beetle.mul;
-        o = { ...o, knock: st.knock + TRAIT.beetle.knock, stun: Math.max(st.stun, TRAIT.beetle.stun), heavy: true, blow: 'charge' };
+        mul *= TRAIT.rhino.mul;
+        o = { ...o, knock: st.knock + TRAIT.rhino.knock, stun: Math.max(st.stun, TRAIT.rhino.stun), heavy: true, blow: 'charge' };
         b.charged = false;
         u.charged = false;
       }
@@ -442,9 +451,9 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
     for (const v of victims) {
       const dir = u.weapon === 'spear' && !stomp ? u.aim : Math.atan2(v.y - u.y, v.x - u.x);
       const dmg = st.dmg * b.rng.range(0.9, 1.1) * mul * share;
-      if (u.pet === 'crab') {
-        pushHit(u, b, v, dmg * TRAIT.crab.share, dir, { ...o, pinch: 1 });
-        pushHit(u, b, v, dmg * TRAIT.crab.share, dir, { ...o, pinch: 2 });
+      if (u.pet === 'cacto') {
+        pushHit(u, b, v, dmg * TRAIT.cacto.share, dir, { ...o, pinch: 1 });
+        pushHit(u, b, v, dmg * TRAIT.cacto.share, dir, { ...o, pinch: 2 });
       } else pushHit(u, b, v, dmg, dir, o);
     }
     if (stomp) events.push({ type: 'stomp', unit: u.id, x: u.x, y: u.y, n: victims.length });
@@ -456,22 +465,22 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
     u.phaseDur = dur;
   };
   const endSlide = (u: SimUnit, b: Brain, then: SimUnit['phase'], dur: number) => {
-    b.slideCd = TRAIT.penguin.recharge;
+    b.slideCd = TRAIT.sumo.recharge;
     setPhase(u, then, dur);
-    events.push({ type: 'slide', unit: u.id, on: false });
+    events.push({ type: 'slide', unit: u.id, on: false, x: u.x, y: u.y });
   };
 
   /**
-   * The grasshoppers' opening leaps, at the whistle and before anyone thinks: each team's grasshoppers pick a
+   * The Pogos' opening leaps, at the whistle and before anyone thinks: each team's Pogos pick a
    * landing target in id order (the deepest foe on its own side, spread so teammates pick different ones, a
    * little toward its own side of the pitch), with the same procedure for both teams.
    */
   const kickOffLeaps = () => {
-    const T = TRAIT.grasshopper;
+    const T = TRAIT.pogo;
     for (const team of [0, 1] as Team[]) {
       const aimed = new Map<number, number>();
       for (const u of units) {
-        if (u.team !== team || !u.alive || u.pet !== 'grasshopper') continue;
+        if (u.team !== team || !u.alive || u.pet !== 'pogo') continue;
         let best: SimUnit | null = null;
         let bs = -Infinity;
         for (const f of living[1 - team]) {
@@ -510,7 +519,7 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
     b.cd -= DT;
     b.slideCd -= DT;
 
-    // grasshopper: the opening leap, a straight line at a constant speed (the end point was fixed at take-off)
+    // pogo: the opening leap, a straight line at a constant speed (the end point was fixed at take-off)
     if (u.phase === 'air') {
       if (u.phaseT <= u.phaseDur + 1e-9) {
         u.vx = (b.lx1 - b.lx0) / u.phaseDur;
@@ -519,7 +528,7 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
         return;
       }
       // landing: one hit on every foe close round it, with a stun
-      const T = TRAIT.grasshopper;
+      const T = TRAIT.pogo;
       u.vx = u.vy = 0;
       u.hop = 0;
       b.air = false;
@@ -535,14 +544,14 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
       });
       return;
     }
-    // snail: hiding in its shell, regrowing
+    // snailor: hiding in its shell, regrowing
     if (u.phase === 'shell') {
-      const T = TRAIT.snail;
+      const T = TRAIT.snailor;
       u.vx = u.vy = 0;
       u.hp = Math.min(u.maxHp, u.hp + (u.maxHp * T.regrow * DT) / T.time);
       if (u.phaseT >= u.phaseDur - 1e-9) {
         setPhase(u, 'move', 0);
-        events.push({ type: 'shell', unit: u.id, on: false });
+        events.push({ type: 'shell', unit: u.id, on: false, x: u.x, y: u.y });
       }
       return;
     }
@@ -565,16 +574,16 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
       if (u.phase === 'wait') setPhase(u, 'move', 0);
     }
 
-    // beetle: the horn goes down once it has walked far enough since its last strike
-    if (u.pet === 'beetle' && !b.charged && b.run >= TRAIT.beetle.run) {
+    // rhino: the horn goes down once it has walked far enough since its last strike
+    if (u.pet === 'rhino' && !b.charged && b.run >= TRAIT.rhino.run) {
       b.charged = true;
       u.charged = true;
-      events.push({ type: 'charge', unit: u.id });
+      events.push({ type: 'charge', unit: u.id, x: u.x, y: u.y });
     }
 
-    // penguin: the belly slide
+    // sumo: the belly slide
     if (u.phase === 'slide') {
-      const T = TRAIT.penguin;
+      const T = TRAIT.sumo;
       const tg = u.target >= 0 ? units[u.target] : null;
       if (!tg || !tg.alive || airborne(tg)) {
         endSlide(u, b, 'move', 0);
@@ -628,7 +637,7 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
     let dirX = 0;
     let dirY = 0;
     const hops = st.move === 'hop' || st.move === 'leap';
-    const speed = st.speed * (b.charged ? TRAIT.beetle.speed : 1);
+    const speed = st.speed * (b.charged ? TRAIT.rhino.speed : 1);
     if (u.phase === 'stun' || u.phase === 'recover' || u.phase === 'windup') {
       if (u.phaseT >= u.phaseDur) {
         if (u.phase === 'windup') {
@@ -652,10 +661,10 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
         const d = Math.sqrt(dx * dx + dy * dy);
         const range = u.r + tg.r + st.reach;
         if (Math.abs(dx) > 2) u.face = dx > 0 ? 1 : -1;
-        if (u.pet === 'penguin' && b.slideCd <= 0 && d > TRAIT.penguin.minDist) {
+        if (u.pet === 'sumo' && b.slideCd <= 0 && d > TRAIT.sumo.minDist) {
           // a far target and the slide is ready: it flops onto its belly
-          setPhase(u, 'slide', TRAIT.penguin.maxTime);
-          events.push({ type: 'slide', unit: u.id, on: true });
+          setPhase(u, 'slide', TRAIT.sumo.maxTime);
+          events.push({ type: 'slide', unit: u.id, on: true, x: u.x, y: u.y });
           u.aim = Math.atan2(dy, dx);
           return;
         }
@@ -740,7 +749,7 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
   const pair = (u: SimUnit, o: SimUnit) => {
     if (u.phase === 'air' || o.phase === 'air') return;
     // bees fly over their own side
-    if (u.team === o.team && (u.pet === 'bee' || o.pet === 'bee')) return;
+    if (u.team === o.team && (u.pet === 'buzzy' || o.pet === 'buzzy')) return;
     const dx = o.x - u.x;
     const dy = o.y - u.y;
     const rr = u.r + o.r;
@@ -751,8 +760,8 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
     const ny = d > 1e-6 ? dy / d : 0;
     const bu = brains[u.id];
     const bo = brains[o.id];
-    const mu = bu.st.mass * (u.phase === 'shell' ? TRAIT.snail.massMul : 1);
-    const mo = bo.st.mass * (o.phase === 'shell' ? TRAIT.snail.massMul : 1);
+    const mu = bu.st.mass * (u.phase === 'shell' ? TRAIT.snailor.massMul : 1);
+    const mo = bo.st.mass * (o.phase === 'shell' ? TRAIT.snailor.massMul : 1);
     const push = ((rr - d) * 0.4) / (mu + mo);
     bu.px -= nx * push * mo;
     bu.py -= ny * push * mo;
@@ -789,8 +798,8 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
       u.x += (u.vx + b.kx) * DT + b.px;
       u.y += (u.vy + b.ky) * DT + b.py;
       u.walked += walk;
-      // a beetle counts only the distance it walks, not shoves
-      if (u.pet === 'beetle') b.run += walk;
+      // a rhino counts only the distance it walks, not shoves
+      if (u.pet === 'rhino') b.run += walk;
       b.kx *= decay;
       b.ky *= decay;
       b.px = b.py = 0;
@@ -813,29 +822,32 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
     }
   };
 
-  /** the share of a blow that reaches it: turtle armour and a hiding snail's shell */
-  const cutOf = (v: SimUnit) => (v.pet === 'turtle' ? 1 - TRAIT.turtle.armour : 1) * (v.phase === 'shell' ? TRAIT.snail.take : 1);
+  /** the share of a blow that reaches it: boulder armour and a hiding snailor's shell */
+  const cutOf = (v: SimUnit) => (v.pet === 'boulder' ? 1 - TRAIT.boulder.armour : 1) * (v.phase === 'shell' ? TRAIT.snailor.take : 1);
 
   /**
-   * The end of a step, in one fixed order: the main hits (a mouse's dodge, then a shield's block and the cuts,
-   * then the damage, the shove, a bee's poison pool and a hedgehog's spikes to come), the strongest stun or an
-   * interrupt per unit, the penguin shove waves, the spikes, the poison ticks, the snail hide check, then deaths.
+   * The end of a step, in one fixed order: the main hits (a ninja's dodge, then a shield's block and the cuts,
+   * then the damage, the shove, a Buzzy's poison pool and a briar's thorns to come), the strongest stun or an
+   * interrupt per unit, the sumo shove waves, the thorns, the poison ticks, the snailor hide check, then deaths.
    */
   const applyHits = () => {
     const spikes: Spike[] = [];
     const touched: number[] = [];
-    /** hits so far from one attacker to one mouse this step (the dodge hash's hit number) */
+    // one fixed order whatever the think order: by attacker, then victim (a strike's own hits keep their order),
+    // so who scores a knock-out (the last hit on it) never depends on the order units were looked at
+    hits.sort((a, b) => a.from - b.from || a.to - b.to);
+    /** hits so far from one attacker to one ninja this step (the dodge hash's hit number) */
     let dodgeN: Map<number, number> | null = null;
     for (const h of hits) {
       const v = units[h.to];
       const a = units[h.from];
       const b = brains[h.to];
-      if (v.pet === 'mouse') {
+      if (v.pet === 'ninja') {
         dodgeN ??= new Map();
         const key = h.from * units.length + h.to;
         const k = dodgeN.get(key) ?? 0;
         dodgeN.set(key, k + 1);
-        if (hashSeed(seed, tickN, h.from, h.to, k) / 4294967296 < TRAIT.mouse.dodge) {
+        if (hashSeed(seed, tickN, h.from, h.to, k) / 4294967296 < TRAIT.ninja.dodge) {
           events.push({ type: 'dodge', unit: v.id, from: h.from, x: v.x, y: v.y });
           continue;
         }
@@ -847,13 +859,13 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
         dmg *= 1 - b.st.block;
         blocked = true;
       }
-      // bee: the sting leaves a pool of poison (80% of what got past the shield), drained over 3 s
-      if (a.pet === 'bee' && dmg > 0) b.poison.push({ rate: (dmg * TRAIT.bee.poison) / TRAIT.bee.time, left: TRAIT.bee.time, by: a.id });
-      const armour = v.pet === 'turtle';
+      // buzzy: the sting leaves a pool of poison (80% of what got past the shield), drained over 3 s
+      if (a.pet === 'buzzy' && dmg > 0) b.poison.push({ rate: (dmg * TRAIT.buzzy.poison) / TRAIT.buzzy.time, left: TRAIT.buzzy.time, by: a.id });
+      const armour = v.pet === 'boulder';
       const shell = v.phase === 'shell';
       dmg *= cutOf(v);
       v.hp -= dmg;
-      if (v.pet === 'hedgehog' && dmg > 0) spikes.push({ from: v.id, to: a.id, dmg: dmg * TRAIT.hedgehog.thorns });
+      if (v.pet === 'briar' && dmg > 0) spikes.push({ from: v.id, to: a.id, dmg: dmg * TRAIT.briar.thorns });
       let dir = h.dir;
       let dist = 0;
       if (h.knock !== 0 && !shell) {
@@ -882,7 +894,7 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
       });
     }
     hits = [];
-    // the strongest stun of the step (a hiding snail cannot be stunned), else a broken-off wind-up
+    // the strongest stun of the step (a hiding snailor cannot be stunned), else a broken-off wind-up
     for (const id of touched) {
       const v = units[id];
       const b = brains[id];
@@ -893,12 +905,12 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
         b.air = false;
         v.hop = 0;
       } else if (b.intIn && v.phase === 'windup') {
-        setPhase(v, 'recover', TRAIT.frog.interrupt);
+        setPhase(v, 'recover', TRAIT.roo.interrupt);
       }
       b.stunIn = 0;
       b.intIn = false;
     }
-    // the penguin's shove wave: no damage, cannot be dodged, and a hiding snail does not budge
+    // the sumo's shove wave: no damage, cannot be dodged, and a hiding snailor does not budge
     for (const s of shoves) {
       const v = units[s.to];
       if (v.phase === 'shell') continue;
@@ -908,7 +920,7 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
       b.ky += Math.sin(s.dir) * dist * KNOCK_DECAY;
     }
     shoves = [];
-    // hedgehog spikes: a share of what it took goes back to its attacker (cut by the attacker's armour or shell)
+    // briar thorns: a share of what it took goes back to its attacker (cut by the attacker's armour or shell)
     for (const s of spikes) {
       const v = units[s.to];
       const b = brains[s.to];
@@ -928,11 +940,11 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
       }
       events.push({
         type: 'hit', from: s.from, to: s.to, weapon: null, dmg, x: v.x, y: v.y, dir,
-        heavy: false, blocked: false, stun: false, pack: 0, pinch: 0, spike: true, pull: false, armour: v.pet === 'turtle',
+        heavy: false, blocked: false, stun: false, pack: 0, pinch: 0, spike: true, pull: false, armour: v.pet === 'boulder',
         shell: v.phase === 'shell', blow: null, slap: false, interrupt: false,
       } satisfies HitEvent);
     }
-    // bee poison: every pool drains evenly; ticks are not hits (no push, flinch, dodge or spikes)
+    // buzzy poison: every pool drains evenly; ticks are not hits (no push, flinch, dodge or thorns)
     for (const u of units) {
       const b = brains[u.id];
       if (!u.alive || b.poison.length === 0) continue;
@@ -958,23 +970,23 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
         b.lastBlow = null;
       }
       b.poisonAcc += dmg;
-      if (time - b.poisonT >= TRAIT.bee.tickEvent - 1e-9) {
-        events.push({ type: 'poison', unit: u.id, by, dmg: b.poisonAcc });
+      if (time - b.poisonT >= TRAIT.buzzy.tickEvent - 1e-9) {
+        events.push({ type: 'poison', unit: u.id, by, dmg: b.poisonAcc, x: u.x, y: u.y });
         b.poisonAcc = 0;
         b.poisonT = time;
       }
     }
-    // snail: hides once per life, the first step that ends with it alive below half health
+    // snailor: hides once per life, the first step that ends with it alive below half health
     for (const v of snails) {
       const b = brains[v.id];
-      if (!v.alive || b.shellUsed || v.hp <= 0 || v.hp >= v.maxHp * TRAIT.snail.below) continue;
+      if (!v.alive || b.shellUsed || v.hp <= 0 || v.hp >= v.maxHp * TRAIT.snailor.below) continue;
       b.shellUsed = true;
-      setPhase(v, 'shell', TRAIT.snail.time);
+      setPhase(v, 'shell', TRAIT.snailor.time);
       v.vx = v.vy = 0;
       b.kx = b.ky = 0;
       b.air = false;
       v.hop = 0;
-      events.push({ type: 'shell', unit: v.id, on: true });
+      events.push({ type: 'shell', unit: v.id, on: true, x: v.x, y: v.y });
     }
     const dead: SimUnit[] = [];
     for (const u of units) if (u.alive && u.hp <= 0) dead.push(u);
@@ -986,6 +998,7 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
         kills[units[b.lastBy].team]++;
         brains[b.lastBy].cheer = FIGHT.cheer;
       }
+      if (u.boss) bossKos[1 - u.team]++;
     }
     for (const u of dead) {
       const b = brains[u.id];
@@ -1019,7 +1032,7 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
     events.push({ type: 'end', winner, byTime });
     summary = {
       winner, byTime, time: Math.max(0, time), kills: [kills[0], kills[1]], size: [size[0], size[1]],
-      hpLeft: [hpShare[0], hpShare[1]],
+      alive: [alive[0], alive[1]], hpLeft: [hpShare[0], hpShare[1]], bossKos: [bossKos[0], bossKos[1]],
     };
   };
 
@@ -1038,6 +1051,7 @@ export function createBattle(armies: [ArmySpec, ArmySpec], seed: number, opts: B
     }
     buildGrid();
     countCrowd();
+    snapAir();
     for (const id of thinkOrder()) if (units[id].alive) think(units[id]);
     collide();
     integrate();

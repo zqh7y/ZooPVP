@@ -10,8 +10,10 @@ import type { PetType, Team, WeaponType } from '../types';
 /** What a fighter is: this does not change while it lives. */
 export interface PetLook {
   pet: PetType;
-  /** class 1..7 (E..SSS): higher classes are fancier (markings, spikes, a crown, an aura); size is the caller's `r` */
+  /** unused by the art since v4 (a unit's rung comes from its type); kept so callers need not change. Size is the caller's `r`. */
   level: number;
+  /** a wave-10 boss: wears a crown and a meaner face (the caller draws it about 1.8x the size) */
+  boss?: boolean;
   /** 0 = yours (blue accents), 1 = the opponent's (red accents). Whose it is must read at a glance, even tiny. */
   team: Team;
   weapon: WeaponType | null;
@@ -29,7 +31,7 @@ export type PetMood = 'idle' | 'angry' | 'hurt' | 'dizzy' | 'cheer' | 'scared' |
 
 /** What the fighter is doing right now. Every field has a resting value, given by restPose(). */
 export interface PetPose {
-  /** seconds: drives breathing, blinking, antenna and ear wobble */
+  /** seconds: drives breathing, blinking, wings, leaves, scarf ends */
   t: number;
   /** 1 = looks right, -1 = looks left */
   face: 1 | -1;
@@ -37,9 +39,9 @@ export interface PetPose {
   walk: number;
   /** 0..1: how much it is walking (0 = standing) */
   moving: number;
-  /** 0..1: height of a hop (the frog's way of moving): the body lifts and stretches, the shadow stays down */
+  /** 0..1: height of a hop (how Roo and Pogo move): the body lifts and stretches, the shadow stays down */
   hop: number;
-  /** 0..1: drawing the weapon (or its jaws, or its tongue) back before a strike */
+  /** 0..1: drawing the weapon (or its fist, glove, head or stinger) back before a strike */
   wind: number;
   /** 1 at the moment the strike lands, fading to 0 as it recovers: the swing follows through */
   strike: number;

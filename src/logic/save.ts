@@ -1,5 +1,5 @@
-import { BENCH_SLOTS, GRID, MAX_COUNT, MAX_LEVEL, PET_TYPES, PIECE_TYPES, STARTER_KIT, TROPHY_ROAD, footprint, isPet, rungOf } from '../data';
-import { makeRng } from '../rng';
+import { BENCH_SLOTS, ECON, GRID, MAX_COUNT, MAX_LEVEL, PET_TYPES, PIECE_TYPES, START_OPEN, STARTER_KIT, WAVES, cellBit, footprint, isPet, rungOf } from '../data';
+import { hashSeed } from '../rng';
 import type { PetType, Piece, PieceType, SaveState } from '../types';
 
 export const SAVE_KEY = 'zoopvp-save';
@@ -17,50 +17,51 @@ function store(): Store | null {
 }
 
 /**
- * The save format. A save of another version is replaced by a fresh start (version 1 was the 8 x 8 grid, version 2
- * the ant and frog with classes; version 3 is the twelve-pet ladder).
+ * The save format. A save of any other version is replaced by a fresh start (version 1 was the 8 x 8 grid,
+ * version 2 the ant and frog with classes, version 3 the twelve-pet ladder with trophies; version 4 is the twelve
+ * units with stages and waves).
  */
-export const SAVE_VERSION = 3;
-/** The toast the lobby shows once when an older save was replaced (see replacedOldSave). */
-export const FRESH_START_TOAST = 'New pets have arrived! Your zoo starts fresh.';
+export const SAVE_VERSION = 4;
+/** The toast the main screen shows once when an older save was replaced (see replacedOldSave). */
+export const FRESH_START_TOAST = 'A new adventure! Your army starts fresh.';
 
-/** The bit of SaveState.seen for a pet (bit rung - 1). */
-const seenBit = (pet: PetType) => 1 << (rungOf(pet) - 1);
+const ownBit = (pet: PetType) => 1 << (rungOf(pet) - 1);
 const ALL_RUNGS = (1 << PET_TYPES.length) - 1;
+const ALL_CELLS = (1 << (GRID.cols * GRID.rows)) - 1;
 
-/** A fresh player: the starter kit on the bench, the scripted first rolls still to come. The seed only picks the name number. */
+/** A fresh player: stage 1 wave 1, the starter kit on the tray, cash for the guide's first cases. */
 export function newSave(seed = 48213): SaveState {
-  const n = makeRng(seed).int(10000, 99999);
   const pieces: Piece[] = STARTER_KIT.map((k, i) => ({ id: i + 1, type: k.type, level: isPet(k.type) ? 1 : k.level, count: 1, col: -1, row: -1, slot: i }));
-  const seen = pieces.reduce((m, p) => (isPet(p.type) ? m | seenBit(p.type) : m), seenBit('ant'));
+  const owned = pieces.reduce((m, p) => (isPet(p.type) ? m | ownBit(p.type) : m), ownBit('sprout'));
   return {
     version: SAVE_VERSION,
-    name: `Player${n}`,
-    trophies: 0,
-    bestTrophies: 0,
-    rolls: 3,
-    rollMeter: 0,
+    cash: ECON.startCash,
+    gems: ECON.startGems,
+    stage: 1,
+    wave: 1,
+    tries: 0,
+    stars: [],
+    cases: 0,
+    elites: 0,
     pity: 0,
     rolled: 0,
+    open: START_OPEN,
+    cellBuys: 0,
+    kos: 0,
+    owned,
+    evolves: 0,
+    auto: false,
+    tutorial: 0,
+    tips: 0,
+    fights: 0,
+    wins: 0,
+    seed: hashSeed(seed, 0x2004) || 1,
     pieces,
     nextId: pieces.length + 1,
-    matches: 0,
-    wins: 0,
-    streak: 0,
-    tutorial: 0,
-    claimed: 0,
-    seed: 1,
-    gifts: [],
-    seen,
-    tips: 0,
-    evolves: 0,
   };
 }
 
-/**
- * true when this stored save is one of an older version (so load() starts fresh): the lobby shows
- * FRESH_START_TOAST once.
- */
+/** true when this stored save is one of an older version (so load() starts fresh): show FRESH_START_TOAST once. */
 export function replacedOldSave(raw: unknown): boolean {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
   const v = (raw as Record<string, unknown>).version;
@@ -72,16 +73,17 @@ const num = (v: unknown, def: number, min = -Infinity, max = Infinity): number =
 const whole = (v: unknown, def: number, min?: number, max?: number) => Math.floor(num(v, def, min, max));
 
 /**
- * Turns anything into a valid SaveState: a save of another version (or no save) becomes a fresh start; a
- * damaged one keeps what it can (a piece that no longer fits its cells goes to the bench, and is dropped only
- * when there is no room anywhere).
+ * Turns anything into a valid SaveState: a save of another version (or no save) becomes a fresh start; a damaged
+ * one keeps what it can (a piece that no longer fits its open cells goes to the tray, and is dropped only when
+ * there is no room anywhere).
  */
 export function repair(raw: unknown): SaveState {
   const base = newSave();
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return base;
   const r = raw as Record<string, unknown>;
   if (r.version !== SAVE_VERSION) return base;
-  const trophies = whole(r.trophies, 0, 0);
+  // the middle 3 x 3 is always open
+  const open = (whole(r.open, START_OPEN, 0) & ALL_CELLS) | START_OPEN;
   const pieces: Piece[] = [];
   const usedIds = new Set<number>();
   const cells = new Set<string>();
@@ -93,7 +95,7 @@ export function repair(raw: unknown): SaveState {
     const o = q as Record<string, unknown>;
     if (typeof o.type !== 'string' || !PIECE_TYPES.includes(o.type as PieceType)) continue;
     const type = o.type as PieceType;
-    // a pet has no class: its level is always 1
+    // a unit has no class: its level is always 1
     const level = isPet(type) ? 1 : whole(o.level, 1, 1, MAX_LEVEL);
     let count = whole(o.count, 1, 1, MAX_COUNT);
     count = isPet(type) ? 2 ** Math.floor(Math.log2(count)) : 1;
@@ -106,16 +108,17 @@ export function repair(raw: unknown): SaveState {
     const col = o.col, row = o.row, slot = o.slot;
     const f = footprint(p);
     const covers = (c: number, rr: number) => {
-      const out: string[] = [];
-      for (let y = 0; y < f.h; y++) for (let x = 0; x < f.w; x++) out.push(`${c + x},${rr + y}`);
+      const out: [number, number][] = [];
+      for (let y = 0; y < f.h; y++) for (let x = 0; x < f.w; x++) out.push([c + x, rr + y]);
       return out;
     };
-    const fitsAt = (c: number, rr: number) => c >= 0 && rr >= 0 && c + f.w <= GRID.cols && rr + f.h <= GRID.rows && covers(c, rr).every((k) => !cells.has(k));
+    const fitsAt = (c: number, rr: number) =>
+      c >= 0 && rr >= 0 && c + f.w <= GRID.cols && rr + f.h <= GRID.rows && covers(c, rr).every(([x, y]) => !cells.has(`${x},${y}`) && (open & cellBit(x, y)) !== 0);
     const onGrid = typeof col === 'number' && typeof row === 'number' && Number.isInteger(col) && Number.isInteger(row) && fitsAt(col, row);
     if (onGrid && (typeof slot !== 'number' || slot < 0)) {
       p.col = col as number;
       p.row = row as number;
-      for (const k of covers(p.col, p.row)) cells.add(k);
+      for (const [x, y] of covers(p.col, p.row)) cells.add(`${x},${y}`);
     } else {
       let s = typeof slot === 'number' && Number.isInteger(slot) && slot >= 0 && slot < BENCH_SLOTS && !slots.has(slot) ? slot : -1;
       for (let i = 0; s < 0 && i < BENCH_SLOTS; i++) if (!slots.has(i)) s = i;
@@ -123,44 +126,47 @@ export function repair(raw: unknown): SaveState {
         p.slot = s;
         slots.add(s);
       } else {
-        // no bench slot left: the first free spot on the grid, else it cannot be kept
+        // no tray slot left: the first free open spot on the grid, else it cannot be kept
         let spot: [number, number] | null = null;
         for (let y = 0; !spot && y < GRID.rows; y++) for (let x = 0; !spot && x < GRID.cols; x++) if (fitsAt(x, y)) spot = [x, y];
         if (!spot) continue;
         [p.col, p.row] = spot;
-        for (const k of covers(p.col, p.row)) cells.add(k);
+        for (const [x, y] of covers(p.col, p.row)) cells.add(`${x},${y}`);
       }
     }
     pieces.push(p);
   }
-  const hasSave = Array.isArray(r.pieces);
-  const trophiesBest = Math.max(trophies, whole(r.bestTrophies, 0, 0));
-  const kept = hasSave ? pieces : base.pieces;
-  const gifts = Array.isArray(r.gifts) ? r.gifts.filter((g): g is PetType => typeof g === 'string' && (PET_TYPES as readonly string[]).includes(g)) : [];
-  // every pet it owns (on the grid or the bench) counts as seen; a gift still waiting does not (it is not owned yet)
-  let seen = (whole(r.seen, base.seen, 0) & ALL_RUNGS) | seenBit('ant');
-  for (const p of kept) if (isPet(p.type)) seen |= seenBit(p.type);
+  const kept = Array.isArray(r.pieces) ? pieces : base.pieces;
+  // every unit it owns counts as owned
+  let owned = (whole(r.owned, base.owned, 0) & ALL_RUNGS) | ownBit('sprout');
+  for (const p of kept) if (isPet(p.type)) owned |= ownBit(p.type);
+  const stage = whole(r.stage, 1, 1, 1e6);
+  const stars = Array.isArray(r.stars) ? r.stars.slice(0, stage - 1).map((v) => whole(v, 0, 0, 3)) : [];
   return {
     version: SAVE_VERSION,
-    name: typeof r.name === 'string' && r.name.trim() ? r.name.slice(0, 24) : base.name,
-    trophies,
-    bestTrophies: trophiesBest,
-    rolls: whole(r.rolls, 0, 0),
-    rollMeter: num(r.rollMeter, 0, 0, 0.999999),
+    cash: whole(r.cash, 0, 0),
+    gems: whole(r.gems, 0, 0),
+    stage,
+    wave: whole(r.wave, 1, 1, WAVES),
+    tries: whole(r.tries, 0, 0),
+    stars,
+    cases: whole(r.cases, 0, 0),
+    elites: whole(r.elites, 0, 0),
     pity: whole(r.pity, 0, 0),
     rolled: whole(r.rolled, 0, 0),
+    open,
+    cellBuys: whole(r.cellBuys, 0, 0, GRID.cols * GRID.rows),
+    kos: whole(r.kos, 0, 0),
+    owned,
+    evolves: whole(r.evolves, 0, 0),
+    auto: r.auto === true,
+    tutorial: whole(r.tutorial, 0, 0),
+    tips: whole(r.tips, 0, 0),
+    fights: whole(r.fights, 0, 0),
+    wins: whole(r.wins, 0, 0),
+    seed: whole(r.seed, base.seed, 1, 0xffffffff),
     pieces: kept,
     nextId: Math.max(whole(r.nextId, 1, 1), maxId + 1),
-    matches: whole(r.matches, 0, 0),
-    wins: whole(r.wins, 0, 0),
-    streak: whole(r.streak, 0),
-    tutorial: whole(r.tutorial, 0, 0),
-    claimed: whole(r.claimed, 0, 0, TROPHY_ROAD.length),
-    seed: whole(r.seed, 1, 0),
-    gifts,
-    seen,
-    tips: whole(r.tips, 0, 0),
-    evolves: whole(r.evolves, 0, 0),
   };
 }
 

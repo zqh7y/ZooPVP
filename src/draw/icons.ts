@@ -38,27 +38,6 @@ function path(ctx: Ctx, pts: number[], close = false) {
   ctx.stroke();
 }
 
-/** A cup: trophies. */
-export function trophy(ctx: Ctx, x: number, y: number, size: number, color?: string) {
-  glyph(ctx, x, y, size, ink(color), () => {
-    ctx.beginPath();
-    ctx.moveTo(-22, -34);
-    ctx.lineTo(22, -34);
-    ctx.lineTo(22, -12);
-    ctx.arc(0, -12, 22, 0, Math.PI);
-    ctx.closePath();
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(-22, -18, 13, Math.PI * 0.5, Math.PI * 1.5);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(22, -18, 13, -Math.PI * 0.5, Math.PI * 0.5);
-    ctx.stroke();
-    path(ctx, [0, 10, 0, 30]);
-    path(ctx, [-18, 34, 18, 34]);
-  });
-}
-
 /** A die: one roll. */
 export function rollToken(ctx: Ctx, x: number, y: number, size: number, color?: string) {
   glyph(ctx, x, y, size, ink(color), () => {
@@ -195,42 +174,94 @@ export function arrow(ctx: Ctx, x: number, y: number, size: number, dir = 0, col
   });
 }
 
-/**
- * League mark: 0 Sprout, 1 Bronze, 2 Silver, 3 Gold, 4 Platinum, 5 Diamond, 6 Legend. A shield that reads as
- * a rank: an open shield with one, two, three chevrons, then a solid shield with one, two, three, then a
- * solid shield with a star. One muted colour per league.
- */
-export function leagueBadge(ctx: Ctx, x: number, y: number, size: number, index: number) {
-  const i = Math.max(0, Math.min(6, Math.round(index)));
-  const color = tint ?? UI.league[i];
-  glyph(ctx, x, y, size, color, () => {
-    const solid = i >= 3;
-    ctx.beginPath();
-    ctx.moveTo(-34, -40);
-    ctx.lineTo(34, -40);
-    ctx.lineTo(34, 2);
-    ctx.quadraticCurveTo(34, 30, 0, 44);
-    ctx.quadraticCurveTo(-34, 30, -34, 2);
-    ctx.closePath();
-    if (solid) ctx.fill();
-    ctx.stroke();
-    ctx.strokeStyle = ctx.fillStyle = solid ? '#ffffff' : color;
-    if (i === 6) {
-      starPath(ctx, 0, -2, 22, 9.5, 5);
-      ctx.fill();
-      return;
-    }
-    const n = (i % 3) + 1;
-    for (let k = 0; k < n; k++) {
-      const cy = (k - (n - 1) / 2) * 17 + 2;
-      path(ctx, [-16, cy + 5, 0, cy - 7, 16, cy + 5]);
-    }
-  });
-}
-
 /** A class-coloured small dot, handy for lists. */
 export function classDot(ctx: Ctx, x: number, y: number, size: number, level: number) {
   circle(ctx, x, y, size / 2);
   ctx.fillStyle = UI.tier[Math.max(0, Math.min(6, Math.round(level) - 1))];
   ctx.fill();
+}
+
+/** A banknote: cash. Filled, in two tones, so it reads at a glance in the top bar and on the CASE price. */
+export function cash(ctx: Ctx, x: number, y: number, size: number, color?: string) {
+  const c = tint ?? color ?? '#7fae86';
+  glyph(ctx, x, y, size, c, () => {
+    ctx.save();
+    ctx.rotate(-0.12);
+    rr(ctx, -42, -26, 84, 52, 9);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
+    ctx.lineWidth = 6;
+    rr(ctx, -31, -16, 62, 32, 6);
+    ctx.stroke();
+    circle(ctx, 0, 0, 10);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.fill();
+    ctx.restore();
+  });
+}
+
+/** A cut gem: gems. Filled, with a lighter top facet. */
+export function gem(ctx: Ctx, x: number, y: number, size: number, color?: string) {
+  const c = tint ?? color ?? UI.gem;
+  glyph(ctx, x, y, size, c, () => {
+    poly(ctx, [-38, -12, -18, -36, 18, -36, 38, -12, 0, 40]);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+    poly(ctx, [-38, -12, -18, -36, 18, -36, 38, -12]);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.lineWidth = 4;
+    path(ctx, [-38, -12, 38, -12]);
+    path(ctx, [-12, -12, 0, 36, 12, -12]);
+  });
+}
+
+/** Three rising bars: the stats / unit ladder. */
+export function bars(ctx: Ctx, x: number, y: number, size: number, color?: string) {
+  glyph(ctx, x, y, size, ink(color), () => {
+    rr(ctx, -34, 4, 18, 32, 4);
+    ctx.fill();
+    rr(ctx, -9, -16, 18, 52, 4);
+    ctx.fill();
+    rr(ctx, 16, -36, 18, 72, 4);
+    ctx.fill();
+  });
+}
+
+/** A filled star: a stage-clear star. */
+export function star(ctx: Ctx, x: number, y: number, size: number, color?: string) {
+  glyph(ctx, x, y, size, ink(color ?? UI.reward), () => {
+    starPath(ctx, 0, 4, 44, 20, 5);
+    ctx.fill();
+  });
+}
+
+/** Two arrows chasing each other round: AUTO (the waves start by themselves). */
+export function cycle(ctx: Ctx, x: number, y: number, size: number, color?: string) {
+  glyph(ctx, x, y, size, ink(color), () => {
+    for (const s of [0, Math.PI]) {
+      ctx.save();
+      ctx.rotate(s);
+      ctx.beginPath();
+      ctx.arc(0, 0, 30, Math.PI * 1.08, Math.PI * 1.85);
+      ctx.stroke();
+      const a = Math.PI * 1.85;
+      const px = Math.cos(a) * 30;
+      const py = Math.sin(a) * 30;
+      poly(ctx, [px + 12, py - 4, px - 8, py - 12, px - 2, py + 10]);
+      ctx.fill();
+      ctx.restore();
+    }
+  });
+}
+
+/** Crossed swords inside nothing: START WAVE's glyph. */
+export function fight(ctx: Ctx, x: number, y: number, size: number, color?: string) {
+  glyph(ctx, x, y, size, ink(color), () => {
+    for (const s of [-1, 1]) {
+      path(ctx, [s * -30, 30, s * 26, -26]);
+      path(ctx, [s * 26, -26, s * 34, -34]);
+      path(ctx, [s * -36, 14, s * -14, 36]);
+    }
+  });
 }

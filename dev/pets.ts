@@ -8,34 +8,40 @@ import { drawGear } from '../src/draw/gear';
 import { param, stage } from './harness';
 
 /*
- * Sheets for looking at the pets, weapons and gear:
- *   ?sheet=lineup | battle | gear | poses | items | perf | live   (&t=1.2 freezes time; perf: &flush=1 also counts painting)
- * The sheets stand on the interface's slate; battle, perf and live stand on the night pitch's green.
+ * Sheets for looking at the units, weapons and gear:
+ *   ?sheet=lineup | gear | poses | items | battle | perf | live | boss   (&t=1.2 freezes time; &pet=roo for poses / gear;
+ *   &from=6 for live shows units 7-12)
+ *   lineup: all 12, both teams, idle / attack / hurt, big and at fight size on grass.
+ *   perf: &flush=1 also counts painting.
  */
 type Ctx = CanvasRenderingContext2D;
 const CLASSES = ['E', 'D', 'C', 'B', 'A', 'S', 'SSS'];
 const WEAPONS: WeaponType[] = ['knife', 'bat', 'shield', 'spear'];
 const GEAR: GearType[] = ['helmet', 'sneakers', 'chili'];
-const SLATE = UI.surfaceAlt;
-/** the pitch under the floodlights: two mowing stripes */
-const PITCH = ['#3f8f4a', '#3a8745'];
+const UNITS: PetType[] = ['sprout', 'buzzy', 'ninja', 'snailor', 'roo', 'cacto', 'pogo', 'briar', 'angler', 'sumo', 'rhino', 'boulder'];
+const NAMES = ['Sprout', 'Buzzy', 'Ninja', 'Snailor', 'Roo', 'Cacto', 'Pogo', 'Briar', 'Angler', 'Sumo', 'Rhino', 'Boulder'];
+/** the fight's body radius of each rung (px) */
+const FIGHT_R = [16, 13, 14, 20, 24, 23, 21, 25, 25, 28, 30, 34];
+const SLATE = '#e9e4da';
+/** a soft, muted pitch: two mowing stripes */
+const PITCH = ['#8fb27a', '#87ab72'];
 const CAP = { color: UI.textDim };
 
-const mk = (pet: PetType, level: number, team: Team, o: Partial<PetLook> = {}): PetLook => ({
+const fightR = (pet: PetType) => FIGHT_R[UNITS.indexOf(pet)];
+const mk = (pet: PetType, team: Team, o: Partial<PetLook> = {}): PetLook => ({
   pet,
-  level,
+  level: 1,
   team,
   weapon: null,
   weaponLevel: 0,
   helmet: 0,
   sneakers: 0,
   chili: 0,
-  seed: level * 3 + team,
+  seed: UNITS.indexOf(pet) * 3 + team,
   ...o,
 });
 const ps = (t: number, o: Partial<PetPose> = {}): PetPose => ({ ...restPose(), t, ...o });
-/** the fight's own radius for a pet of a class */
-const radius = (pet: PetType, level: number) => (pet === 'ant' ? 8 : 14) * (1 + 0.11 * (level - 1));
+const hops = (pet: PetType) => pet === 'roo' || pet === 'pogo';
 
 function put(ctx: Ctx, x: number, y: number, l: PetLook, p: PetPose, r: number, cap = '') {
   ctx.save();
@@ -43,168 +49,125 @@ function put(ctx: Ctx, x: number, y: number, l: PetLook, p: PetPose, r: number, 
   petArt.drawShadow(ctx, l, r, p.hop);
   petArt.drawPet(ctx, l, p, r);
   ctx.restore();
-  if (cap) label(ctx, cap, x, y + 13, 11, CAP);
+  if (cap) label(ctx, cap, x, y + 14, 11, CAP);
 }
 
 /** A fighter going through its moves: walk (or hop), wind up, strike. */
-function act(p: PetPose, t: number, i: number, frog: boolean) {
+function act(p: PetPose, t: number, i: number, hop: boolean) {
   const c = (t * 0.8 + i * 0.37) % 1;
   p.walk = t * 70 + i * 9;
   p.moving = c < 0.5 ? 1 : 0;
-  p.hop = frog && c < 0.5 ? Math.sin(c * 2 * Math.PI) : 0;
+  p.hop = hop && c < 0.5 ? Math.sin(c * 2 * Math.PI) : 0;
   p.wind = c >= 0.5 && c < 0.75 ? (c - 0.5) / 0.25 : 0;
   p.strike = c >= 0.75 ? 1 - (c - 0.75) / 0.25 : 0;
 }
 
-function lineup(ctx: Ctx, t: number) {
-  CLASSES.forEach((c, i) => label(ctx, c, 85 + i * 138, 24, 22, { color: UI.tierText[i] }));
-  for (let row = 0; row < 4; row++) {
-    const pet: PetType = row < 2 ? 'ant' : 'frog';
-    for (let i = 0; i < 7; i++) put(ctx, 85 + i * 138, [150, 300, 465, 625][row], mk(pet, i + 1, (row % 2) as Team), ps(t), row < 2 ? 30 : 40);
+function pitch(ctx: Ctx, x: number, y: number, w: number, h: number) {
+  for (let yy = 0; yy < h; yy += 40) {
+    ctx.fillStyle = PITCH[(yy / 40) % 2];
+    ctx.fillRect(x, y + yy, w, Math.min(40, h - yy));
   }
 }
 
-interface Unit {
-  l: PetLook;
-  x: number;
-  y: number;
-  face: 1 | -1;
-  kind: number;
-}
-function army(n: number, w: number, h: number, seed: number): Unit[] {
-  const rng = seeded(seed);
-  const out: Unit[] = [];
-  for (let i = 0; i < n; i++) {
-    const team: Team = i < n / 2 ? 1 : 0;
-    const pet: PetType = rng() < 0.62 ? 'ant' : 'frog';
-    const level = 1 + Math.floor(rng() ** 1.5 * 7);
-    const armed = rng() < 0.5;
-    const l = mk(pet, level, team, {
-      weapon: armed ? WEAPONS[Math.floor(rng() * 4)] : null,
-      weaponLevel: armed ? 1 + Math.floor(rng() * 7) : 0,
-      helmet: rng() < 0.2 ? 1 + Math.floor(rng() * 7) : 0,
-      sneakers: rng() < 0.15 ? 1 + Math.floor(rng() * 7) : 0,
-      chili: rng() < 0.15 ? 1 + Math.floor(rng() * 7) : 0,
-      seed: i,
-    });
-    const y = team ? 34 + rng() * (h * 0.5 - 30) : h * 0.5 + 8 + rng() * (h * 0.5 - 20);
-    out.push({ l, x: 26 + rng() * (w - 52), y, face: rng() < 0.5 ? 1 : -1, kind: Math.floor(rng() * 10) });
-  }
-  return out.sort((a, b) => a.y - b.y);
-}
-function drawArmy(ctx: Ctx, units: Unit[], t: number, plain: boolean) {
-  const poses = units.map((u, i) => {
-    const p = ps(t, { face: u.face, aimY: u.l.team ? 0.6 : -0.6 });
-    act(p, t, i, u.l.pet === 'frog');
-    if (!plain) {
-      if (u.kind === 7) p.hurt = 0.8;
-      else if (u.kind === 8) p.mood = 'angry';
-      else if (u.kind === 9 && i % 3 === 0) p.puff = 0.9;
-    }
-    return p;
+function lineup(ctx: Ctx, t: number) {
+  // big: idle (yours), attack (theirs), hurt (yours)
+  UNITS.forEach((pet, i) => {
+    const cx = (i % 4) * 300;
+    const cy = Math.floor(i / 4) * 200;
+    label(ctx, `${i + 1}  ${NAMES[i]}`, cx + 150, cy + 18, 17, { color: UI.text });
+    const r = 30;
+    put(ctx, cx + 62, cy + 160, mk(pet, 0), ps(t), r, 'idle');
+    put(ctx, cx + 160, cy + 160, mk(pet, 1), ps(t, { face: -1, strike: 0.85 }), r, 'attack');
+    put(ctx, cx + 250, cy + 160, mk(pet, 0), ps(t, { hurt: 0.7 }), r, 'hurt');
   });
-  units.forEach((u, i) => {
-    ctx.save();
-    ctx.translate(u.x, u.y);
-    petArt.drawShadow(ctx, u.l, radius(u.l.pet, u.l.level), poses[i].hop);
-    ctx.restore();
+  // at fight size on the grass
+  const y0 = 610;
+  pitch(ctx, 0, y0, 1200, 330);
+  UNITS.forEach((pet, i) => {
+    const x = 50 + i * 100;
+    const r = fightR(pet);
+    label(ctx, NAMES[i], x, y0 + 14, 12, { color: '#ffffff' });
+    put(ctx, x - 12, y0 + 105, mk(pet, 0), ps(t, { walk: 6 + i }), r);
+    put(ctx, x + 12, y0 + 200, mk(pet, 1), ps(t, { face: -1, strike: 0.85 }), r);
+    put(ctx, x - 6, y0 + 300, mk(pet, 0, { weapon: WEAPONS[i % 4], weaponLevel: 1 + (i % 7), helmet: i % 3 === 0 ? 3 : 0 }), ps(t, { hurt: i % 2 ? 0.7 : 0, aimY: -0.4 }), r);
   });
-  units.forEach((u, i) => {
-    ctx.save();
-    ctx.translate(u.x, u.y);
-    petArt.drawPet(ctx, u.l, poses[i], radius(u.l.pet, u.l.level));
-    ctx.restore();
+}
+
+/** Bosses at 1.8x next to a plain unit, all twelve in two rows. */
+function boss(ctx: Ctx, t: number) {
+  pitch(ctx, 0, 0, 1200, 640);
+  UNITS.forEach((pet, i) => {
+    const x = 100 + (i % 6) * 200;
+    const y = 280 + Math.floor(i / 6) * 320;
+    const r = fightR(pet);
+    put(ctx, x - 50, y, mk(pet, 0), ps(t, { walk: 4 }), r);
+    put(ctx, x + 30, y, mk(pet, 1, { boss: true }), ps(t, { face: -1 }), r * 1.8);
   });
 }
 
 function gear(ctx: Ctx, t: number) {
-  (['ant', 'frog'] as PetType[]).forEach((pet, row) => {
-    const r = pet === 'ant' ? 30 : 36;
+  const pets: PetType[] = param('pet') ? [param('pet') as PetType] : UNITS;
+  pets.forEach((pet, row) => {
+    const r = 26;
+    const y = 95 + row * 125;
+    label(ctx, pet, 40, y - 70, 13, { color: UI.text });
     WEAPONS.forEach((w, i) => {
       const lv = [2, 4, 5, 7][i];
       const base = { weapon: w, weaponLevel: lv };
-      const y = 150 + row * 175;
-      put(ctx, 70 + i * 240, y, mk(pet, 3, 0, base), ps(t), r, `${w} ${CLASSES[lv - 1]}`);
-      put(ctx, 175 + i * 240, y, mk(pet, 3, 1, base), ps(t, { strike: w === 'bat' ? 0.95 : 0.8 }), r, 'strike');
+      put(ctx, 60 + i * 190, y, mk(pet, 0, base), ps(t), r);
+      put(ctx, 140 + i * 190, y, mk(pet, 1, base), ps(t, { face: -1, strike: w === 'bat' ? 0.95 : 0.8 }), r);
     });
-    const y = 520 + row * 170;
-    const worn: [string, Partial<PetLook>][] = [
-      ['helmet E', { helmet: 1 }],
-      ['helmet B', { helmet: 4 }],
-      ['helmet SSS', { helmet: 7 }],
-      ['sneakers C', { sneakers: 3 }],
-      ['sneakers SSS', { sneakers: 7 }],
-      ['chili C', { chili: 3 }],
-      ['chili SSS', { chili: 7 }],
-      ['all', { helmet: 6, sneakers: 5, chili: 5, weapon: 'spear', weaponLevel: 6 }],
-    ];
-    worn.forEach(([cap, o], i) => put(ctx, 65 + i * 125, y, mk(pet, 2, (i % 2) as Team, o), ps(t, { walk: 8, moving: i === 3 || i === 4 ? 1 : 0 }), r, cap));
+    put(ctx, 830, y, mk(pet, 0, { helmet: 2 }), ps(t), r);
+    put(ctx, 905, y, mk(pet, 1, { helmet: 7, sneakers: 6 }), ps(t, { face: -1 }), r);
+    put(ctx, 980, y, mk(pet, 0, { sneakers: 3, chili: 7 }), ps(t, { walk: 8, moving: 1 }), r);
+    put(ctx, 1080, y, mk(pet, 1, { helmet: 5, sneakers: 5, chili: 5, weapon: 'spear', weaponLevel: 6 }), ps(t, { face: -1, wind: 0.6 }), r);
   });
 }
 
 function poses(ctx: Ctx, t: number) {
-  (['ant', 'frog'] as PetType[]).forEach((pet, half) => {
-    const r = pet === 'ant' ? 20 : 24;
-    const x0 = half * 500;
-    const l = mk(pet, 3, half as Team);
-    const bat = mk(pet, 3, half as Team, { weapon: 'bat', weaponLevel: 3 });
-    const row = (y: number, cells: [string, PetLook, Partial<PetPose>][]) => {
-      const step = 500 / cells.length;
-      cells.forEach(([cap, lk, o], i) => put(ctx, x0 + step * (i + 0.5), y, lk, ps(t, o), r, cap));
-    };
-    const move: [string, PetLook, Partial<PetPose>][] =
-      pet === 'ant'
-        ? [0, 9, 18, 27].map((d, i) => [`walk ${i}`, l, { walk: d, moving: 1 }])
-        : [0.12, 0.5, 1, 0.12].map((h, i) => [`hop ${h}`, l, { hop: h, moving: 1, walk: i * 9 }]);
-    row(95, [...move, ['wind', bat, { wind: 1 }], ['strike 1', bat, { strike: 1 }], ['strike .6', bat, { strike: 0.6 }], ['hurt', l, { hurt: 1 }]]);
-    row(220, [
-      ['idle', l, {}],
-      ['angry', l, { mood: 'angry' }],
-      ['hurt', l, { mood: 'hurt' }],
-      ['dizzy', l, { mood: 'dizzy' }],
-      ['cheer', l, { mood: 'cheer' }],
-      ['scared', l, { mood: 'scared' }],
-      ['dead', l, { mood: 'dead' }],
-      [pet === 'ant' ? 'bite' : 'tongue', l, pet === 'ant' ? { wind: 1 } : { strike: 0.9 }],
-    ]);
-    row(390, [
-      ['flat', l, { squashX: 1.8, squashY: 0.2 }],
-      ['squash', l, { squashX: 1.3, squashY: 0.6 }],
-      ['puff .5', l, { puff: 0.5 }],
-      ['puff 1', l, { puff: 1 }],
-      ['puff 1.5', l, { puff: 1.5 }],
-    ]);
-    row(520, [
-      ['spin 1', l, { spin: 1, hop: 0.4 }],
-      ['spin 3', l, { spin: 3, hop: 0.4 }],
-      ['stone .5', l, { stone: 0.5 }],
-      ['stone 1', bat, { stone: 1 }],
-      ['limp .5', l, { limp: 0.5 }],
-      ['limp 1', l, { limp: 1 }],
-      [pet === 'ant' ? 'snap' : 'wind', l, pet === 'ant' ? { strike: 1 } : { wind: 1 }],
-    ]);
-    // the high classes through the same poses: their metal must go with them
-    const s5 = mk(pet, 6, half as Team, { weapon: 'knife', weaponLevel: 6 });
-    const s7 = mk(pet, 7, half as Team, { weapon: 'spear', weaponLevel: 7 });
-    row(680, [
-      ['S idle', s5, {}],
-      ['SSS idle', s7, {}],
-      ['SSS strike', s7, { strike: 1, aimY: -0.8 }],
-      ['SSS puff 1', s7, { puff: 1 }],
-      ['S stone', s5, { stone: 1 }],
-      ['S limp', s5, { limp: 0.8 }],
-    ]);
-    // small things: a blink, eyes on the aim, a helmet in a spin
-    const hat = mk(pet, 4, half as Team, { helmet: 5, sneakers: 6, weapon: 'shield', weaponLevel: 4 });
-    row(820, [
-      ['blink', l, { t: 0.05 + (((l.seed * 0.618) % 1) + 1) * -2.9 + 3.7 * 3 }],
-      ['aim up', bat, { wind: 0.6, aimY: -1 }],
-      ['aim down', bat, { wind: 0.6, aimY: 1 }],
-      ['geared', hat, {}],
-      ['shove', hat, { strike: 1 }],
-      ['geared spin', hat, { spin: 2.2, hop: 0.5 }],
-    ]);
-  });
+  const pet = (param('pet', 'sprout') as PetType) || 'sprout';
+  const r = 30;
+  const l = mk(pet, 0);
+  const bat = mk(pet, 1, { weapon: 'bat', weaponLevel: 3 });
+  const row = (y: number, cells: [string, PetLook, Partial<PetPose>][]) => {
+    const step = 1200 / cells.length;
+    cells.forEach(([cap, lk, o], i) => put(ctx, step * (i + 0.5), y, lk, ps(t, o), r, cap));
+  };
+  const move: [string, PetLook, Partial<PetPose>][] = hops(pet)
+    ? [0.12, 0.5, 1, 0.12].map((h, i) => [`hop ${h}`, l, { hop: h, moving: 1, walk: i * 9 }])
+    : [0, 9, 18, 27].map((d, i) => [`walk ${i}`, l, { walk: d, moving: 1 }]);
+  row(110, [...move, ['wind', l, { wind: 1 }], ['strike 1', l, { strike: 1 }], ['strike .5', l, { strike: 0.5 }], ['bat wind', bat, { wind: 1 }], ['bat strike', bat, { strike: 1 }], ['hurt', l, { hurt: 1 }]]);
+  row(250, [
+    ['idle', l, {}],
+    ['angry', l, { mood: 'angry' }],
+    ['hurt', l, { mood: 'hurt' }],
+    ['dizzy', l, { mood: 'dizzy' }],
+    ['cheer', l, { mood: 'cheer' }],
+    ['scared', l, { mood: 'scared' }],
+    ['dead', l, { mood: 'dead' }],
+    ['blink', l, { t: 0.05 + (((l.seed * 0.618) % 1) + 1) * -2.9 + 3.7 * 3 }],
+  ]);
+  row(410, [
+    ['flat', l, { squashX: 1.8, squashY: 0.2 }],
+    ['squash', l, { squashX: 1.3, squashY: 0.6 }],
+    ['puff .5', l, { puff: 0.5 }],
+    ['puff 1', l, { puff: 1 }],
+    ['puff 1.5', l, { puff: 1.5 }],
+    ['spin 1', l, { spin: 1, hop: 0.4 }],
+    ['spin 3', l, { spin: 3, hop: 0.4 }],
+  ]);
+  const hat = mk(pet, 0, { helmet: 5, sneakers: 6, weapon: 'shield', weaponLevel: 4, chili: 5 });
+  row(560, [
+    ['stone .5', l, { stone: 0.5 }],
+    ['stone 1', bat, { stone: 1 }],
+    ['limp .5', l, { limp: 0.5 }],
+    ['limp 1', l, { limp: 1 }],
+    ['alpha .5', l, { alpha: 0.5 }],
+    ['aim up', bat, { wind: 0.6, aimY: -1 }],
+    ['aim down', bat, { wind: 0.6, aimY: 1 }],
+    ['geared', hat, {}],
+    ['shove', hat, { strike: 1 }],
+  ]);
 }
 
 function items(ctx: Ctx, t: number) {
@@ -228,45 +191,85 @@ function items(ctx: Ctx, t: number) {
   });
 }
 
-/** Big fighters going through their moves in real time, to watch the small things (blinks, feelers, throats). */
+interface Unit {
+  l: PetLook;
+  x: number;
+  y: number;
+  face: 1 | -1;
+  kind: number;
+}
+function army(n: number, w: number, h: number, seed: number): Unit[] {
+  const rng = seeded(seed);
+  const out: Unit[] = [];
+  for (let i = 0; i < n; i++) {
+    const team: Team = i < n / 2 ? 1 : 0;
+    const pet = UNITS[Math.floor(rng() ** 1.6 * 12)];
+    const armed = rng() < 0.5;
+    const l = mk(pet, team, {
+      weapon: armed ? WEAPONS[Math.floor(rng() * 4)] : null,
+      weaponLevel: armed ? 1 + Math.floor(rng() * 7) : 0,
+      helmet: rng() < 0.2 ? 1 + Math.floor(rng() * 7) : 0,
+      sneakers: rng() < 0.15 ? 1 + Math.floor(rng() * 7) : 0,
+      chili: rng() < 0.15 ? 1 + Math.floor(rng() * 7) : 0,
+      seed: i,
+    });
+    const y = team ? 40 + rng() * (h * 0.5 - 40) : h * 0.5 + 30 + rng() * (h * 0.5 - 40);
+    out.push({ l, x: 26 + rng() * (w - 52), y, face: team ? -1 : 1, kind: Math.floor(rng() * 10) });
+  }
+  return out.sort((a, b) => a.y - b.y);
+}
+function drawArmy(ctx: Ctx, units: Unit[], t: number, plain: boolean) {
+  const poses = units.map((u, i) => {
+    const p = ps(t, { face: u.face, aimY: u.l.team ? 0.6 : -0.6 });
+    act(p, t, i, hops(u.l.pet));
+    if (!plain) {
+      if (u.kind === 7) p.hurt = 0.8;
+      else if (u.kind === 8) p.mood = 'angry';
+    }
+    return p;
+  });
+  units.forEach((u, i) => {
+    ctx.save();
+    ctx.translate(u.x, u.y);
+    petArt.drawShadow(ctx, u.l, fightR(u.l.pet), poses[i].hop);
+    ctx.restore();
+  });
+  units.forEach((u, i) => {
+    ctx.save();
+    ctx.translate(u.x, u.y);
+    petArt.drawPet(ctx, u.l, poses[i], fightR(u.l.pet));
+    ctx.restore();
+  });
+}
+
+/** Big fighters going through their moves in real time, to watch the small things. */
 function live(ctx: Ctx, t: number) {
-  const cast: [PetLook, number, number][] = [
-    [mk('ant', 1, 0), 110, 0],
-    [mk('ant', 5, 1, { weapon: 'spear', weaponLevel: 5 }), 330, 1],
-    [mk('frog', 3, 0), 110, 2],
-    [mk('frog', 7, 1, { weapon: 'bat', weaponLevel: 7, chili: 6 }), 330, 3],
-  ];
-  cast.forEach(([l, x, i]) => {
+  UNITS.slice(param('from') ? +param('from') : 0).slice(0, 6).forEach((pet, i) => {
+    const l = mk(pet, (i % 2) as Team, i % 3 === 1 ? { weapon: WEAPONS[i % 4], weaponLevel: 4 } : {});
     const p = ps(t + i * 0.9, { face: i % 2 ? -1 : 1, aimY: i % 2 ? 0.5 : -0.5 });
     const c = ((t * 0.25 + i * 0.3) % 1) * 4;
     if (c < 1.6) {
       p.walk = t * 40;
       p.moving = 1;
-      if (l.pet === 'frog') p.hop = Math.max(0, Math.sin(((t * 1.6) % 1) * Math.PI));
-    } else if (c > 2.4 && c < 3.2) act(p, t, i, l.pet === 'frog');
-    put(ctx, x + (c < 1.6 ? Math.sin(c * 2) * 20 : 0), i < 2 ? 190 : 400, l, p, l.pet === 'ant' ? 40 : 46);
+      if (hops(pet)) p.hop = Math.max(0, Math.sin(((t * 1.6) % 1) * Math.PI));
+    } else if (c > 2.4 && c < 3.2) act(p, t, i, hops(pet));
+    put(ctx, 120 + (i % 3) * 210 + (c < 1.6 ? Math.sin(c * 2) * 20 : 0), i < 3 ? 200 : 420, l, p, 40);
   });
-}
-
-function pitch(ctx: Ctx, w: number, h: number) {
-  for (let y = 0; y < h; y += 40) {
-    ctx.fillStyle = PITCH[(y / 40) % 2];
-    ctx.fillRect(0, y, w, 40);
-  }
 }
 
 const sheet = param('sheet', 'lineup');
 const SIZE: Record<string, [number, number, string]> = {
-  lineup: [1000, 640, SLATE],
-  battle: [460, 520, PITCH[0]],
-  gear: [1000, 720, SLATE],
-  poses: [1000, 900, SLATE],
+  lineup: [1200, 940, SLATE],
+  boss: [1200, 640, SLATE],
+  gear: [1200, param('pet') ? 180 : 1540, SLATE],
+  poses: [1200, 640, SLATE],
   items: [720, 480, SLATE],
+  battle: [460, 620, PITCH[0]],
   perf: [460, 820, PITCH[0]],
-  live: [460, 520, PITCH[0]],
+  live: [680, 500, PITCH[0]],
 };
 const [w, h, bg] = SIZE[sheet] ?? SIZE.lineup;
-const fighters = sheet === 'battle' ? army(50, w, h, 11) : sheet === 'perf' ? army(200, w, h, 5) : [];
+const fighters = sheet === 'battle' ? army(60, w, h, 11) : sheet === 'perf' ? army(200, w, h, 5) : [];
 let frames = 0;
 let total = 0;
 void stage({
@@ -274,12 +277,13 @@ void stage({
   h,
   bg,
   draw(ctx, t) {
-    if (sheet === 'battle' || sheet === 'perf' || sheet === 'live') pitch(ctx, w, h);
+    if (sheet === 'battle' || sheet === 'perf' || sheet === 'live') pitch(ctx, 0, 0, w, h);
     if (sheet === 'battle') drawArmy(ctx, fighters, t, false);
     else if (sheet === 'live') live(ctx, t);
     else if (sheet === 'gear') gear(ctx, t);
     else if (sheet === 'poses') poses(ctx, t);
     else if (sheet === 'items') items(ctx, t);
+    else if (sheet === 'boss') boss(ctx, t);
     else if (sheet === 'perf') {
       const t0 = performance.now();
       drawArmy(ctx, fighters, t, true);

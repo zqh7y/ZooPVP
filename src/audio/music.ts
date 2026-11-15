@@ -1,28 +1,36 @@
-import type { MusicApi, MusicState } from './names';
-import { IN_SCALE, YO_SCALE, crash, drum, m, renderRecipe, sparkle, type Synth } from './synth';
+import { MUSIC_ALIAS, type LegacyMusicState, type MusicApi, type MusicState } from './names';
+import { frand } from '../rng';
+import { mallet, voice } from './kit';
+import { crash, drum, m, renderRecipe, sparkle, type Synth } from './synth';
 
 export type { MusicState };
+export { MUSIC_ALIAS };
 
 /*
- * The soundtrack: an adaptive loop that follows the game, with a Japanese festival flavour over a bouncy groove.
- * Its instruments are synthesized and rendered once (like the sound effects); a small sequencer then plays the
- * composed parts on a 16th-note grid, a little ahead of time on the audio clock, so the beat never drifts.
+ * The soundtrack: an adaptive loop that follows the stage. Its instruments are synthesized and rendered once (like
+ * the sound effects); a small sequencer then plays the composed parts on a 16th-note grid, a little ahead of time
+ * on the audio clock, so the beat never drifts.
  *
- *   lobby     calm and warm, 92 BPM, 16 bars: koto tune, flute answer, a contrasting middle, taiko tapping softly
- *   search    the lobby's chords held in suspense: a ticking woodblock, a pedal bass, shimmer
- *   battle    144 BPM taiko groove + bass; energy adds a shamisen riff, then a flute hook, fills and crashes
- *   overtime  the battle pushed: faster, a rising ostinato, more drums
- *   victory   a bright yo-scale loop, starting 1.5 s after it is set
- *   defeat    the music fades out
+ *   prep        between waves, most of the time: 84 BPM, G major, 16 bars. Soft keys, a marimba tune that leaves
+ *               room, a round bass, brushed shaker and finger snaps. Warm and low-key, no bright highs to tire on
+ *   wave        a wave is fought: 124 BPM, E minor, four on the floor; energy adds offbeat brass stabs, the marimba
+ *               hook, a horn, the crowd chanting "oh", crashes and fills
+ *   boss        the boss wave: 132 BPM, E phrygian, big drums and a low ostinato; energy adds stabs, a horn line,
+ *               a choir and a ticking marimba
+ *   stageClear  a bright, bouncy G major victory loop, starting 2.2 s after it is set (after the fanfare)
+ *   defeat      a soft, slow, sparse loop (no drums), 1.4 s after it is set (after the crowd's "aww")
  *
- * Changes wait for the next bar, except battle (0.4 s), victory (1.5 s), defeat and off (right away).
- * Melodies are written as steps along a five-note scale, so a note can never leave its scale.
+ * The v3 names still work (MUSIC_ALIAS): lobby and search play prep, battle plays wave, overtime plays boss,
+ * victory plays stageClear.
+ * Changes: prep fades in fresh after 1.2 s (straight away when nothing plays), wave after 0.35 s, boss 0.9 s,
+ * stageClear 2.2 s, defeat 1.4 s; off stops at once.
+ * Melodies are written as degrees of a seven-note scale, so a note can never leave its scale (see scaleCheck).
  */
 
 /** The soundtrack's level: under the effects, so every hit cuts through. */
-const LEVEL = 0.27;
+const LEVEL = 0.3;
 
-type Inst = 'koto' | 'shamisen' | 'flute' | 'chime' | 'pad' | 'bass' | 'don' | 'doko' | 'ka' | 'shime' | 'wood' | 'shaker' | 'crash' | 'shimmer';
+type Inst = 'keys' | 'mallet' | 'flute' | 'chime' | 'pad' | 'bass' | 'kick' | 'snap' | 'clap' | 'hat' | 'tom' | 'don' | 'stab' | 'horn' | 'chant' | 'choir' | 'shaker' | 'crash' | 'shimmer';
 
 interface InstDef {
   bases: number[]; // MIDI notes the instrument is rendered at (the nearest is pitched to each note)
@@ -34,39 +42,34 @@ interface InstDef {
 }
 
 const INSTRUMENTS: Record<Inst, InstDef> = {
-  koto: {
-    // a plucked silk string: a bright strike with a tiny pre-bend, a long singing tail
-    bases: [55, 67, 79], dur: 1.5, vol: 0.34, verb: 0.35,
+  keys: {
+    // a soft electric piano: a round tine, mellow and warm
+    bases: [55, 67, 79], dur: 2.2, vol: 0.2, verb: 0.35,
     make: (s, base) => {
       const f = m(base);
-      s.tone({ type: 'triangle', f: [[0, f * 1.025], [0.05, f]], a: 0.001, d: 1.2, v: 0.6 });
-      s.tone({ f: f * 2, a: 0.001, d: 0.35, v: 0.22 });
-      s.bell({ f, ratio: 3, index: 0.45, a: 0.001, d: 0.5, v: 0.3 });
-      s.noise({ filter: 'bandpass', f: 3600, q: 1, a: 0.0003, d: 0.012, v: 0.35 });
+      s.tone({ f, a: 0.003, d: 1.9, v: 0.5 });
+      s.bell({ f, ratio: 1, index: 0.8, a: 0.002, d: 1.2, v: 0.35 });
+      s.bell({ f: f * 2, ratio: 7, index: 0.15, a: 0.001, d: 0.25, v: 0.05 });
+      s.tone({ f: f * 2, a: 0.003, d: 0.6, v: 0.07 });
     },
   },
-  shamisen: {
-    // a twangy skin-covered lute: a slap, a buzzing saw that closes fast
-    bases: [50, 62, 74], dur: 0.6, vol: 0.34, verb: 0.15, pan: -0.15,
-    make: (s, base) => {
-      const f = m(base);
-      s.tone({ type: 'sawtooth', f, lp: [[0, 5200], [0.07, 1500], [0.5, 650]], q: 3, a: 0.001, d: 0.45, v: 0.5 });
-      s.tone({ type: 'triangle', f, a: 0.001, d: 0.3, v: 0.4 });
-      s.noise({ filter: 'bandpass', f: 2600, q: 1.2, a: 0.0003, d: 0.02, v: 0.8 });
-    },
+  mallet: {
+    // a marimba
+    bases: [60, 72, 84], dur: 1.2, vol: 0.3, verb: 0.3,
+    make: (s, base) => mallet(s, 0, base, 1, 0.8),
   },
   flute: {
-    // a breathy bamboo flute with a little vibrato
-    bases: [74, 86], dur: 1.8, vol: 0.3, verb: 0.4, pan: 0.1,
+    // a breathy flute with a little vibrato
+    bases: [74, 86], dur: 1.8, vol: 0.26, verb: 0.4, pan: 0.1,
     make: (s, base) => {
       const f = m(base);
       s.tone({ f: [[0, f * 0.985], [0.07, f]], a: 0.045, h: 1.1, d: 0.55, v: 0.6, vib: [5.2, 11] });
-      s.tone({ f: f * 2, a: 0.05, h: 1.1, d: 0.5, v: 0.1 });
-      s.noise({ filter: 'bandpass', f: f * 2, q: 3, a: 0.04, h: 1.1, d: 0.5, v: 0.14 });
+      s.tone({ f: f * 2, a: 0.05, h: 1.1, d: 0.5, v: 0.08 });
+      s.noise({ filter: 'bandpass', f: f * 2, q: 3, a: 0.04, h: 1.1, d: 0.5, v: 0.1 });
     },
   },
   chime: {
-    bases: [84, 96], dur: 1.6, vol: 0.2, verb: 0.55, pan: 0.3,
+    bases: [84, 96], dur: 1.6, vol: 0.16, verb: 0.55, pan: 0.3,
     make: (s, base) => {
       const f = m(base);
       s.bell({ f, ratio: 2.76, index: 0.5, a: 0.001, d: 1.4, v: 0.6 });
@@ -74,13 +77,13 @@ const INSTRUMENTS: Record<Inst, InstDef> = {
     },
   },
   pad: {
-    bases: [55, 67], dur: 3.4, vol: 0.14, verb: 0.5,
+    bases: [55, 67], dur: 3.4, vol: 0.12, verb: 0.5,
     make: (s, base) => {
       for (const detune of [-9, 0, 8]) s.tone({ type: 'triangle', f: m(base), lp: 1300, a: 0.5, h: 1.8, d: 1, v: 0.4, detune, vib: [0.4, 5] });
     },
   },
   bass: {
-    bases: [31, 38, 45], dur: 1, vol: 0.5,
+    bases: [31, 38, 45], dur: 1, vol: 0.38,
     make: (s, base) => {
       const f = m(base);
       s.tone({ f, a: 0.004, h: 0.5, d: 0.4, v: 0.85 });
@@ -88,52 +91,77 @@ const INSTRUMENTS: Record<Inst, InstDef> = {
       s.tone({ type: 'sawtooth', f, lp: [[0, 1800], [0.1, 380]], a: 0.003, h: 0.3, d: 0.3, v: 0.16 });
     },
   },
+  kick: {
+    // a round, soft kick
+    bases: [0], dur: 0.45, vol: 0.5,
+    make: (s) => drum(s, 0, 52, 0.35, 1, 1.8),
+  },
+  snap: {
+    // a finger snap
+    bases: [0], dur: 0.15, vol: 0.22, verb: 0.2, pan: -0.12,
+    make: (s) => {
+      s.noise({ filter: 'bandpass', f: 2400, q: 2.5, a: 0.0004, d: 0.035, v: 0.9 });
+      s.tone({ f: [[0, 1700], [0.02, 1200]], a: 0.0004, d: 0.02, v: 0.3 });
+    },
+  },
+  clap: {
+    // a hand clap: three slaps a hair apart and the room after them
+    bases: [0], dur: 0.3, vol: 0.3, verb: 0.25,
+    make: (s) => {
+      for (const t of [0, 0.009, 0.018]) s.noise({ t, filter: 'bandpass', f: 1150, q: 1.1, a: 0.0004, d: 0.012, v: 0.8 });
+      s.noise({ t: 0.027, filter: 'bandpass', f: 1300, q: 0.9, a: 0.001, d: 0.13, v: 0.6 });
+    },
+  },
+  hat: {
+    bases: [0], dur: 0.08, vol: 0.12, pan: 0.25,
+    make: (s) => s.noise({ filter: 'highpass', f: 8000, a: 0.0005, d: 0.03, v: 0.8 }),
+  },
+  tom: {
+    bases: [45, 52, 57], dur: 0.5, vol: 0.45, verb: 0.15,
+    make: (s, base) => drum(s, 0, m(base), 0.35, 1, 1.8),
+  },
   don: {
-    // the big taiko: a deep, round hit
-    bases: [0], dur: 0.8, vol: 0.8, verb: 0.2,
+    // the big drum: a deep, round hit
+    bases: [0], dur: 0.8, vol: 0.7, verb: 0.2,
     make: (s) => {
-      drum(s, 0, 66, 0.6, 1, 2.5);
-      s.tone({ f: [[0, 190], [0.2, 120]], a: 0.001, d: 0.25, v: 0.35 });
+      drum(s, 0, 62, 0.6, 1, 2.5);
+      s.tone({ f: [[0, 180], [0.2, 110]], a: 0.001, d: 0.25, v: 0.3 });
     },
   },
-  doko: {
-    bases: [0], dur: 0.45, vol: 0.62, verb: 0.15, pan: 0.1,
-    make: (s) => drum(s, 0, 118, 0.32, 0.9, 2),
+  stab: {
+    // a short brass stab
+    bases: [55, 67], dur: 0.6, vol: 0.2, verb: 0.25,
+    make: (s, base) => s.brass({ notes: [base], cut: [[0, 500], [0.04, 2600], [0.25, 700]], a: 0.008, h: 0.06, d: 0.18, v: 0.7 }),
   },
-  ka: {
-    // a stick on the drum's rim
-    bases: [0], dur: 0.15, vol: 0.4, verb: 0.15, pan: -0.1,
-    make: (s) => {
-      s.noise({ filter: 'bandpass', f: 2300, q: 2, a: 0.0003, d: 0.05, v: 0.9 });
-      s.tone({ f: [[0, 520], [0.03, 380]], a: 0.0003, d: 0.05, v: 0.5 });
+  horn: {
+    // a held brass line
+    bases: [62, 74], dur: 1.4, vol: 0.2, verb: 0.3,
+    make: (s, base) => s.brass({ notes: [base], cut: [[0, 500], [0.06, 2400], [1.2, 900]], a: 0.025, h: 0.8, d: 0.4, v: 0.7, vib: [5, 10] }),
+  },
+  chant: {
+    // the crowd chanting "oh!"
+    bases: [52, 59], dur: 0.9, vol: 0.3, verb: 0.4,
+    make: (s, base) => {
+      for (let i = 0; i < 8; i++) {
+        const f = m(base) * 2 ** (s.rand(-18, 18) / 1200) * (i % 4 === 0 ? 2 : 1);
+        voice(s, { t: s.rand(0, 0.02), f: [[0, f * 0.97], [0.05, f]], vow: [[0, 'o'], [0.25, 'u']], size: s.rand(0.95, 1.2), a: 0.03, h: 0.25, d: 0.3, v: 0.25, breath: 0.12, vib: [s.rand(4.5, 5.5), 15] });
+      }
     },
   },
-  shime: {
-    // the small high taiko
-    bases: [0], dur: 0.2, vol: 0.3, pan: 0.2,
-    make: (s) => {
-      s.tone({ f: [[0, 420], [0.04, 290]], a: 0.0005, d: 0.09, v: 0.7 });
-      s.noise({ filter: 'bandpass', f: 3800, q: 1.5, a: 0.0003, d: 0.025, v: 0.5 });
-    },
-  },
-  wood: {
-    // a wood block tick
-    bases: [0], dur: 0.14, vol: 0.34, verb: 0.2, pan: 0.15,
-    make: (s) => {
-      s.tone({ f: [[0, 1900], [0.012, 1450]], a: 0.0003, d: 0.05, v: 0.7 });
-      s.noise({ filter: 'bandpass', f: 2800, q: 4, a: 0.0003, d: 0.015, v: 0.5 });
-    },
+  choir: {
+    bases: [55, 67], dur: 2.6, vol: 0.14, verb: 0.5,
+    make: (s, base) => s.choir({ notes: [base], a: 0.35, h: 1.3, d: 0.9, v: 0.8 }),
   },
   shaker: {
-    bases: [0], dur: 0.1, vol: 0.14, pan: -0.3,
-    make: (s) => s.noise({ filter: 'bandpass', f: 6400, q: 1.2, a: 0.012, d: 0.05, v: 0.8 }),
+    bases: [0], dur: 0.1, vol: 0.12, pan: -0.3,
+    make: (s) => s.noise({ filter: 'bandpass', f: 6000, q: 1.2, a: 0.012, d: 0.05, v: 0.8 }),
   },
   crash: {
-    bases: [0], dur: 1.8, vol: 0.28, verb: 0.2,
+    bases: [0], dur: 1.8, vol: 0.24, verb: 0.2,
     make: (s) => crash(s, 0, 1.6, 0.8),
   },
   shimmer: {
-    bases: [0], dur: 2.4, vol: 0.3, verb: 0.6,
+    bases: [0], dur: 2.4, vol: 0.26, verb: 0.6,
     make: (s) => sparkle(s, 0, 2, 0.8, 8, 2400, 5600),
   },
 };
@@ -156,163 +184,257 @@ interface Song {
   sc: Scale;
   swing?: number;
 }
-/** A five-note scale on a root: a degree (0 = the root, 5 = an octave up, -5 = an octave down) becomes a MIDI note. */
+/** A seven-note scale on a root: a degree (0 = the root, 7 = an octave up, -7 = an octave down) becomes a MIDI note. */
 interface Scale {
   root: number;
   base: number[];
-  full: number[];
 }
-const YO: Scale = { root: 62, base: YO_SCALE.slice(0, 5), full: YO_SCALE };
-const IN: Scale = { root: 62, base: IN_SCALE.slice(0, 5), full: IN_SCALE };
-const note = (sc: Scale, d: number) => sc.root + 12 * Math.floor(d / 5) + sc.base[((d % 5) + 5) % 5];
+const G_MAJOR: Scale = { root: 55, base: [0, 2, 4, 5, 7, 9, 11] }; // degree 0 = G3
+const E_MINOR: Scale = { root: 52, base: [0, 2, 3, 5, 7, 8, 10] }; // degree 0 = E3
+const E_PHRYGIAN: Scale = { root: 52, base: [0, 1, 3, 5, 7, 8, 10] }; // E F G A B C D
+const note = (sc: Scale, d: number) => {
+  const L = sc.base.length;
+  return sc.root + 12 * Math.floor(d / L) + sc.base[((d % L) + L) % L];
+};
 
 type Mel = [number, number, number][]; // [step, degree, length]
 const mel = (sc: Scale, i: Inst, tune: Mel, v: number, e = 0): Ev[] => tune.map(([s, d, l]) => ({ s, i, n: note(sc, d), d: l, v, e }));
 const hit = (i: Inst, steps: number[], v = 1, e = 0): Ev[] => steps.map((s) => ({ s, i, v, e }));
-
-// ---- the lobby (D yo scale: D E G A B). Chords stay inside the scale: G6, Em7, Dsus2, Asus4.
+/** A chord: its bass degree and its chord degrees. */
 interface Chord {
-  b: number; // bass degree
-  t: number[]; // chord degrees
+  b: number;
+  t: number[];
 }
-const CH: Record<string, Chord> = {
-  G: { b: -8, t: [-3, -1, 0, 1] },
-  E: { b: -9, t: [-4, -3, -1, 0] },
-  D: { b: -10, t: [-5, -4, -2, 0] },
-  A: { b: -7, t: [-2, 0, 1, 3] },
+const chordEv = (sc: Scale, i: Inst, ch: Chord, s: number, d: number, v: number, e = 0, up = 0): Ev[] => ch.t.map((x) => ({ s, i, n: note(sc, x + up), d, v, e }));
+
+// ---- prep (G major). Gadd9, Em7, Cmaj7, D, Am7: soft and open
+const PREP_CH: Record<string, Chord> = {
+  G: { b: -7, t: [2, 4, 7, 8] },
+  Em: { b: -9, t: [2, 4, 5, 7] },
+  C: { b: -4, t: [2, 3, 5, 7] },
+  D: { b: -10, t: [1, 4, 6, 8] },
+  Am: { b: -6, t: [1, 3, 5, 7] },
 };
-const LOBBY_CHORDS = ['G', 'E', 'D', 'A', 'G', 'E', 'D', 'A', 'E', 'G', 'A', 'D', 'G', 'E', 'D', 'A'];
-
-const TUNE_A: Mel[] = [
-  [[0, 5, 2], [2, 6, 2], [4, 7, 4], [8, 6, 2], [10, 5, 2], [12, 6, 4]],
-  [[0, 7, 3], [3, 6, 1], [4, 5, 4], [8, 4, 4], [12, 5, 4]],
-  [[0, 5, 2], [2, 6, 2], [4, 8, 4], [8, 7, 2], [10, 6, 2], [12, 5, 4]],
-  [[0, 6, 2], [2, 5, 2], [4, 3, 4], [8, 5, 4], [12, 6, 2], [14, 7, 2]],
+const PREP_CHORDS = ['G', 'Em', 'C', 'D', 'G', 'Em', 'Am', 'D', 'C', 'G', 'Am', 'Em', 'C', 'G', 'Am', 'D'];
+const PREP_TUNE: Mel[] = [
+  // A: the marimba tune
+  [[0, 9, 3], [3, 8, 1], [4, 7, 4], [10, 8, 2], [12, 9, 4]],
+  [[0, 11, 3], [4, 9, 3], [8, 7, 8]],
+  [[0, 10, 2], [2, 9, 2], [4, 7, 4], [8, 5, 4], [12, 7, 4]],
+  [[0, 8, 6], [8, 6, 2], [10, 8, 2], [12, 11, 4]],
+  // B: its answer
+  [[0, 9, 3], [3, 8, 1], [4, 7, 4], [10, 9, 2], [12, 11, 4]],
+  [[0, 12, 4], [4, 11, 2], [6, 9, 2], [8, 11, 8]],
+  [[0, 10, 3], [3, 9, 1], [4, 8, 4], [8, 7, 2], [10, 8, 2], [12, 5, 4]],
+  [[0, 6, 4], [4, 8, 4], [8, 4, 8]],
+  // C: the flute, long and calm (the marimba rests)
+  [[0, 7, 6], [6, 9, 2], [8, 10, 8]],
+  [[0, 11, 6], [6, 9, 2], [8, 7, 8]],
+  [[0, 8, 6], [6, 10, 2], [8, 12, 8]],
+  [[0, 11, 8], [8, 9, 8]],
+  // D: a few marimba notes, lots of air
+  [[4, 9, 2], [6, 10, 2], [8, 12, 8]],
+  [[4, 11, 2], [6, 9, 2], [8, 7, 8]],
+  [[4, 8, 2], [6, 10, 2], [8, 12, 4], [12, 11, 4]],
+  [[0, 8, 6], [6, 6, 2], [8, 4, 8]],
 ];
-const TUNE_A2: Mel = [[0, 6, 2], [2, 5, 2], [4, 3, 2], [6, 5, 2], [8, 7, 8]];
-const TUNE_B: Mel[] = [
-  [[0, 9, 6], [6, 8, 2], [8, 7, 4], [12, 8, 4]],
-  [[0, 7, 4], [4, 6, 4], [8, 7, 2], [10, 8, 2], [12, 9, 4]],
-  [[0, 10, 6], [6, 9, 2], [8, 8, 4], [12, 7, 4]],
-  [[0, 8, 4], [4, 7, 2], [6, 6, 2], [8, 5, 8]],
-];
 
-function lobbyBar(bar: number): Ev[] {
-  const ch = CH[LOBBY_CHORDS[bar]];
+function prepBar(bar: number): Ev[] {
+  const sc = G_MAJOR;
+  const ch = PREP_CH[PREP_CHORDS[bar]];
+  const sec = Math.floor(bar / 4);
   const ev: Ev[] = [];
-  const sec = bar < 4 ? 0 : bar < 8 ? 1 : bar < 12 ? 2 : 3;
-  ev.push(...hit('don', [0], 0.6), ...hit('doko', [10], 0.42), ...hit('ka', [4, 12], 0.3));
-  ev.push(...[0, 2, 4, 6, 8, 10, 12, 14].map((s) => ({ s, i: 'shaker' as Inst, v: s % 4 ? 0.35 : 0.6 })));
-  if (bar % 4 === 3) ev.push(...hit('shime', [14, 15], 0.5));
-  [[0, 0, 3], [3, 5, 1], [6, 0, 2], [8, 0, 3], [11, 5, 1], [14, 0, 2]].forEach(([s, o, d]) => ev.push({ s, i: 'bass', n: note(YO, ch.b + o), d, v: 0.8 }));
-  [0, 1, 2, 3, 2, 1, 2, 3].forEach((k, j) => ev.push({ s: j * 2, i: 'koto', n: note(YO, ch.t[k]), d: 3, v: j % 2 ? 0.28 : 0.42, p: j % 2 ? 0.25 : -0.25 }));
-  for (const d of ch.t) ev.push({ s: 0, i: 'pad', n: note(YO, d), d: 16, v: 0.6 });
-  if (sec === 0) ev.push(...mel(YO, 'koto', TUNE_A[bar], 0.9));
-  if (sec === 1) {
-    const t = bar === 7 ? [TUNE_A2] : [TUNE_A[bar - 4]];
-    ev.push(...mel(YO, 'flute', t[0], 0.85), ...mel(YO, 'koto', t[0], 0.35));
+  // the kit: brushed, soft
+  ev.push(...hit('kick', [0], sec === 2 ? 0.32 : 0.45));
+  if (sec === 1 || sec === 3) ev.push(...hit('kick', [10], 0.28));
+  ev.push(...hit('snap', [4, 12], sec === 0 ? 0.3 : 0.42));
+  ev.push(...[0, 2, 4, 6, 8, 10, 12, 14].map((s) => ({ s, i: 'shaker' as Inst, v: s % 4 ? 0.22 : 0.34 })));
+  if (bar === 15) ev.push({ s: 12, i: 'tom', n: 57, v: 0.3 }, { s: 14, i: 'tom', n: 52, v: 0.35 });
+  // the round bass
+  [[0, 0, 6], [8, 4, 4], [12, 0, 2], [14, 4, 2]].forEach(([s, o, d]) => ev.push({ s, i: 'bass', n: note(sc, ch.b + o), d, v: 0.6 }));
+  // the keys
+  if (sec === 2) ev.push(...chordEv(sc, 'keys', ch, 0, 14, 0.26));
+  else {
+    ev.push(...chordEv(sc, 'keys', ch, 0, 6, 0.34), ...chordEv(sc, 'keys', ch, 8, 6, 0.25));
+    ev.push({ s: 6, i: 'keys', n: note(sc, ch.t[3]), d: 2, v: 0.16 }, { s: 11, i: 'keys', n: note(sc, ch.t[1]), d: 3, v: 0.14 }, { s: 11, i: 'keys', n: note(sc, ch.t[2]), d: 3, v: 0.14 });
   }
-  if (sec === 2) ev.push(...mel(YO, 'flute', TUNE_B[bar - 8], 0.9));
-  if (sec === 3) ev.push(...mel(YO, 'koto', TUNE_A[bar - 12], 0.8), ...mel(YO, 'flute', TUNE_A[bar - 12], 0.5));
-  if (bar % 2 === 1) ev.push({ s: 8, i: 'chime', n: note(YO, ch.t[2] + 10), d: 8, v: 0.8 });
-  if (bar === 8) ev.push({ s: 0, i: 'chime', n: note(YO, 14), d: 8, v: 0.9 });
+  if (sec >= 2) ev.push(...chordEv(sc, 'pad', ch, 0, 16, 0.42));
+  // the tune
+  const tune = PREP_TUNE[bar];
+  if (sec === 2) ev.push(...mel(sc, 'flute', tune, 0.58));
+  else ev.push(...mel(sc, 'mallet', tune, sec === 3 ? 0.66 : 0.8));
+  if (bar === 3 || bar === 7) ev.push({ s: 12, i: 'chime', n: note(sc, ch.t[3] + 7), d: 4, v: 0.45 });
+  if (bar === 12 || bar === 14) ev.push({ s: 0, i: 'chime', n: note(sc, ch.t[2] + 7), d: 8, v: 0.4 });
   return ev;
 }
 
-function searchBar(bar: number): Ev[] {
-  const ch = CH[LOBBY_CHORDS[Math.floor(bar / 2) % 4]];
-  const ev: Ev[] = [];
-  ev.push({ s: 0, i: 'bass', n: note(YO, -10), d: 16, v: 0.7 });
-  for (const d of ch.t) ev.push({ s: 0, i: 'pad', n: note(YO, d), d: 16, v: 0.75 });
-  for (let s = 0; s < 16; s += 2) ev.push({ s, i: 'wood', v: s % 8 === 0 ? 0.8 : s % 4 === 0 ? 0.5 : 0.28 });
-  if (bar % 2 === 1) ev.push({ s: 8, i: 'shimmer', v: 0.9 });
-  if (bar % 2 === 0) ev.push({ s: 0, i: 'koto', n: note(YO, ch.t[3] + 5), d: 4, v: 0.4 }, { s: 6, i: 'koto', n: note(YO, ch.t[1] + 5), d: 4, v: 0.3 });
-  if (bar === 3 || bar === 7) ev.push({ s: 12, i: 'chime', n: note(YO, 13), d: 4, v: 0.7 });
-  return ev;
-}
-
-// ---- the battle (D "in" scale: D Eb G A Bb), 8 bars: D D Bb A D D G A
-const BATTLE_ROOT = [0, 0, 4, 3, 0, 0, 2, 3]; // the chord's root as a degree
-const BATTLE_BASS = [-10, -10, -6, -7, -10, -10, -8, -7];
-const HOOK: Mel[] = [
-  [[0, 5, 2], [2, 7, 2], [4, 8, 4], [8, 7, 2], [10, 5, 2], [12, 7, 4]],
-  [[0, 8, 2], [2, 9, 2], [4, 8, 4], [8, 7, 4], [12, 8, 4]],
-  [[0, 9, 2], [2, 9, 2], [4, 8, 2], [6, 7, 2], [8, 6, 4], [12, 5, 4]],
-  [[0, 6, 2], [2, 7, 2], [4, 8, 8], [12, 7, 2], [14, 6, 2]],
-  [[0, 5, 2], [2, 7, 2], [4, 8, 4], [8, 7, 2], [10, 5, 2], [12, 7, 4]],
-  [[0, 8, 2], [2, 9, 2], [4, 10, 4], [8, 9, 2], [10, 8, 2], [12, 7, 4]],
-  [[0, 10, 4], [4, 9, 2], [6, 8, 2], [8, 7, 4], [12, 5, 4]],
-  [[0, 8, 6], [6, 7, 2], [8, 6, 4], [12, 5, 4]],
+// ---- wave (E minor), 8 bars: Em C G D Em C Am D
+const WAVE_CH: Record<string, Chord> = {
+  Em: { b: -7, t: [4, 7, 9] },
+  C: { b: -2, t: [5, 7, 9] },
+  G: { b: -5, t: [4, 6, 9] },
+  D: { b: -1, t: [3, 6, 8] },
+  Am: { b: -4, t: [3, 5, 7] },
+};
+const WAVE_CHORDS = ['Em', 'C', 'G', 'D', 'Em', 'C', 'Am', 'D'];
+const WAVE_HOOK: Mel[] = [
+  [[0, 7, 2], [2, 7, 2], [4, 9, 2], [6, 7, 2], [8, 11, 4], [12, 10, 2], [14, 9, 2]],
+  [[0, 12, 2], [2, 11, 2], [4, 9, 4], [8, 7, 4], [12, 9, 4]],
+  [[0, 11, 2], [2, 11, 2], [4, 12, 2], [6, 11, 2], [8, 9, 4], [12, 6, 4]],
+  [[0, 8, 4], [4, 9, 2], [6, 8, 2], [8, 6, 8]],
+  [[0, 7, 2], [2, 7, 2], [4, 9, 2], [6, 7, 2], [8, 11, 4], [12, 10, 2], [14, 9, 2]],
+  [[0, 12, 2], [2, 11, 2], [4, 9, 2], [6, 11, 2], [8, 12, 4], [12, 14, 4]],
+  [[0, 10, 2], [2, 10, 2], [4, 12, 2], [6, 10, 2], [8, 9, 4], [12, 7, 4]],
+  [[0, 8, 4], [4, 10, 2], [6, 9, 2], [8, 8, 4], [12, 6, 4]],
 ];
-const RIFF: [number, number][] = [[0, 0], [2, 0], [3, 2], [4, 1], [6, 0], [8, 0], [10, 3], [11, 2], [12, 1], [14, 2]]; // [step, steps up from the root]
-const FLY = [0, 1, 2, 3, 0, 1, 2, 3, 1, 2, 3, 4, 2, 3, 4, 5]; // the overtime ostinato climbs
-
-function battleBar(bar: number, over: boolean): Ev[] {
-  const ev: Ev[] = [];
-  const r = BATTLE_ROOT[bar];
-  // the groove (always)
-  ev.push(...hit('don', over ? [0, 3, 6, 8, 10, 12, 14] : [0, 6, 8, 10], 1));
-  ev.push(...hit('ka', [4, 12], 0.7), ...hit('doko', over ? [2, 7, 11, 15] : [3, 11], 0.55));
-  ev.push(...[0, 2, 4, 6, 8, 10, 12, 14].map((s) => ({ s, i: 'shime' as Inst, v: s % 4 ? 0.4 : 0.7 })));
-  [0, 0, 5, 0, 0, 0, 5, 0].forEach((o, k) => ev.push({ s: k * 2, i: 'bass', n: note(IN, BATTLE_BASS[bar] + o), d: 1.6, v: k % 2 ? 0.75 : 1 }));
-  ev.push(...hit('shaker', [1, 3, 5, 7, 9, 11, 13, 15], 0.8, over ? 0 : 0.5));
-  // the shamisen riff and the sparkle (mid energy)
-  const re = over ? 0 : 0.35;
-  for (const [s, o] of RIFF) ev.push({ s, i: 'shamisen', n: note(IN, r + 5 + o), d: 1, v: s % 4 ? 0.8 : 1, e: re });
-  ev.push({ s: 0, i: 'shamisen', n: note(IN, r), d: 2, v: 0.9, e: re });
-  if (bar % 2 === 0) ev.push({ s: 0, i: 'chime', n: note(IN, r + 15), d: 8, v: 0.8, e: over ? 0 : 0.5 });
-  // the hook (high energy)
-  ev.push(...mel(IN, 'flute', HOOK[bar], 1, over ? 0 : 0.65));
-  // fills and crashes
-  if (bar % 4 === 0) ev.push({ s: 0, i: 'crash', v: 1, e: over ? 0 : 0.8 });
-  if (bar % 4 === 3) ev.push(...[12, 13, 14, 15].map((s, k) => ({ s, i: 'doko' as Inst, v: 0.5 + k * 0.17, e: over ? 0 : 0.8 })));
-  if (over) {
-    FLY.forEach((o, s) => ev.push({ s, i: 'shamisen', n: note(IN, r + 5 + o + (bar % 2) * 2), d: 1, v: 0.55 + s / 40 }));
-    ev.push(...hit('don', [1, 5, 9, 13], 0.55));
-    if (bar % 2 === 0) ev.push({ s: 0, i: 'crash', v: 0.9 });
-    if (bar % 4 === 3) ev.push(...[8, 10, 11, 12, 13, 14, 15].map((s, k) => ({ s, i: 'doko' as Inst, v: 0.4 + k * 0.1 })));
-  }
-  return ev;
-}
-
-// ---- the victory (D yo scale), 8 bars, bright and bouncy
-const VICTORY_CHORDS = ['G', 'D', 'E', 'A', 'G', 'D', 'E', 'A'];
-const VICTORY: Mel[] = [
-  [[0, 5, 2], [2, 7, 2], [4, 9, 4], [8, 8, 2], [10, 7, 2], [12, 5, 4]],
-  [[0, 6, 2], [2, 7, 2], [4, 8, 6], [10, 7, 2], [12, 6, 4]],
-  [[0, 7, 2], [2, 9, 2], [4, 10, 4], [8, 9, 2], [10, 8, 2], [12, 7, 4]],
-  [[0, 8, 4], [4, 7, 2], [6, 6, 2], [8, 5, 4], [12, 6, 2], [14, 7, 2]],
-  [[0, 5, 2], [2, 7, 2], [4, 9, 4], [8, 10, 2], [10, 9, 2], [12, 7, 4]],
-  [[0, 8, 2], [2, 9, 2], [4, 10, 6], [10, 9, 2], [12, 8, 4]],
-  [[0, 9, 2], [2, 10, 2], [4, 11, 4], [8, 10, 2], [10, 9, 2], [12, 8, 4]],
-  [[0, 8, 2], [2, 7, 2], [4, 5, 4], [8, 5, 8]],
+/** The crowd's chant: "oh, oh, oh-OH ... oh-ohhh". */
+const CHANT: Mel[] = [
+  [[0, 4, 2], [4, 4, 2], [8, 5, 2], [12, 4, 3]],
+  [[0, 2, 3], [4, 2, 2], [8, 0, 6]],
 ];
 
-function victoryBar(bar: number): Ev[] {
-  const ch = CH[VICTORY_CHORDS[bar]];
+function waveBar(bar: number): Ev[] {
+  const sc = E_MINOR;
+  const ch = WAVE_CH[WAVE_CHORDS[bar]];
   const ev: Ev[] = [];
-  ev.push(...hit('don', [0, 8], 0.8), ...hit('doko', [6, 14], 0.5), ...hit('ka', [4, 12], 0.5));
-  ev.push(...[0, 2, 4, 6, 8, 10, 12, 14].map((s) => ({ s, i: 'shime' as Inst, v: s % 4 ? 0.35 : 0.6 })));
-  ev.push(...hit('shaker', [1, 3, 5, 7, 9, 11, 13, 15], 0.8));
-  [[0, 0, 3], [3, 5, 1], [6, 0, 2], [8, 0, 3], [11, 5, 1], [14, 0, 2]].forEach(([s, o, d]) => ev.push({ s, i: 'bass', n: note(YO, ch.b + o), d, v: 0.85 }));
-  for (let j = 0; j < 8; j++) ev.push({ s: j * 2, i: 'koto', n: note(YO, ch.t[[0, 2, 3, 2][j % 4]] + 5), d: 2, v: j % 2 ? 0.3 : 0.45, p: j % 2 ? 0.3 : -0.3 });
-  for (const d of ch.t) ev.push({ s: 0, i: 'pad', n: note(YO, d), d: 16, v: 0.5 });
-  ev.push(...mel(YO, 'flute', VICTORY[bar], 0.9), ...mel(YO, 'chime', VICTORY[bar], 0.5).map((x) => ({ ...x, n: (x.n ?? 0) + 12 })));
-  if (bar % 4 === 0) ev.push({ s: 0, i: 'crash', v: 0.8 });
+  // the groove (always): four on the floor, claps, offbeat hats
+  ev.push({ s: 0, i: 'kick', v: 1 }, { s: 4, i: 'kick', v: 0.8 }, { s: 8, i: 'kick', v: 0.95 }, { s: 12, i: 'kick', v: 0.8 });
+  ev.push(...hit('clap', [4, 12], 0.8), ...hit('hat', [2, 6, 10, 14], 0.6));
+  ev.push(...hit('shaker', [1, 3, 5, 7, 9, 11, 13, 15], 0.6, 0.3));
+  [0, 0, 7, 0, 0, 0, 7, 4].forEach((o, k) => ev.push({ s: k * 2, i: 'bass', n: note(sc, ch.b + o), d: 1.6, v: k % 2 ? 0.75 : 1 }));
+  // offbeat stabs
+  ev.push(...chordEv(sc, 'stab', ch, 6, 1, 0.7, 0.2), ...chordEv(sc, 'stab', ch, 14, 1, 0.6, 0.2));
+  // the hook, then a horn doubling it
+  ev.push(...mel(sc, 'mallet', WAVE_HOOK[bar], 0.8, 0.4));
+  ev.push(...mel(sc, 'horn', WAVE_HOOK[bar], 0.55, 0.7));
+  // the crowd
+  if (bar % 4 < 2) ev.push(...mel(sc, 'chant', CHANT[bar % 2], 0.9, 0.6));
+  // crashes and fills
+  if (bar % 4 === 0) ev.push({ s: 0, i: 'crash', v: 0.9, e: 0.75 });
+  if (bar % 4 === 3) ev.push(...[12, 13, 14, 15].map((s, k) => ({ s, i: 'tom' as Inst, n: [57, 57, 52, 45][k], v: 0.5 + k * 0.15, e: 0.75 })));
   return ev;
+}
+
+// ---- boss (E phrygian), 8 bars: Em Em F F Em Em G F
+const BOSS_CH: Record<string, Chord> = {
+  Em: { b: -7, t: [4, 7, 9] },
+  F: { b: -6, t: [3, 5, 8] },
+  G: { b: -5, t: [4, 6, 9] },
+};
+const BOSS_CHORDS = ['Em', 'Em', 'F', 'F', 'Em', 'Em', 'G', 'F'];
+const BOSS_HORN: Mel[] = [
+  [[0, 7, 8], [8, 8, 8]],
+  [[0, 7, 12], [12, 6, 4]],
+  [[0, 8, 8], [8, 9, 8]],
+  [[0, 10, 8], [8, 8, 8]],
+  [[0, 11, 8], [8, 12, 8]],
+  [[0, 11, 12], [12, 9, 4]],
+  [[0, 9, 8], [8, 11, 8]],
+  [[0, 12, 8], [8, 8, 8]],
+];
+
+function bossBar(bar: number): Ev[] {
+  const sc = E_PHRYGIAN;
+  const ch = BOSS_CH[BOSS_CHORDS[bar]];
+  const ev: Ev[] = [];
+  // big drums (always)
+  ev.push({ s: 0, i: 'don', v: 1 }, { s: 6, i: 'don', v: 0.7 }, { s: 8, i: 'don', v: 0.9 });
+  ev.push(...hit('kick', [0, 4, 8, 12], 0.85), ...hit('clap', [4, 12], 0.7), ...hit('hat', [2, 6, 10, 14], 0.55));
+  if (bar % 2 === 1) ev.push({ s: 14, i: 'tom', n: 52, v: 0.6 }, { s: 15, i: 'tom', n: 45, v: 0.7 });
+  // the low ostinato, with the menacing half step
+  [0, 0, 7, 0, 1, 0, 7, 0].forEach((o, k) => ev.push({ s: k * 2, i: 'bass', n: note(sc, ch.b + o), d: 1.6, v: k % 2 ? 0.8 : 1 }));
+  // stabs: dun - dun - dun
+  for (const s of [0, 3, 6]) ev.push(...chordEv(sc, 'stab', ch, s, 1.5, 0.75, 0.2, -7));
+  ev.push(...mel(sc, 'horn', BOSS_HORN[bar], 0.7, 0.45));
+  if (bar % 2 === 0) ev.push(...chordEv(sc, 'choir', ch, 0, 16, 0.85, 0.6));
+  // a ticking marimba, tense
+  for (let k = 0; k < 8; k++) ev.push({ s: k * 2, i: 'mallet', n: note(sc, ch.t[k % 2 ? 1 : 2] + 7), d: 1, v: k % 2 ? 0.35 : 0.5, e: 0.7 });
+  if (bar % 2 === 0) ev.push({ s: 0, i: 'crash', v: 0.85, e: 0.8 });
+  if (bar % 4 === 3) ev.push(...[8, 10, 11, 12, 13, 14, 15].map((s, k) => ({ s, i: 'tom' as Inst, n: [57, 57, 52, 52, 45, 45, 45][k], v: 0.4 + k * 0.1, e: 0.8 })));
+  return ev;
+}
+
+// ---- stage clear (G major), 8 bars, bright and bouncy
+const CLEAR_CH: Record<string, Chord> = {
+  G: { b: -7, t: [0, 2, 4] },
+  D: { b: -10, t: [1, 4, 6] },
+  Em: { b: -9, t: [0, 2, 5] },
+  C: { b: -4, t: [0, 3, 5] },
+};
+const CLEAR_CHORDS = ['G', 'D', 'Em', 'C', 'G', 'D', 'C', 'D'];
+const CLEAR_TUNE: Mel[] = [
+  [[0, 7, 2], [2, 9, 2], [4, 11, 4], [8, 12, 2], [10, 11, 2], [12, 9, 4]],
+  [[0, 8, 2], [2, 9, 2], [4, 11, 6], [10, 9, 2], [12, 8, 4]],
+  [[0, 9, 2], [2, 11, 2], [4, 12, 4], [8, 11, 2], [10, 9, 2], [12, 7, 4]],
+  [[0, 10, 4], [4, 9, 2], [6, 8, 2], [8, 7, 4], [12, 8, 2], [14, 9, 2]],
+  [[0, 7, 2], [2, 9, 2], [4, 11, 4], [8, 14, 2], [10, 12, 2], [12, 11, 4]],
+  [[0, 11, 2], [2, 12, 2], [4, 13, 6], [10, 12, 2], [12, 11, 4]],
+  [[0, 12, 2], [2, 11, 2], [4, 10, 4], [8, 9, 2], [10, 10, 2], [12, 12, 4]],
+  [[0, 11, 4], [4, 8, 4], [8, 6, 4], [12, 8, 4]],
+];
+
+function clearBar(bar: number): Ev[] {
+  const sc = G_MAJOR;
+  const ch = CLEAR_CH[CLEAR_CHORDS[bar]];
+  const ev: Ev[] = [];
+  ev.push(...hit('kick', [0, 8], 0.85), ...hit('kick', [10], 0.45), ...hit('clap', [4, 12], 0.65), ...hit('hat', [2, 6, 10, 14], 0.5));
+  ev.push(...hit('shaker', [1, 3, 5, 7, 9, 11, 13, 15], 0.6));
+  [[0, 0, 2], [3, 0, 1], [4, 7, 2], [6, 0, 2], [8, 0, 2], [11, 4, 1], [12, 7, 2], [14, 4, 2]].forEach(([s, o, d]) => ev.push({ s, i: 'bass', n: note(sc, ch.b + o), d, v: 0.8 }));
+  for (let j = 0; j < 8; j++) ev.push({ s: j * 2, i: 'mallet', n: note(sc, ch.t[[0, 1, 2, 1][j % 4]] + 7), d: 2, v: j % 2 ? 0.3 : 0.42, p: j % 2 ? 0.3 : -0.3 });
+  ev.push(...chordEv(sc, 'keys', ch, 0, 14, 0.25));
+  ev.push(...mel(sc, 'flute', CLEAR_TUNE[bar], 0.8), ...mel(sc, 'chime', CLEAR_TUNE[bar], 0.32).map((x) => ({ ...x, n: (x.n ?? 0) + 12 })));
+  if (bar % 4 === 0) ev.push({ s: 0, i: 'crash', v: 0.7 });
+  return ev;
+}
+
+// ---- defeat (G major / E minor), 4 slow bars: Em7 Cmaj7 Am7 Dsus
+const DEFEAT_CH: Chord[] = [
+  { b: -9, t: [2, 4, 5, 7] },
+  { b: -4, t: [2, 3, 5, 7] },
+  { b: -6, t: [1, 3, 5, 7] },
+  { b: -10, t: [1, 4, 5, 8] },
+];
+const DEFEAT_TUNE: Mel[] = [
+  [[4, 9, 4], [8, 7, 8]],
+  [[4, 9, 4], [8, 7, 8]],
+  [[4, 8, 4], [8, 5, 8]],
+  [[4, 8, 4], [8, 11, 8]],
+];
+
+function defeatBar(bar: number): Ev[] {
+  const sc = G_MAJOR;
+  const ch = DEFEAT_CH[bar];
+  return [
+    { s: 0, i: 'bass', n: note(sc, ch.b), d: 14, v: 0.45 },
+    ...chordEv(sc, 'keys', ch, 0, 15, 0.38),
+    { s: 8, i: 'keys', n: note(sc, ch.t[3]), d: 6, v: 0.2 },
+    ...chordEv(sc, 'pad', ch, 0, 16, 0.6),
+    ...mel(sc, 'mallet', DEFEAT_TUNE[bar], 0.6),
+  ];
 }
 
 const bars = (n: number, f: (b: number) => Ev[]) => Array.from({ length: n }, (_, b) => f(b));
 
-const SONGS: Record<Exclude<MusicState, 'off' | 'defeat'>, Song> = {
-  lobby: { bpm: 92, bars: bars(16, lobbyBar), sc: YO, swing: 0.14 },
-  search: { bpm: 92, bars: bars(8, searchBar), sc: YO },
-  battle: { bpm: 144, bars: bars(8, (b) => battleBar(b, false)), sc: IN },
-  overtime: { bpm: 156, bars: bars(8, (b) => battleBar(b, true)), sc: IN },
-  victory: { bpm: 128, bars: bars(8, victoryBar), sc: YO },
+type Playable = Exclude<MusicState, 'off' | LegacyMusicState>;
+
+const SONGS: Record<Playable, Song> = {
+  prep: { bpm: 84, bars: bars(16, prepBar), sc: G_MAJOR, swing: 0.12 },
+  wave: { bpm: 124, bars: bars(8, waveBar), sc: E_MINOR },
+  boss: { bpm: 132, bars: bars(8, bossBar), sc: E_PHRYGIAN },
+  stageClear: { bpm: 128, bars: bars(8, clearBar), sc: G_MAJOR },
+  defeat: { bpm: 70, bars: bars(4, defeatBar), sc: G_MAJOR },
 };
 
-const MELODIC: Inst[] = ['koto', 'shamisen', 'flute', 'chime', 'pad', 'bass'];
+/** Seconds before each state's song starts, and how fast the one before it fades. */
+const ENTRY: Record<Playable, [number, number]> = {
+  prep: [1.2, 0.8],
+  wave: [0.35, 0.2],
+  boss: [0.9, 0.3],
+  stageClear: [2.2, 0.5],
+  defeat: [1.4, 0.6],
+};
+
+const MELODIC: Inst[] = ['keys', 'mallet', 'flute', 'chime', 'pad', 'bass', 'stab', 'horn', 'chant', 'choir'];
 
 /** For checking: every melodic note of every song against its scale. Returns notes counted and notes outside the scale. */
 export function scaleCheck(): { state: string; notes: number; bad: number }[] {
@@ -324,7 +446,7 @@ export function scaleCheck(): { state: string; notes: number; bad: number }[] {
         if (e.n === undefined || !MELODIC.includes(e.i)) continue;
         notes++;
         const pc = (((e.n - song.sc.root) % 12) + 12) % 12;
-        if (!song.sc.full.some((x) => x % 12 === pc)) bad++;
+        if (!song.sc.base.some((x) => x % 12 === pc)) bad++;
       }
     }
     return { state, notes, bad };
@@ -333,12 +455,82 @@ export function scaleCheck(): { state: string; notes: number; bad: number }[] {
 
 // ------------------------------------------------------------------ the player
 
+type Samples = Map<Inst, { base: number; buf: AudioBuffer }[]>;
+
+/** Plays one event of a song at time t: the nearest rendered sample, pitched, cut at its length, panned, into the mix. */
+function playNote(ac: BaseAudioContext, samples: Samples, e: Ev, t: number, stepLen: number, dest: AudioNode, verb: AudioNode | null): Voice | null {
+  const def = INSTRUMENTS[e.i];
+  const list = samples.get(e.i);
+  if (!list) return null;
+  let smp = list[0];
+  if (e.n !== undefined) for (const x of list) if (Math.abs(x.base - e.n) < Math.abs(smp.base - e.n)) smp = x;
+  const rate = e.n !== undefined && smp.base ? 2 ** ((e.n - smp.base) / 12) : 1;
+  const src = ac.createBufferSource();
+  src.buffer = smp.buf;
+  src.playbackRate.value = rate;
+  const g = ac.createGain();
+  const vol = def.vol * (e.v ?? 1) * frand(0.93, 1.03);
+  g.gain.setValueAtTime(vol, t);
+  let end = t + smp.buf.duration / rate;
+  if (e.d !== undefined) {
+    const off = t + e.d * stepLen;
+    if (off < end) {
+      g.gain.setValueAtTime(vol, off);
+      g.gain.setTargetAtTime(0, off, 0.03);
+      end = off + 0.2;
+    }
+  }
+  src.connect(g);
+  let node: AudioNode = g;
+  const pan = e.p ?? def.pan;
+  if (pan && ac.createStereoPanner) {
+    const p = ac.createStereoPanner();
+    p.pan.value = pan;
+    g.connect(p);
+    node = p;
+  }
+  node.connect(dest);
+  if (def.verb && verb) {
+    const send = ac.createGain();
+    send.gain.value = def.verb * LEVEL;
+    node.connect(send);
+    send.connect(verb);
+  }
+  src.start(t);
+  src.stop(end + 0.05);
+  return { g, src, end };
+}
+
+/** For checking (tools): renders the first `seconds` of a state's song offline, at an energy, dry, at its game level. */
+export async function renderSong(state: MusicState, seconds: number, energy = 0.5): Promise<AudioBuffer> {
+  const st = resolve(state);
+  if (st === 'off') throw new Error('off has no song');
+  const song = SONGS[st];
+  const samples: Samples = new Map();
+  for (const [name, def] of Object.entries(INSTRUMENTS) as [Inst, InstDef][]) {
+    samples.set(name, await Promise.all(def.bases.map(async (base) => ({ base, buf: await renderRecipe(`music:${name}:${base}`, def.dur, (s) => def.make(s, base)) }))));
+  }
+  const ac = new OfflineAudioContext(2, Math.ceil(seconds * 44100), 44100);
+  const level = ac.createGain();
+  level.gain.value = LEVEL;
+  level.connect(ac.destination);
+  const stepLen = 60 / song.bpm / 4;
+  for (let k = 0, t = 0.02; t < seconds; k++, t += stepLen) {
+    const step = k % 16;
+    const swing = song.swing && step % 2 ? song.swing * stepLen : 0;
+    for (const e of song.bars[Math.floor(k / 16) % song.bars.length]) if (e.s === step && (e.e ?? 0) <= energy) playNote(ac, samples, e, t + swing, stepLen, level, null);
+  }
+  return ac.startRendering();
+}
+
+
 interface Voice {
   g: GainNode;
   src: AudioBufferSourceNode;
   end: number;
 }
-type Playable = keyof typeof SONGS;
+/** A v3 state name becomes the v4 state it plays. */
+const resolve = (st: MusicState): Exclude<MusicState, LegacyMusicState> => (st in MUSIC_ALIAS ? MUSIC_ALIAS[st as LegacyMusicState] : (st as Exclude<MusicState, LegacyMusicState>));
 
 class Music implements MusicApi {
   private ac: AudioContext | null = null;
@@ -423,13 +615,12 @@ class Music implements MusicApi {
 
   set(state: MusicState) {
     try {
-      if (state === this.state) return;
-      this.state = state;
-      if (state === 'off' || state === 'defeat') this.start(null, 0, 0.6);
-      else if (state === 'battle') this.start(state, 0.4, 0.15);
-      else if (state === 'victory') this.start(state, 1.5, 0.5);
-      else this.pending = state; // lobby, search, overtime: on the next bar
-      if (this.playing === null && this.pending) this.start(this.pending, 0, 0.1); // nothing is playing: no bar to wait for
+      const st = resolve(state);
+      if (st === this.state) return;
+      this.state = st;
+      if (st === 'off') this.start(null, 0, 0.6);
+      else if (this.playing === null) this.start(st, 0, 0.1); // nothing is playing: straight in
+      else this.start(st, ...ENTRY[st]);
     } catch {
       /* ignore */
     }
@@ -548,53 +739,14 @@ class Music implements MusicApi {
     const swing = song.swing && this.step % 2 ? song.swing * stepLen : 0;
     for (const e of song.bars[this.bar]) {
       if (e.s !== this.step || (e.e ?? 0) > this.heat) continue;
-      this.note(e, t + swing + (Math.random() - 0.5) * 0.004, stepLen);
+      this.note(e, t + swing + frand(-0.002, 0.002), stepLen);
     }
   }
 
   private note(e: Ev, t: number, stepLen: number) {
     const ac = this.ac!;
-    t = Math.max(t, ac.currentTime); // the jitter never schedules a note in the past
-    const def = INSTRUMENTS[e.i];
-    const list = this.samples.get(e.i);
-    if (!list) return;
-    let smp = list[0];
-    if (e.n !== undefined) for (const x of list) if (Math.abs(x.base - e.n) < Math.abs(smp.base - e.n)) smp = x;
-    const rate = e.n !== undefined && smp.base ? 2 ** ((e.n - smp.base) / 12) : 1;
-    const src = ac.createBufferSource();
-    src.buffer = smp.buf;
-    src.playbackRate.value = rate;
-    const g = ac.createGain();
-    const vol = def.vol * (e.v ?? 1) * (0.93 + Math.random() * 0.1);
-    g.gain.setValueAtTime(vol, t);
-    let end = t + smp.buf.duration / rate;
-    if (e.d !== undefined) {
-      const off = t + e.d * stepLen;
-      if (off < end) {
-        g.gain.setValueAtTime(vol, off);
-        g.gain.setTargetAtTime(0, off, 0.03);
-        end = off + 0.2;
-      }
-    }
-    src.connect(g);
-    let node: AudioNode = g;
-    const pan = e.p ?? def.pan;
-    if (pan && ac.createStereoPanner) {
-      const p = ac.createStereoPanner();
-      p.pan.value = pan;
-      g.connect(p);
-      node = p;
-    }
-    node.connect(this.level!);
-    if (def.verb && this.verb) {
-      const send = ac.createGain();
-      send.gain.value = def.verb * LEVEL;
-      node.connect(send);
-      send.connect(this.verb);
-    }
-    src.start(t);
-    src.stop(end + 0.05);
-    this.voices.push({ g, src, end });
+    const v = playNote(ac, this.samples, e, Math.max(t, ac.currentTime), stepLen, this.level!, this.verb); // the jitter never schedules a note in the past
+    if (v) this.voices.push(v);
   }
 }
 

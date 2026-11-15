@@ -10,11 +10,11 @@ export type UnitPhase =
   | 'wait' // lined up, before the fight starts (or before its band sets off)
   | 'move' // walking (or hopping) toward its target
   | 'windup' // drawing back for an attack
-  | 'recover' // following through after the strike (and a penguin standing up after a slam)
+  | 'recover' // following through after the strike (and a Sumo standing up after a slam)
   | 'stun' // knocked silly
-  | 'air' // a grasshopper's opening leap: it cannot be targeted, hit, pushed or collided with
-  | 'shell' // a snail hiding in its shell: it takes 85% less, cannot be pushed or stunned, and regrows
-  | 'slide'; // a penguin's belly slide toward its target
+  | 'air' // a Pogo's opening leap: it cannot be targeted, hit, pushed or collided with
+  | 'shell' // a Snailor hiding in its shell: it takes 85% less, cannot be pushed or stunned, and regrows
+  | 'slide'; // a Sumo's belly slide toward its target
 
 export interface SimUnit {
   id: number;
@@ -48,13 +48,15 @@ export interface SimUnit {
   phaseDur: number;
   /** id of the unit it is going for, or -1 */
   target: number;
-  /** its pet's rung, 1..12 */
+  /** its unit's rung, 1..12 */
   rung: number;
-  /** a hop (frogs, grasshoppers): 0 on the ground, up to 1 at the top; also the grasshopper's opening leap arc */
+  /** a boss (wave 10): draw it as a giant (r is already BOSS.radius x) with a crown */
+  boss: boolean;
+  /** a hop (Roos, Pogos): 0 on the ground, up to 1 at the top; also the Pogo's opening leap arc */
   hop: number;
   /** health its poison pools still hold (it will lose this much more unless it dies first), for the view */
   poison: number;
-  /** a beetle with its horn down: its next strike is a charge */
+  /** a Rhino with its horn down: its next strike is a charge */
   charged: boolean;
   /** distance walked, px (drives leg animation) */
   walked: number;
@@ -64,7 +66,7 @@ export interface SimUnit {
   hitDir: number;
 }
 
-/** How a unit died: a hit (an attack, a pinch, a landing, a slam), its foe's poison, or a hedgehog's spikes. */
+/** How a unit died: a hit (an attack, a jab, a landing, a slam, a stomp), a Buzzy's poison, or a Briar's thorns. */
 export type DeathCause = 'hit' | 'poison' | 'spike';
 /** The special blow that dealt a hit (null for a plain attack). */
 export type Blow = 'charge' | 'slam' | 'landing' | 'stomp' | null;
@@ -79,27 +81,27 @@ export interface HitEvent {
   x: number;
   y: number;
   dir: number;
-  /** a bat-sized hit (a bat swing, a penguin slam, a beetle charge) */
+  /** a bat-sized hit (a bat swing, a Sumo slam, a Rhino charge) */
   heavy: boolean;
   /** a shield took part of it */
   blocked: boolean;
   /** it stunned the target */
   stun: boolean;
-  /** ant: other ants packed around the biter, 0..3 (+10% each) */
+  /** sprout: other Sprouts packed around the biter, 0..3 (+10% each) */
   pack: number;
-  /** crab: 0 when not a crab, else which of its two pinches (1 or 2; the view draws the 2nd 0.12 s later) */
+  /** cacto (the double hit): 0 when not a Cacto, else which of its two jabs (1 or 2; the view draws the 2nd 0.12 s later) */
   pinch: 0 | 1 | 2;
-  /** hedgehog spikes biting back: `from` is the hedgehog, `to` the attacker (no push, stun or poison) */
+  /** briar thorns biting back: `from` is the Briar, `to` its attacker (no push, stun or poison) */
   spike: boolean;
-  /** chameleon: the hit pulled the target toward it instead of pushing it */
+  /** angler: the hook pulled the target toward it instead of pushing it */
   pull: boolean;
-  /** turtle: its armour cut this hit */
+  /** boulder: its armour cut this hit */
   armour: boolean;
-  /** snail: it landed on a hiding snail's shell (85% cut) */
+  /** snailor: it landed on a hiding Snailor's shell (85% cut) */
   shell: boolean;
-  /** the special blow it was */
+  /** the special blow it was: 'charge' a Rhino's charge hit, 'slam' a Sumo's slam, 'landing' a Pogo's landing, 'stomp' a Boulder's stomp */
   blow: Blow;
-  /** frog: its tongue slap (+30 knock) */
+  /** roo: its punch (+30 knock) */
   slap: boolean;
   /** it broke off the target's wind-up */
   interrupt: boolean;
@@ -120,24 +122,24 @@ export type SimEvent =
    * health; blow: the special blow, when a hit did.
    */
   | { type: 'death'; unit: number; by: number; weapon: WeaponType | null; x: number; y: number; dir: number; power: number; last: boolean; cause: DeathCause; blow: Blow }
-  /** a hop lands (frogs, grasshoppers); big: a grasshopper's opening leap landing (its splash hit and stun land now) */
+  /** a hop lands (Roos, Pogos); big: a Pogo's opening leap landing (its splash hit and stun land now) */
   | { type: 'land'; unit: number; x: number; y: number; big: boolean }
-  /** mouse: it dodged a hit from `from` (nothing landed); (x, y) is where the hit would have landed */
+  /** ninja: it dodged a hit from `from` (nothing landed); (x, y) is where the hit would have landed */
   | { type: 'dodge'; unit: number; from: number; x: number; y: number }
-  /** snail: it hides in its shell (on) or pops out (off) */
-  | { type: 'shell'; unit: number; on: boolean }
-  /** grasshopper: its opening leap starts, from (x0, y0) to (x1, y1) in dur s, aimed at `target` */
+  /** snailor: it hides in its shell (on) or pops out (off), at (x, y) */
+  | { type: 'shell'; unit: number; on: boolean; x: number; y: number }
+  /** pogo: its opening leap starts, from (x0, y0) to (x1, y1) in dur s, aimed at `target` */
   | { type: 'leap'; unit: number; target: number; x0: number; y0: number; x1: number; y1: number; dur: number }
-  /** penguin: a belly slide starts (on) or ends (off) */
-  | { type: 'slide'; unit: number; on: boolean }
-  /** penguin: the slide slams into `to` at (x, y); n more foes are shoved by the wave */
+  /** sumo: a belly slide starts (on) or ends (off), at (x, y) */
+  | { type: 'slide'; unit: number; on: boolean; x: number; y: number }
+  /** sumo: the slide slams into `to` at (x, y); n more foes are shoved by the wave */
   | { type: 'slam'; unit: number; to: number; x: number; y: number; n: number }
-  /** beetle: its horn goes down (it is charged; its next strike is a charge) */
-  | { type: 'charge'; unit: number }
-  /** turtle: a stomp lands round it at (x, y) on n foes */
+  /** rhino: its horn goes down at (x, y) (it is charged; its next strike is a charge: a hit with blow 'charge') */
+  | { type: 'charge'; unit: number; x: number; y: number }
+  /** boulder: a stomp lands round it at (x, y) on n foes */
   | { type: 'stomp'; unit: number; x: number; y: number; n: number }
-  /** bee poison: `unit` lost dmg to poison since its last poison event (at most one every 0.5 s per victim); by = the bee of its newest pool */
-  | { type: 'poison'; unit: number; by: number; dmg: number }
+  /** buzzy poison: `unit` (at x, y) lost dmg to poison since its last poison event (at most one every 0.5 s per victim); by = the Buzzy of its newest pool */
+  | { type: 'poison'; unit: number; by: number; dmg: number; x: number; y: number }
   /** from now on hits grow stronger every second */
   | { type: 'enrage' }
   /** the fight is over. winner -1 = a draw. byTime: the clock decided it. */
@@ -153,6 +155,10 @@ export interface SimSummary {
   kills: [number, number];
   /** fighters each team started with */
   size: [number, number];
+  /** fighters each team still has standing */
+  alive: [number, number];
+  /** bosses each team knocked out */
+  bossKos: [number, number];
   /** share of its total health each team has left, 0..1 */
   hpLeft: [number, number];
 }

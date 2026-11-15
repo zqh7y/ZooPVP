@@ -1,11 +1,11 @@
 import { CLASS_FX, H, S, TEAM, TYPE, UI, W } from '../theme';
 import { CLASSES } from '../data';
 import { clamp, font, label, poly, rr, textWidth, type Ctx, type FontWeight, type Rect } from '../util';
-import { bolt, iconTint, trophy } from './icons';
+import { bolt, iconTint } from './icons';
 
 /*
- * The interface kit: sunny match day. Warm white and cream surfaces, dark slate text, one sunny gold for the
- * main action. Things that can be touched are soft rounded blocks lit from the upper left (a top face with a
+ * The interface kit: calm and easy on the eyes. Soft greige and warm white surfaces, slate text, one muted sage
+ * teal for the main action. Things that can be touched are soft rounded blocks lit from the upper left (a top face with a
  * light top edge, a deeper side face below it, a short warm shadow falling to the lower right); the rest are
  * warm white plates with a soft shadow. Every screen draws its interface with these.
  */
@@ -26,7 +26,7 @@ function hair(ctx: Ctx, x: number, y: number, w: number, h: number, rad: number)
  */
 function softShadow(ctx: Ctx, x: number, y: number, w: number, h: number, rad: number, spread: number, alpha: number) {
   const n = 3;
-  ctx.fillStyle = `rgba(110, 80, 40, ${(alpha / n).toFixed(3)})`;
+  ctx.fillStyle = `rgba(60, 54, 44, ${(alpha / n).toFixed(3)})`;
   for (let i = 0; i < n; i++) {
     const g = (spread * (i + 1)) / n;
     rr(ctx, x - g * 0.6 + g * 0.35, y - g * 0.3, w + g * 1.2, h + g * 0.9, rad + g);
@@ -130,8 +130,11 @@ export function tickTo(key: string, value: number, speed = 9): number {
 
 // ------------------------------------------------------------------ buttons and pills
 
-/** primary: the screen's one main action, in sunny gold. Every other variant is warm white or cream; danger is the red "drop here" state. */
-export type ButtonVariant = 'primary' | 'roll' | 'secondary' | 'quiet' | 'danger';
+/**
+ * primary: the screen's one main action, in the calm accent. secondary / roll / quiet are warm white or greige;
+ * case and elite are the two soft case tones (wheat for cash, lilac for gems); danger is the soft red "drop here" state.
+ */
+export type ButtonVariant = 'primary' | 'roll' | 'secondary' | 'quiet' | 'danger' | 'case' | 'elite';
 interface Look {
   top: string;
   low: string;
@@ -140,13 +143,15 @@ interface Look {
   text: string;
 }
 const VARIANT: Record<ButtonVariant, Look> = {
-  primary: { top: '#ffd23f', low: '#ffbb12', side: '#d99200', rim: '', text: UI.accentText },
-  roll: { top: '#ffffff', low: '#fbf5ea', side: '#dccbb0', rim: '#eadfcc', text: UI.text },
-  secondary: { top: '#ffffff', low: '#fbf5ea', side: '#dccbb0', rim: '#eadfcc', text: UI.text },
-  quiet: { top: '#f8f1e6', low: '#f1e8da', side: '#ddd0ba', rim: '#e8dcc8', text: UI.textDim },
-  danger: { top: '#ff7a72', low: '#f0564f', side: '#bf3a37', rim: '', text: '#ffffff' },
+  primary: { top: '#67a294', low: '#5a9686', side: '#3f6c60', rim: '', text: UI.accentText },
+  roll: { top: '#fbfaf7', low: '#f1eee8', side: '#cbc4b7', rim: '#e1dcd2', text: UI.text },
+  secondary: { top: '#fbfaf7', low: '#f1eee8', side: '#cbc4b7', rim: '#e1dcd2', text: UI.text },
+  quiet: { top: '#efece6', low: '#e7e3dc', side: '#cbc4b8', rim: '#ddd8ce', text: UI.textDim },
+  danger: { top: '#d98179', low: '#cb6a62', side: '#9e4d47', rim: '', text: '#ffffff' },
+  case: { top: '#eddcb2', low: '#e2cb95', side: '#ad9157', rim: '', text: '#3d321f' },
+  elite: { top: '#cfc8ea', low: '#bdb3e0', side: '#8075b1', rim: '', text: '#2c2647' },
 };
-const DISABLED: Look = { top: '#f1ebe1', low: '#ece4d7', side: '#dbd1c1', rim: '#e6ddcf', text: '#b5b0a6' };
+const DISABLED: Look = { top: '#ebe8e2', low: '#e5e1da', side: '#cfc9be', rim: '#dfdad1', text: '#a9a49b' };
 
 /** How deep a button's side face is: the top face travels this far when pressed. */
 export const BUTTON_DEPTH = 6;
@@ -216,7 +221,7 @@ export function button(ctx: Ctx, r: Rect, o: ButtonOpts = {}) {
   softShadow(ctx, r.x, r.y + 4, r.w, r.h - 2, rad, 7 - 4 * clamp(k, 0, 1), o.disabled ? 0.12 : 0.32);
   if (o.breathe !== undefined && !o.disabled) {
     ctx.save();
-    ctx.shadowColor = `rgba(255, 180, 0, ${(0.35 + 0.2 * Math.sin(o.breathe * 2.2)).toFixed(3)})`;
+    ctx.shadowColor = `rgba(90, 150, 134, ${(0.22 + 0.14 * Math.sin(o.breathe * 2.2)).toFixed(3)})`;
     ctx.shadowBlur = 24;
     rr(ctx, r.x, r.y + 2, r.w, r.h - 2, rad);
     ctx.fillStyle = v.side;
@@ -383,12 +388,12 @@ export function powerBadge(ctx: Ctx, cx: number, cy: number, power: number, o: {
   const D = 6;
   softShadow(ctx, x, y + 5, w, h - 2, rad, 9, 0.3);
   // a gold rim block, then the white face inset in it
-  block(ctx, x, y, w, h, rad, D, '#ffd23f', '#ffb80d', '#d18f00');
+  block(ctx, x, y, w, h, rad, D, '#e9dbb6', '#dcc796', '#a98e56');
   const inset = 4;
   rr(ctx, x + inset, y + inset, w - inset * 2, h - D - inset * 2, rad - inset);
   const g = ctx.createLinearGradient(0, y, 0, y + h - D);
   g.addColorStop(0, '#ffffff');
-  g.addColorStop(1, '#fff6e2');
+  g.addColorStop(1, '#f6f2e8');
   ctx.fillStyle = g;
   ctx.fill();
   const fh = h - D;
@@ -396,10 +401,10 @@ export function powerBadge(ctx: Ctx, cx: number, cy: number, power: number, o: {
   // the medallion
   const mr = fh * 0.36;
   const mx = x + inset + 10 + mr;
-  circleFill(ctx, mx + 1, my + 2, mr, 'rgba(180, 120, 0, 0.35)');
+  circleFill(ctx, mx + 1, my + 2, mr, 'rgba(120, 95, 45, 0.25)');
   const mg = ctx.createRadialGradient(mx - mr * 0.4, my - mr * 0.4, mr * 0.1, mx, my, mr);
-  mg.addColorStop(0, '#ffe680');
-  mg.addColorStop(1, '#f2a900');
+  mg.addColorStop(0, '#eedcae');
+  mg.addColorStop(1, '#c9a35c');
   circleFill(ctx, mx, my, mr, mg);
   bolt(ctx, mx, my + 1, mr * 1.25, '#ffffff');
   // caption and number
@@ -411,7 +416,7 @@ export function powerBadge(ctx: Ctx, cx: number, cy: number, power: number, o: {
   const ny = my + fh * 0.12;
   ctx.translate(nx, ny);
   ctx.scale(pop, pop);
-  fitLabel(ctx, shortNumber(s.shown), 0, 0, size, x + w - inset - 12 - tx, { align: 'left', color: u < 1 ? '#c98a00' : UI.text, weight: 700, track: 0.5 });
+  fitLabel(ctx, shortNumber(s.shown), 0, 0, size, x + w - inset - 12 - tx, { align: 'left', color: u < 1 ? UI.rewardDark : UI.text, weight: 700, track: 0.5 });
   ctx.restore();
   // the change floats up off the plate
   if (pa < 1.2 && s.delta !== 0) {
@@ -452,7 +457,7 @@ export function panel(ctx: Ctx, r: Rect, o: { title?: string; tone?: 'paper' | '
     const s = o.title.toUpperCase();
     const w = Math.min(r.w - 40, textWidth(ctx, s, TYPE.small, 700, 2) + 36);
     const tr = { x: Math.round(r.x + r.w / 2 - w / 2), y: Math.round(r.y - 14), w: Math.round(w), h: 28 };
-    block(ctx, tr.x, tr.y, tr.w, tr.h, 14, 3, '#ffffff', '#f6eee1', '#e0d3bd', UI.border);
+    block(ctx, tr.x, tr.y, tr.w, tr.h, 14, 3, '#fbfaf7', '#f1eee8', '#d2ccc0', UI.border);
     fitLabel(ctx, s, r.x + r.w / 2, tr.y + 13, TYPE.small, w - 20, { color: UI.textDim, weight: 700, track: 2 });
   }
 }
@@ -470,7 +475,7 @@ export function gridFrame(ctx: Ctx, r: Rect) {
   const rad = S.radius.l + 4;
   const D = 7;
   softShadow(ctx, x, y + 6, w, h + D, rad, 10, 0.26);
-  block(ctx, x, y, w, h + D, rad, D, '#f3e7d3', '#ecdec7', '#d6c3a3');
+  block(ctx, x, y, w, h + D, rad, D, '#e3dfd7', '#dbd6cd', '#bdb6a9');
   // the recessed floor
   const fx = r.x - 2;
   const fy = r.y - 2;
@@ -478,19 +483,19 @@ export function gridFrame(ctx: Ctx, r: Rect) {
   const fh = r.h + 4;
   const frad = S.radius.l - 2;
   rr(ctx, fx, fy, fw, fh, frad);
-  ctx.fillStyle = '#e8d9c0';
+  ctx.fillStyle = '#d4cfc5';
   ctx.fill();
   ctx.save();
   rr(ctx, fx, fy, fw, fh, frad);
   ctx.clip();
   const top = ctx.createLinearGradient(0, fy, 0, fy + 12);
-  top.addColorStop(0, 'rgba(120, 88, 44, 0.28)');
-  top.addColorStop(1, 'rgba(120, 88, 44, 0)');
+  top.addColorStop(0, 'rgba(60, 54, 44, 0.2)');
+  top.addColorStop(1, 'rgba(60, 54, 44, 0)');
   ctx.fillStyle = top;
   ctx.fillRect(fx, fy, fw, 12);
   const left = ctx.createLinearGradient(fx, 0, fx + 9, 0);
-  left.addColorStop(0, 'rgba(120, 88, 44, 0.2)');
-  left.addColorStop(1, 'rgba(120, 88, 44, 0)');
+  left.addColorStop(0, 'rgba(60, 54, 44, 0.14)');
+  left.addColorStop(1, 'rgba(60, 54, 44, 0)');
   ctx.fillStyle = left;
   ctx.fillRect(fx, fy, 9, fh);
   ctx.restore();
@@ -508,14 +513,14 @@ export function cell(ctx: Ctx, r: Rect, state: 'empty' | 'ok' | 'bad' | 'fuse' =
   const h = Math.round(r.h - 6);
   const rad = S.radius.m;
   rr(ctx, x, y, w, h, rad);
-  ctx.fillStyle = '#f2e7d5';
+  ctx.fillStyle = '#e6e2da';
   ctx.fill();
   ctx.save();
   rr(ctx, x, y, w, h, rad);
   ctx.clip();
   const g = ctx.createLinearGradient(0, y, 0, y + 7);
-  g.addColorStop(0, 'rgba(120, 88, 44, 0.16)');
-  g.addColorStop(1, 'rgba(120, 88, 44, 0)');
+  g.addColorStop(0, 'rgba(60, 54, 44, 0.12)');
+  g.addColorStop(1, 'rgba(60, 54, 44, 0)');
   ctx.fillStyle = g;
   ctx.fillRect(x, y, w, 7);
   ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
@@ -550,7 +555,7 @@ export function veil(ctx: Ctx, alpha = 1) {
 /** The slow white-gold shimmer of SSS, as a gradient that drifts along the line x0,y0 -> x1,y1, deep enough to read on white. */
 export function rainbow(ctx: Ctx, x0: number, y0: number, x1: number, y1: number, t: number) {
   const g = ctx.createLinearGradient(x0, y0, x1, y1);
-  const stops = ['#f5b300', '#ffe27a', '#fffaf0', '#ffd23f', '#e8a300'];
+  const stops = ['#c99a52', '#ecd6a0', '#fbf6ea', '#dcbc78', '#b98c45'];
   const n = stops.length;
   const sh = (((t * 0.25) % 1) + 1) % 1;
   for (let i = 0; i <= 6; i++) {
@@ -564,7 +569,7 @@ export function rainbow(ctx: Ctx, x0: number, y0: number, x1: number, y1: number
 /** Text colour for a class (level 1..7), readable on the light surfaces: greys, steel, gold; SSS breathes in gold. */
 export function classColor(level: number, t: number) {
   const i = clamp(Math.round(level) - 1, 0, 6);
-  return i === 6 ? mix('#b8860b', '#f0a800', 0.5 + 0.5 * Math.sin(t * 1.4)) : UI.tierText[i];
+  return i === 6 ? mix('#9b7a2c', '#c9a35a', 0.5 + 0.5 * Math.sin(t * 1.4)) : UI.tierText[i];
 }
 
 /** How deep a tile's side face is, for a tile h px tall. */
@@ -573,16 +578,16 @@ export const tileDepth = (h: number) => clamp(Math.round(h * 0.075), 3, 8);
 export const TILE_LIFT = 7;
 
 // the side face of a tile: warm grey for the common classes, steel for B, gold from A
-const TILE_SIDE = ['#d8cfc1', '#cdc4b6', '#bfb6a9', '#a9b6c4', '#d39410', '#e09f00', '#e6b23a'];
+const TILE_SIDE = ['#d0cbc2', '#c6c1b8', '#b8b2a9', '#a8b3be', '#c2a267', '#c59858', '#d2b57a'];
 // the top face, from its upper edge to its lower one: warm white, faintly gold from A
 const TILE_TOP = [
   ['#ffffff', '#f8f2e8'],
   ['#ffffff', '#f6f0e6'],
   ['#ffffff', '#f3ede3'],
   ['#ffffff', '#eef2f6'],
-  ['#fffdf5', '#fdf0cf'],
-  ['#fffcf0', '#ffeab0'],
-  ['#ffffff', '#fff3cf'],
+  ['#fdfbf5', '#f4ead3'],
+  ['#fdfaf2', '#f2e3c4'],
+  ['#ffffff', '#f7eed8'],
 ];
 
 /**
@@ -645,7 +650,7 @@ export function classFx(ctx: Ctx, r: Rect, level: number, t: number) {
     const pulse = 0.5 + 0.5 * Math.sin(t * 2);
     ctx.save();
     rr(ctx, r.x - 1, r.y - 1, r.w + 2, fh + 2, rad + 1);
-    ctx.shadowColor = lv >= 7 ? 'rgba(255, 214, 90, 0.95)' : 'rgba(255, 190, 0, 0.9)';
+    ctx.shadowColor = lv >= 7 ? 'rgba(230, 200, 130, 0.85)' : 'rgba(215, 175, 105, 0.75)';
     ctx.shadowBlur = 12 + 6 * pulse;
     ctx.lineWidth = 2;
     ctx.strokeStyle = lv >= 7 ? CLASS_FX.sss : CLASS_FX.s;
@@ -662,7 +667,7 @@ export function classFx(ctx: Ctx, r: Rect, level: number, t: number) {
   const span = r.w + fh + 40;
   const sx = r.x - 20 + (u / 0.45) * span;
   const band = ctx.createLinearGradient(sx - 20, 0, sx + 20, 0);
-  const c = lv >= 7 ? '255, 236, 160' : '255, 222, 110';
+  const c = lv >= 7 ? '250, 238, 205' : '245, 226, 180';
   const a = lv === 5 ? 0.22 : lv === 6 ? 0.3 : 0.45;
   band.addColorStop(0, `rgba(${c}, 0)`);
   band.addColorStop(0.5, `rgba(${c}, ${a})`);
@@ -703,7 +708,7 @@ export function classBadge(ctx: Ctx, level: number, x: number, y: number, k: num
   ctx.fillStyle = g;
   ctx.fill();
   ctx.lineWidth = Math.max(1, k);
-  ctx.strokeStyle = i >= 4 ? 'rgba(150, 95, 0, 0.55)' : i === 3 ? 'rgba(90, 110, 135, 0.5)' : 'rgba(60, 66, 78, 0.28)';
+  ctx.strokeStyle = i >= 4 ? 'rgba(130, 100, 45, 0.45)' : i === 3 ? 'rgba(90, 110, 135, 0.45)' : 'rgba(60, 66, 78, 0.25)';
   ctx.stroke();
   if (i >= 3) {
     // the metals catch the sun: a bright line along the top, and a passing sheen on SSS
@@ -726,6 +731,32 @@ export function classBadge(ctx: Ctx, level: number, x: number, y: number, k: num
   label(ctx, letter, x + w / 2, y + 1 * k, size, { color: ink, weight: 700, track: letter.length > 1 ? 0.5 * k : 0 });
 }
 
+/**
+ * A unit's rung on its tile: the number on a small round chip in the tone of the tier the rung looks like. Left
+ * edge at x, centred on y; at k = 1 it is 26 px across.
+ */
+export function rungBadge(ctx: Ctx, rung: number, x: number, y: number, k = 1) {
+  const tier = clamp(Math.round(1 + ((rung - 1) * 6) / 11), 1, 7) - 1;
+  const d = Math.round(26 * k);
+  const cx = x + d / 2;
+  const [c0, c1, ink] = UI.tierPlate[tier];
+  ctx.beginPath();
+  ctx.arc(cx + 0.5, y + 1.5 * k, d / 2, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(60, 54, 44, 0.22)';
+  ctx.fill();
+  const g = ctx.createLinearGradient(0, y - d / 2, 0, y + d / 2);
+  g.addColorStop(0, c0);
+  g.addColorStop(1, c1);
+  ctx.beginPath();
+  ctx.arc(cx, y, d / 2, 0, Math.PI * 2);
+  ctx.fillStyle = g;
+  ctx.fill();
+  ctx.lineWidth = Math.max(1, k);
+  ctx.strokeStyle = 'rgba(60, 66, 78, 0.28)';
+  ctx.stroke();
+  label(ctx, String(rung), cx, y + 1 * k, Math.max(TYPE.tiny, TYPE.label * k), { color: ink, weight: 700, track: 0 });
+}
+
 /** "×4" on a small slate chip, centred on x, y. */
 export function countBadge(ctx: Ctx, count: number, x: number, y: number, k = 1) {
   const s = `×${count}`;
@@ -741,70 +772,17 @@ export function countBadge(ctx: Ctx, count: number, x: number, y: number, k = 1)
 
 // ------------------------------------------------------------------ battle bars
 
-/**
- * The opponent's or your own name plate: a team bar on the outer edge, the name, the trophies. The opponent's
- * always shows a BOT tag. body: the plate goes on this many px below r as one panel (r is its header row, a
- * hairline divides them, the team bar runs the whole height), for what belongs to that player.
- */
-export function namePlate(ctx: Ctx, r: Rect, o: { name: string; trophies: number; team: 0 | 1; bot?: boolean; align?: 'left' | 'right'; body?: number }) {
-  const right = o.align === 'right';
-  const full = { x: r.x, y: r.y, w: r.w, h: r.h + Math.max(0, o.body ?? 0) };
-  const rad = S.radius.l;
-  plate(ctx, full, UI.surface, rad, 0.26);
-  ctx.save();
-  rr(ctx, full.x, full.y, full.w, full.h, rad);
-  ctx.clip();
-  // the team's colour: a band along the outer edge and a soft wash of it across the header
-  const wash = ctx.createLinearGradient(right ? r.x + r.w : r.x, 0, right ? r.x + r.w * 0.4 : r.x + r.w * 0.6, 0);
-  wash.addColorStop(0, o.team === 0 ? 'rgba(63, 162, 255, 0.16)' : 'rgba(255, 90, 90, 0.16)');
-  wash.addColorStop(1, 'rgba(255, 255, 255, 0)');
-  ctx.fillStyle = wash;
-  ctx.fillRect(r.x, r.y, r.w, r.h);
-  ctx.fillStyle = TEAM[o.team].main;
-  ctx.fillRect(Math.round(right ? r.x + r.w - 7 : r.x), r.y, 7, full.h);
-  ctx.restore();
-  if (full.h > r.h) {
-    ctx.fillStyle = UI.border;
-    ctx.fillRect(Math.round(r.x + 18), Math.round(r.y + r.h - 1), Math.round(r.w - 36), 1);
-  }
-  const pad = 20;
-  const dir = right ? -1 : 1;
-  const ax = right ? r.x + r.w - pad : r.x + pad;
-  const al: CanvasTextAlign = right ? 'right' : 'left';
-  const tag = o.bot ? 44 : 0;
-  const mid = r.y + r.h / 2;
-  const two = r.h > 44;
-  const nameY = two ? mid - 11 : mid;
-  const nameW = Math.min(r.w - pad * 2 - (tag ? tag + 10 : 0), textWidth(ctx, o.name, TYPE.lead, 700));
-  fitLabel(ctx, o.name, ax, nameY + 1, TYPE.lead, nameW, { align: al, weight: 700, color: UI.text });
-  if (two) {
-    trophy(ctx, ax + dir * 8, mid + 14, 16, '#d99400');
-    label(ctx, shortNumber(o.trophies), ax + dir * 22, mid + 15, TYPE.caption, { align: al, color: UI.textDim, weight: 700 });
-  }
-  // the BOT tag sits right after the name
-  if (o.bot) botTag(ctx, right ? ax - nameW - 10 - tag : ax + nameW + 10, nameY, tag);
-}
-
-/** The BOT tag the opponent's name always carries: a small slate chip, left edge at x, centred on y. */
-export function botTag(ctx: Ctx, x: number, y: number, w = 40) {
-  rr(ctx, Math.round(x), Math.round(y - 11), w, 22, 11);
-  ctx.fillStyle = UI.text;
-  ctx.fill();
-  label(ctx, 'BOT', x + w / 2, y + 1, TYPE.tag + 1, { weight: 700, track: 1.5, color: '#ffffff' });
-}
-
 export interface ScoreSide {
   name: string;
   /** the big number beside the clock (fighters left, a score) */
   score: number | string;
-  bot?: boolean;
 }
 
 /** The score bug's size: pass SCORE_BUG.h as its rect's height, wherever it is drawn. */
 export const SCORE_BUG = { h: 44 };
 
 /**
- * A friendly score bar: [team bar | NAME | score | clock | score | NAME BOT | team bar] on one white strip.
+ * A friendly score bar: [team bar | NAME | score | clock | score | NAME | team bar] on one white strip.
  * home is your side (blue), away the opponent (red). flash 0..1 lights the clock in gold for a moment; hot keeps
  * it gold (overtime).
  */
@@ -836,11 +814,8 @@ export function scoreBug(ctx: Ctx, r: Rect, o: { home: ScoreSide; away: ScoreSid
   label(ctx, String(o.home.score), cx - clockW / 2 - scoreW / 2, cy + 1, size, { weight: 700, color: TEAM[0].dark });
   label(ctx, String(o.away.score), cx + clockW / 2 + scoreW / 2, cy + 1, size, { weight: 700, color: TEAM[1].dark });
   const room = r.w / 2 - clockW / 2 - scoreW - 24;
-  fitLabel(ctx, o.home.name.toUpperCase(), r.x + 18, cy + 1, TYPE.body, room - (o.home.bot ? 46 : 0), { align: 'left', weight: 700, track: 1, color: UI.text });
-  const tag = o.away.bot ? 46 : 0;
-  fitLabel(ctx, o.away.name.toUpperCase(), r.x + r.w - 18, cy + 1, TYPE.body, room - tag, { align: 'right', weight: 700, track: 1, color: UI.text });
-  if (o.away.bot) botTag(ctx, cx + clockW / 2 + scoreW + 8, cy);
-  if (o.home.bot) botTag(ctx, cx - clockW / 2 - scoreW - 48, cy);
+  fitLabel(ctx, o.home.name.toUpperCase(), r.x + 18, cy + 1, TYPE.body, room, { align: 'left', weight: 700, track: 1, color: UI.text });
+  fitLabel(ctx, o.away.name.toUpperCase(), r.x + r.w - 18, cy + 1, TYPE.body, room, { align: 'right', weight: 700, track: 1, color: UI.text });
 }
 
 /** A rounded fill bar, 0..1, in a sunken cream track, with a light line along the fill's top and a slow sheen. */
@@ -924,15 +899,16 @@ export function meter(ctx: Ctx, r: Rect, value: number, o: { ticks?: number; col
 
 // ------------------------------------------------------------------ banners, toasts, hints
 
-/** A title slab's tone: accent is the gold (a win, a reward), plain warm white, muted slate (a loss). */
-export type RibbonTone = 'accent' | 'plain' | 'muted';
+/** A title slab's tone: accent the calm teal (a win), reward the soft wheat, plain warm white, muted slate (a loss). */
+export type RibbonTone = 'accent' | 'plain' | 'muted' | 'reward';
 /** The tone names from the old palette, still read: gold and jade are accent, red plain, indigo muted. */
 type OldRibbonTone = 'red' | 'gold' | 'indigo' | 'jade';
-const RIBBON_TONE: Record<RibbonTone | OldRibbonTone, RibbonTone> = { accent: 'accent', plain: 'plain', muted: 'muted', gold: 'accent', jade: 'accent', red: 'plain', indigo: 'muted' };
+const RIBBON_TONE: Record<RibbonTone | OldRibbonTone, RibbonTone> = { accent: 'accent', plain: 'plain', muted: 'muted', reward: 'reward', gold: 'reward', jade: 'accent', red: 'plain', indigo: 'muted' };
 const RIBBON_LOOK: Record<RibbonTone, Look> = {
-  accent: { top: '#ffd23f', low: '#ffb80d', side: '#d18f00', rim: '', text: UI.accentText },
-  plain: { top: '#ffffff', low: '#fbf4e8', side: '#d8c6a8', rim: '', text: UI.text },
-  muted: { top: '#6b7584', low: '#5a6372', side: '#3c4450', rim: '', text: '#ffffff' },
+  accent: { top: '#67a294', low: '#5a9686', side: '#3f6c60', rim: '', text: UI.accentText },
+  plain: { top: '#fbfaf7', low: '#f1eee8', side: '#cbc4b7', rim: '', text: UI.text },
+  muted: { top: '#76808c', low: '#67707c', side: '#474f59', rim: '', text: '#ffffff' },
+  reward: { top: '#eddcb2', low: '#e2cb95', side: '#ad9157', rim: '', text: '#3d321f' },
 };
 
 /**
@@ -1050,107 +1026,4 @@ export function hint(ctx: Ctx, r: Rect, text: string, pointAt: { x: number; y: n
   ctx.fillStyle = UI.accent;
   poly(ctx, [pointAt.x - 10, my - dir * 8.5, pointAt.x + 10, my - dir * 8.5, pointAt.x, my + dir * 7]);
   ctx.fill();
-}
-
-// ------------------------------------------------------------------ the VS bar
-
-export interface VsSide {
-  name: string;
-  trophies?: number;
-  bot?: boolean;
-}
-
-/**
- * The friendly framed VS bar: your half in team blue on the left, the opponent's in red on the right, meeting on
- * a slanted seam, both names in bold white, a big VS in the middle, the trophies on small tabs hanging under each
- * end. slide 0..1 brings the halves in from the sides (1 = joined); vs 0..1 pops the VS in.
- */
-export function vsBar(ctx: Ctx, r: Rect, o: { left: VsSide; right: VsSide; slide?: number; vs?: number; only?: 0 | 1 }) {
-  const slide = clamp(o.slide ?? 1, 0, 1);
-  const vsK = clamp(o.vs ?? 1, 0, 1);
-  const rad = Math.min(22, r.h * 0.32);
-  const cx = r.x + r.w / 2;
-  const sk = r.h * 0.16; // half the seam's slant
-  const ink = '#26303d';
-  const half = (side: 0 | 1) => {
-    const off = (1 - slide) * (side === 0 ? -1 : 1) * (W / 2 + 40);
-    ctx.save();
-    ctx.translate(off, 0);
-    // the trophies on a tab hanging under the outer end
-    const s = side === 0 ? o.left : o.right;
-    if (s.trophies !== undefined) {
-      const tw = 104;
-      const tx = side === 0 ? r.x + 18 : r.x + r.w - 18 - tw;
-      const ty = r.y + r.h - 12;
-      rr(ctx, tx, ty, tw, 44, 12);
-      ctx.fillStyle = ink;
-      ctx.fill();
-      rr(ctx, tx + 3, ty, tw - 6, 38, 10);
-      ctx.fillStyle = '#ffffff';
-      ctx.fill();
-      trophy(ctx, tx + 24, ty + 24, 18, '#d99400');
-      label(ctx, shortNumber(s.trophies), tx + 40, ty + 25, TYPE.body, { align: 'left', weight: 700, color: UI.text });
-    }
-    // the half itself: a framed block, lit from above
-    ctx.beginPath();
-    if (side === 0) {
-      ctx.moveTo(cx + sk, r.y);
-      ctx.lineTo(cx - sk, r.y + r.h);
-      ctx.lineTo(r.x + rad, r.y + r.h);
-      ctx.arcTo(r.x, r.y + r.h, r.x, r.y + r.h - rad, rad);
-      ctx.lineTo(r.x, r.y + rad);
-      ctx.arcTo(r.x, r.y, r.x + rad, r.y, rad);
-    } else {
-      ctx.moveTo(cx + sk, r.y);
-      ctx.lineTo(r.x + r.w - rad, r.y);
-      ctx.arcTo(r.x + r.w, r.y, r.x + r.w, r.y + rad, rad);
-      ctx.lineTo(r.x + r.w, r.y + r.h - rad);
-      ctx.arcTo(r.x + r.w, r.y + r.h, r.x + r.w - rad, r.y + r.h, rad);
-      ctx.lineTo(cx - sk, r.y + r.h);
-    }
-    ctx.closePath();
-    const tm = TEAM[side];
-    const g = ctx.createLinearGradient(0, r.y, 0, r.y + r.h);
-    g.addColorStop(0, tm.light);
-    g.addColorStop(0.42, tm.main);
-    g.addColorStop(1, tm.dark);
-    ctx.fillStyle = g;
-    ctx.fill();
-    ctx.save();
-    ctx.clip();
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.22)';
-    ctx.fillRect(r.x, r.y + 4, r.w, r.h * 0.3);
-    ctx.restore();
-    ctx.lineWidth = 3.5;
-    ctx.lineJoin = 'round';
-    ctx.strokeStyle = ink;
-    ctx.stroke();
-    // the name, and the BOT tag beside the opponent's
-    const al: CanvasTextAlign = side === 0 ? 'left' : 'right';
-    const room = r.w / 2 - 60 - (s.bot ? 52 : 0);
-    const nx = side === 0 ? r.x + 22 : r.x + r.w - 22;
-    const nw = Math.min(room, textWidth(ctx, s.name, TYPE.h3, 700));
-    fitLabel(ctx, s.name, nx, r.y + r.h / 2 + 1, TYPE.h3, room, { align: al, weight: 700, color: '#ffffff', outline: 'rgba(20, 30, 50, 0.55)', lw: 1 });
-    if (s.bot) botTag(ctx, side === 0 ? nx + nw + 10 : nx - nw - 10 - 44, r.y + r.h / 2, 44);
-    ctx.restore();
-  };
-  if (o.only !== 1) half(0);
-  if (o.only !== 0) half(1);
-  if (vsK > 0) {
-    const k = vsK < 1 ? 1.6 - 0.6 * (1 - (1 - vsK) ** 3) : 1;
-    ctx.save();
-    ctx.translate(cx, r.y + r.h / 2 + 2);
-    ctx.scale(k, k);
-    ctx.globalAlpha *= Math.min(1, vsK * 2);
-    ctx.font = font(TYPE.h1 + 4, 700);
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.lineJoin = 'round';
-    ctx.lineWidth = 7;
-    ctx.strokeStyle = ink;
-    ctx.strokeText('VS', 0, 0);
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText('VS', 0, 0);
-    ctx.restore();
-  }
 }
