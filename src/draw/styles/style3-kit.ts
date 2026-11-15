@@ -78,24 +78,6 @@ function silLine(c: Ctx, p: readonly number[], h: number) {
   for (let i = 0; i + 1 < p.length; i += 2) silDot(c, p[i], p[i + 1], h);
 }
 
-/** Adds a closed polygon to the path, wound the same way as arcs (so overlaps never punch holes). */
-export function polyPath(c: Ctx, p: readonly number[]) {
-  let a = 0;
-  const n = p.length / 2;
-  for (let i = 0; i < n; i++) {
-    const j = (i + 1) % n;
-    a += p[i * 2] * p[j * 2 + 1] - p[j * 2] * p[i * 2 + 1];
-  }
-  if (a >= 0) {
-    c.moveTo(p[0], p[1]);
-    for (let i = 1; i < n; i++) c.lineTo(p[i * 2], p[i * 2 + 1]);
-  } else {
-    c.moveTo(p[(n - 1) * 2], p[(n - 1) * 2 + 1]);
-    for (let i = n - 2; i >= 0; i--) c.lineTo(p[i * 2], p[i * 2 + 1]);
-  }
-  c.closePath();
-}
-
 // ------------------------------------------------------------------ painted pieces
 
 function outline(c: Ctx, k = 1) {
@@ -131,7 +113,7 @@ export function ell(c: Ctx, x: number, y: number, rx: number, ry: number, rot: n
   c.fill();
   const m = Math.min(rx, ry);
   // a crisp rim of bounced light just inside the edge, on the shadow side
-  if (K.lod && m > 0.14) {
+  if (m > 0.14) {
     const ta = Math.atan2(-ey * rx, -ex * ry);
     const ins = K.lw * 0.5 + m * 0.07;
     c.beginPath();
@@ -185,10 +167,10 @@ export function limb(c: Ctx, p: readonly number[], w: number, fill: string, hi?:
   c.beginPath();
   c.moveTo(p[0], p[1]);
   for (let i = 2; i < p.length; i += 2) c.lineTo(p[i], p[i + 1]);
-  c.lineWidth = w + K.lw;
+  c.lineWidth = w + K.lw * 0.9;
   c.strokeStyle = K.ink;
   c.stroke();
-  c.lineWidth = Math.max(0.001, w - K.lw);
+  c.lineWidth = Math.max(0.001, w - K.lw * 0.9);
   c.strokeStyle = fill;
   c.stroke();
   if (hi && K.lod) {
@@ -210,27 +192,6 @@ export function limb(c: Ctx, p: readonly number[], w: number, fill: string, hi?:
     c.strokeStyle = hi;
     c.stroke();
   }
-}
-
-/** A polygon part: base fill, then the caller's shading (optional), then the outline. */
-export function polyPart(c: Ctx, p: readonly number[], fill: string, shade?: (c: Ctx) => void, line = 1) {
-  if (K.sil) {
-    polyPath(c, p);
-    return;
-  }
-  c.beginPath();
-  polyPath(c, p);
-  c.fillStyle = fill;
-  c.fill();
-  if (shade) {
-    c.save();
-    c.clip();
-    shade(c);
-    c.restore();
-    c.beginPath();
-    polyPath(c, p);
-  }
-  if (line > 0) outline(c, line);
 }
 
 /** A path part built by the caller (it must close its own shape): base fill and outline, shading clipped inside. */
@@ -304,7 +265,7 @@ export function sticker(c: Ctx, geom: (c: Ctx) => void, b: number, ol: number, d
   K.sil = true;
   // the drop shadow: the same silhouette, a little lower, stroked wide (its hollow middle is under the art)
   c.save();
-  c.translate(d * 0.25, d);
+  c.translate(0, d);
   c.beginPath();
   geom(c);
   c.restore();
@@ -324,4 +285,28 @@ export function sticker(c: Ctx, geom: (c: Ctx) => void, b: number, ol: number, d
   c.stroke();
   K.sil = false;
   geom(c);
+}
+
+/**
+ * Runs fn in a frame moved to (x, y), turned by rot and scaled by s, keeping the key light fixed in the world
+ * and the outline the same width on screen.
+ */
+export function frame(c: Ctx, x: number, y: number, rot: number, s: number, fn: (c: Ctx) => void) {
+  c.save();
+  c.translate(x, y);
+  if (rot) c.rotate(rot);
+  if (s !== 1) c.scale(s, s);
+  const lx = K.lx;
+  const ly = K.ly;
+  const lw = K.lw;
+  const cs = Math.cos(rot);
+  const sn = Math.sin(rot);
+  K.lx = lx * cs + ly * sn;
+  K.ly = -lx * sn + ly * cs;
+  K.lw = lw / s;
+  fn(c);
+  K.lx = lx;
+  K.ly = ly;
+  K.lw = lw;
+  c.restore();
 }

@@ -1,8 +1,8 @@
 import { TEAM } from '../../theme';
 
 /*
- * Style 2's toolkit: the palette, the cached two-tone fills that give every part its hard light / shade split,
- * and the soft ground shadow. Nothing here allocates per frame once the caches are warm.
+ * Style 2's toolkit: the palette, the curved two-tone fill that gives every form its hard light / shade split,
+ * and the sun (which way the long shadows fall). Gradients are made while a sprite is built, never per frame.
  */
 export type Ctx = CanvasRenderingContext2D;
 
@@ -18,95 +18,80 @@ export function mix(a: string, b: string, k: number): string {
   return `#${c(0)}${c(1)}${c(2)}`;
 }
 
-/** One team's ladder of tones, lightest first. Every part is two neighbouring rungs. */
+/** One team's tones. Every form is a pair: the colour in the sun, then in shade. */
 export interface Pal {
-  hi: string; // the lightest: throats, bellies
-  hiShade: string;
-  lit: string; // a near limb in the light
-  base: string; // the team colour itself
-  mid: string; // the body's shade side
-  shade: string; // the team's dark
-  deep: string; // far limbs, mandibles
+  body: string;
+  bodyS: string;
+  /** near limbs, a step down from the body so they read against it */
+  limb: string;
+  limbS: string;
+  /** far limbs and mandibles */
+  deep: string;
+  spot: string;
+  spotS: string;
+  belly: string;
+  bellyS: string;
+  /** the helmet's plume */
+  plume: string;
+  plumeS: string;
+  /** a cast shadow laid over anything (see-through) */
+  cast: string;
 }
 export const PAL: Pal[] = TEAM.map((c, i) => {
-  // the light side leans warm-bright, the shade side leans cool-deep: a hue shift, not just darker paint
-  const night = i === 0 ? '#14205a' : '#4a0f2c';
-  const sun = i === 0 ? '#5fd0ff' : '#ff8a5c';
-  const dusk = i === 0 ? '#3d34b8' : '#b0205a';
+  // the sun side leans warm-bright, the shade side cool-deep: a hue shift, not just darker paint
+  const blue = i === 0;
+  const sun = blue ? '#62d6ff' : '#ff4a3a';
+  const dusk = blue ? '#3a3cc6' : '#a3164f';
+  const night = blue ? '#121c58' : '#470b28';
+  const body = mix(c.main, sun, blue ? 0.2 : 0.3);
+  const bodyS = mix(c.dark, dusk, 0.28);
+  const cream = '#fff4dc';
   return {
-    hi: mix(c.light, '#fff6e4', 0.45),
-    hiShade: mix(c.light, c.main, 0.25),
-    lit: mix(mix(c.main, c.light, 0.3), sun, 0.15),
-    base: mix(c.main, sun, 0.18),
-    mid: mix(c.dark, dusk, 0.22),
-    shade: mix(mix(c.dark, dusk, 0.3), night, 0.25),
-    deep: mix(c.dark, night, 0.55),
+    body,
+    bodyS,
+    limb: mix(c.dark, c.main, 0.2),
+    limbS: mix(c.dark, night, 0.32),
+    deep: mix(c.dark, night, 0.58),
+    spot: mix(c.dark, dusk, 0.12),
+    spotS: mix(c.dark, night, 0.42),
+    belly: mix(cream, c.light, 0.16),
+    bellyS: mix(mix(cream, c.light, 0.55), c.dark, 0.22),
+    plume: body,
+    plumeS: bodyS,
+    cast: blue ? 'rgba(14, 22, 92, 0.24)' : 'rgba(84, 6, 40, 0.24)',
   };
 });
 
 export const INK = '#151c28';
 export const EYE = '#fffdf6';
-
-// ------------------------------------------------------------------ cached hard-split gradients
-
-const caches = new WeakMap<Ctx, Map<number, CanvasGradient>>();
-function cacheOf(ctx: Ctx): Map<number, CanvasGradient> {
-  let m = caches.get(ctx);
-  if (!m) {
-    m = new Map();
-    caches.set(ctx, m);
-  }
-  return m;
-}
+/** swing arcs and impact stars */
+export const FX = '#ffd84a';
+export const FX_HI = '#fffbe8';
 
 /**
- * A fill that is `lit` on one side of a straight line and `shade` on the other: the line passes `off` units
- * past (cx, cy) along (dx, dy) (the way the light travels), so a positive off leaves more of the part lit.
- * Built once per key and reused; the coordinates are in whatever space the caller fills in.
+ * The sun, high on the upper left. A point h above the ground throws its shadow kx * h to the right and ky * h
+ * down the screen; the shadow is the pet's own silhouette laid down that way, hard edged, `alpha` strong.
  */
-export function split(ctx: Ctx, key: number, cx: number, cy: number, dx: number, dy: number, lit: string, shade: string, off = 0): CanvasGradient {
-  const m = cacheOf(ctx);
-  let g = m.get(key);
-  if (g) return g;
-  const L = 2;
-  g = ctx.createLinearGradient(cx - dx * L, cy - dy * L, cx + dx * L, cy + dy * L);
-  const at = 0.5 + off / (2 * L);
-  const b = 0.0035;
+export const SUN = { kx: 0.74, ky: 0.28, color: '#26244a', alpha: 0.2 };
+
+/**
+ * The curved terminator. A fill that is `lit` inside a circle and `shade` outside it: the circle is 1.35 rho
+ * across and its edge crosses the form's centre line k * rho past (cx, cy) along the light (lx, ly), so a round
+ * form of radius rho keeps about two thirds lit and a crescent of shade wraps its far side. Every part of one
+ * mass shares the same circle, so the terminator runs on unbroken across the parts.
+ */
+export function moon(ctx: Ctx, cx: number, cy: number, rho: number, lx: number, ly: number, lit: string, shade: string, k = 0.3): CanvasGradient {
+  const R = 1.35 * rho;
+  const d = R - k * rho;
+  const x = cx - lx * d;
+  const y = cy - ly * d;
+  const out = R + 3 * rho;
+  const g = ctx.createRadialGradient(x, y, 0, x, y, out);
+  const at = R / out;
+  const b = 0.008 / out;
   g.addColorStop(0, lit);
-  g.addColorStop(Math.max(0, at - b), lit);
-  g.addColorStop(Math.min(1, at + b), shade);
+  g.addColorStop(at - b, lit);
+  g.addColorStop(at + b, shade);
   g.addColorStop(1, shade);
-  m.set(key, g);
   return g;
-}
-
-// ------------------------------------------------------------------ the soft long shadow, baked once
-
-let shadowSprite: HTMLCanvasElement | null = null;
-/** 144 x 48 (the tail ends near 140): a dark core under the feet at (40, 24), a long soft tail off to the right. */
-export function shadow(): HTMLCanvasElement {
-  if (shadowSprite) return shadowSprite;
-  const c = document.createElement('canvas');
-  c.width = 144;
-  c.height = 48;
-  const g = c.getContext('2d')!;
-  const blob = (x: number, y: number, rx: number, ry: number, a: number) => {
-    g.save();
-    g.translate(x, y);
-    g.scale(rx / ry, 1);
-    const rg = g.createRadialGradient(0, 0, 0, 0, 0, ry);
-    rg.addColorStop(0, `rgba(28, 46, 34, ${a})`);
-    rg.addColorStop(0.55, `rgba(28, 46, 34, ${a * 0.75})`);
-    rg.addColorStop(1, 'rgba(28, 46, 34, 0)');
-    g.fillStyle = rg;
-    g.beginPath();
-    g.arc(0, 0, ry, 0, Math.PI * 2);
-    g.fill();
-    g.restore();
-  };
-  blob(76, 25, 64, 15, 0.42); // the long tail
-  blob(42, 24, 38, 14, 0.5); // the core under the body
-  blob(40, 24, 24, 8, 0.35); // contact
-  shadowSprite = c;
-  return c;
 }
