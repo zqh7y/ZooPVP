@@ -23,7 +23,7 @@ const POSE: Record<Pose, number> = { idle: 0, attack: 1, hit: 2 };
 /** per pose: stretch along x and y (the lunge stretches along the attack, the flinch squashes) */
 const STRETCH = [
   [1, 1],
-  [1.1, 0.92],
+  [1.08, 0.93],
   [1.05, 0.93],
 ];
 
@@ -229,7 +229,7 @@ function streaks(ctx: Ctx, x: number, y: number, len: number, gap: number, n: nu
   ctx.fillStyle = FX;
   ctx.beginPath();
   for (let i = 0; i < n; i++) {
-    const l = len * (1 - Math.abs(i - (n - 1) / 2) * 0.35);
+    const l = len * (1 - Math.abs(i - (n - 1) / 2) * (n > 2 ? 0.35 : 0) - (n === 2 ? i * 0.3 : 0));
     cap(ctx, x - l, y + i * gap, x, y + i * gap, th);
   }
   ctx.fill();
@@ -261,13 +261,16 @@ function impact(ctx: Ctx, x: number, y: number, s: number) {
 
 // ------------------------------------------------------------------ weapons in hand
 
-/** where a held weapon points (radians: 0 = forward, + = down) and how big it is, per pose */
-const AIM: Record<WeaponType, number[]> = {
-  knife: [0.62, 0.22, 1.25],
-  bat: [0.78, -0.95, 1.3],
-  spear: [0.3, 0.1, 0.95],
-  shield: [0, 0, 0],
+/**
+ * Where a held weapon points (radians: 0 = forward, + = down), per pet and pose. Idle weapons point forward and
+ * down, away from the face. The ant's attack slashes down from above; the frog's is an uppercut from below, so
+ * its weapon stays clear of its wide face.
+ */
+const AIM: Record<'ant' | 'frog', Record<WeaponType, number[]>> = {
+  ant: { knife: [0.62, 0.25, 1.25], bat: [0.8, 0.3, 1.3], spear: [0.3, 0.06, 0.95], shield: [0, 0, 0] },
+  frog: { knife: [0.62, -0.62, 1.25], bat: [0.8, -0.86, 1.3], spear: [0.3, -0.12, 0.95], shield: [0, 0, 0] },
 };
+let PET: 'ant' | 'frog' = 'ant';
 
 function held(ctx: Ctx, w: WeaponType, x: number, y: number, pose: number, k: number) {
   ctx.save();
@@ -276,7 +279,7 @@ function held(ctx: Ctx, w: WeaponType, x: number, y: number, pose: number, k: nu
     itemLight(LX, LY);
     ctx.scale(k * 0.74, k);
   } else {
-    const a = AIM[w][pose];
+    const a = AIM[PET][w][pose];
     const c = Math.cos(a);
     const s = Math.sin(a);
     itemLight(LX * c + LY * s, -LX * s + LY * c);
@@ -300,14 +303,19 @@ function hat(ctx: Ctx, P: Pal, x: number, y: number, w: number, sy: number, tilt
   ctx.restore();
 }
 
-/** the swing or thrust behind a held weapon, from its grip at (x, y) */
-function swing(ctx: Ctx, w: WeaponType | null, x: number, y: number, k: number) {
+/** the swing or thrust behind a held weapon, from its grip at (x, y): from above (dir -1) or below (+1) */
+function swing(ctx: Ctx, w: WeaponType | null, x: number, y: number, k: number, dir: number) {
   if (w === 'knife' || w === 'bat') {
-    const a1 = AIM[w][1];
-    const len = (w === 'bat' ? 1.0 : 1.05) * k;
-    swoosh(ctx, x, y, len, a1 - 1.9, a1 - 0.12, len * 0.16);
+    const a1 = AIM[PET][w][1];
+    const len = (w === 'bat' ? 1.0 : 1.08) * k;
+    swoosh(ctx, x, y, len * 0.86, a1 + dir * 1.8, a1 + dir * 0.14, len * 0.16);
   } else if (w === 'spear') {
-    streaks(ctx, x - 0.12, y - 0.2, 0.55, 0.2, 3, 0.035);
+    const a = AIM[PET].spear[1];
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(a);
+    streaks(ctx, -0.18, -0.2, 0.5, 0.4, 2, 0.035);
+    ctx.restore();
   }
 }
 
@@ -318,19 +326,19 @@ function swing(ctx: Ctx, w: WeaponType | null, x: number, y: number, k: number) 
  * Three legs a side on the thorax: two pairs stand, the front pair are the arms. Elbowed antennae (an ant's
  * signature), mandibles that are two rounded triangles, and a glint of sky on the head.
  */
-const AG = { x: -0.8, y: -0.94, R: 0.44, tip: -2.5, d: 0.64 };
-const AW = { x: -0.25, y: -1.0, r: 0.095 };
-const AT = [0.03, -1.06, 0.21, -1.38, 0.2];
-const AH = { x: 0.5, y: -1.74, r: 0.54 };
+const AG = { x: -0.84, y: -0.74, R: 0.43, tip: -2.55, d: 0.6 };
+const AW = { x: -0.33, y: -0.8, r: 0.095 };
+const AT = [-0.12, -0.82, 0.14, -1.08, 0.22];
+const AH = { x: 0.5, y: -1.56, r: 0.52 };
 /** hips in the body frame: near hind, near mid, far hind, far mid */
 const ANT_HIPS = [
-  [-0.02, -1.04],
-  [0.1, -1.1],
-  [0.1, -1.08],
-  [0.22, -1.14],
+  [-0.08, -0.8],
+  [0.06, -0.86],
+  [0.04, -0.86],
+  [0.16, -0.92],
 ];
-const ANT_SHOULDER = [0.22, -1.34];
-const ANT_FAR_SHOULDER = [0.32, -1.36];
+const ANT_SHOULDER = [0.18, -1.06];
+const ANT_FAR_SHOULDER = [0.28, -1.1];
 interface AntPose {
   lean: number;
   lunge: number;
@@ -344,78 +352,82 @@ const ANT: AntPose[] = [
     lean: 0,
     lunge: 0,
     feet: [
-      [-0.54, 0],
-      [0.36, 0],
-      [-0.28, 0],
-      [0.64, 0],
+      [-0.6, 0],
+      [0.46, 0],
+      [-0.36, 0],
+      [0.7, 0],
     ],
-    hand: [0.86, -1.08],
-    farHand: [0.9, -1.2],
+    hand: [0.8, -0.86],
+    farHand: [0.86, -0.98],
     head: [0, 0],
   },
   {
     lean: 0.3,
     lunge: 0.34,
     feet: [
-      [-0.7, 0],
-      [1.0, 0],
-      [-0.44, 0],
-      [1.2, 0],
+      [-0.66, 0],
+      [0.96, 0],
+      [-0.42, 0],
+      [1.16, 0],
     ],
-    hand: [1.24, -1.08],
-    farHand: [1.2, -1.24],
+    hand: [1.04, -0.88],
+    farHand: [1.16, -1.0],
     head: [0.02, 0],
   },
   {
-    lean: -0.26,
-    lunge: -0.28,
+    lean: -0.24,
+    lunge: -0.26,
     feet: [
-      [-0.84, 0],
-      [0.16, -0.16],
-      [-0.58, 0],
-      [0.44, 0],
+      [-0.76, 0],
+      [0.18, -0.12],
+      [-0.52, 0],
+      [0.42, 0],
     ],
-    hand: [0.58, -0.84],
-    farHand: [0.66, -1.0],
-    head: [-0.06, 0.12],
+    hand: [0.6, -0.98],
+    farHand: [0.68, -1.12],
+    head: [-0.06, 0.1],
   },
 ];
-const ANT_THIGH = 0.56;
-const ANT_SHIN = 0.74;
+const ANT_THIGH = 0.48;
+const ANT_SHIN = 0.6;
 
 function ant(ctx: Ctx, P: Pal, p: number, ph: number, o: PetOpts, blink: boolean, fx: boolean) {
+  PET = 'ant';
   const A = ANT[p];
   const w = o.weapon ?? null;
   const b = p === 0 ? Math.sin(ph) : 0;
-  frame(A.lunge, -b * 0.03, A.lean, -0.1, -1.0);
+  frame(A.lunge, -b * 0.03, A.lean, -0.1, -0.85);
   const hx = AH.x + A.head[0];
   const hy = AH.y + A.head[1];
   const hand = [A.hand[0], A.hand[1] + b * 0.01];
-  if (w === 'shield') hand[1] += 0.18;
+  if (w === 'shield') {
+    hand[0] += 0.06;
+    hand[1] += 0.12;
+  }
   const sh = bf(ANT_SHOULDER[0], ANT_SHOULDER[1]);
-  const k = w === 'shield' ? 0.46 : w === 'spear' ? 0.62 : w === 'bat' ? 0.78 : 0.74;
+  const k = w === 'shield' ? 0.46 : w === 'spear' ? 0.6 : w === 'bat' ? 0.76 : 0.72;
 
   if (fx) {
     if (p === 1) {
-      swing(ctx, w, hand[0], hand[1], k);
+      swing(ctx, w, hand[0], hand[1], k, -1);
       if (!w) {
         // a chomp: three ticks fanning out in front of the open jaws
-        const [jx, jy] = bf(hx + 0.86, hy + 0.36);
+        const [jx, jy] = bf(hx + 0.9, hy + 0.32);
         ctx.strokeStyle = FX;
         ctx.lineWidth = 0.07;
         ctx.lineCap = 'round';
         ctx.beginPath();
         for (let i = -1; i <= 1; i++) {
-          const a = i * 0.55;
-          ctx.moveTo(jx + Math.cos(a) * 0.2, jy + Math.sin(a) * 0.2);
-          ctx.lineTo(jx + Math.cos(a) * 0.42, jy + Math.sin(a) * 0.42);
+          const a = i * 0.6;
+          ctx.moveTo(jx + Math.cos(a) * 0.16, jy + Math.sin(a) * 0.16);
+          ctx.lineTo(jx + Math.cos(a) * 0.38, jy + Math.sin(a) * 0.38);
         }
         ctx.stroke();
       }
-      streaks(ctx, -1.1, -1.5, 0.5, 0.2, 2, 0.04);
+      streaks(ctx, -1.2, -1.32, 0.46, 0.2, 2, 0.04);
     } else if (p === 2) {
       const [ix, iy] = bf(hx + 0.62, hy - 0.4);
-      impact(ctx, ix + 0.3, iy, 0.34);
+      impact(ctx, ix + 0.32, iy, 0.34);
     }
     return;
   }
@@ -430,53 +442,56 @@ function ant(ctx: Ctx, P: Pal, p: number, ph: number, o: PetOpts, blink: boolean
   for (let i = 2; i < 4; i++) {
     const h = bf(ANT_HIPS[i][0], ANT_HIPS[i][1]);
     const f = A.feet[i];
-    limb(ctx, h, joint(h[0], h[1], f[0], f[1], ANT_THIGH, ANT_SHIN, i === 2 ? 1 : -1), f, 0.062, 0.052);
+    limb(ctx, h, joint(h[0], h[1], f[0], f[1], ANT_THIGH, ANT_SHIN, i === 2 ? 1 : -1), f, 0.07, 0.06);
   }
   const fs = bf(ANT_FAR_SHOULDER[0], ANT_FAR_SHOULDER[1]);
   const fh = A.farHand;
-  limb(ctx, fs, joint(fs[0], fs[1], fh[0], fh[1], 0.36, 0.38, -1), fh, 0.058, 0.05);
-  dot(ctx, fh[0], fh[1], 0.085);
+  limb(ctx, fs, joint(fs[0], fs[1], fh[0], fh[1], 0.32, 0.34, 1), fh, 0.062, 0.054);
+  dot(ctx, fh[0], fh[1], 0.09);
   ctx.fill();
 
   // the body frame: antennae, gaster, waist, thorax
   enter(ctx);
   const sway = p === 0 ? Math.sin(ph + 1.3) * 0.03 : 0;
-  const bk = p === 1 ? 0.16 : p === 2 ? -0.06 : 0;
-  const antennae = (x0: number, y0: number, near: boolean) => {
+  const bk = p === 1 ? 0.14 : p === 2 ? -0.06 : 0;
+  /** an elbowed antenna from (x0, y0): a stalk up to the elbow (dx, dy away), then a whip forward to the club */
+  const antenna = (x0: number, y0: number, dx: number, dy: number, near: boolean) => {
     ctx.strokeStyle = near ? P.limbS : P.deep;
     ctx.fillStyle = ctx.strokeStyle;
-    ctx.lineWidth = 0.075;
-    const ex = x0 - 0.1 - bk * 0.4;
-    const ey = y0 - 0.3;
-    const cx = ex + 0.32 - bk;
-    const cy = ey - 0.06 + (near ? sway : -sway) + bk * 0.2;
+    ctx.lineWidth = 0.08;
+    const ex = x0 + dx - bk * 0.3;
+    const ey = y0 + dy;
+    const cx = ex + 0.3 - bk;
+    const cy = ey - 0.04 + (near ? sway : -sway) + bk * 0.2;
     ctx.beginPath();
     ctx.moveTo(x0, y0);
     ctx.lineTo(ex, ey);
     ctx.lineTo(cx, cy);
     ctx.stroke();
     ctx.beginPath();
-    dot(ctx, cx, cy, 0.085);
+    dot(ctx, cx, cy, 0.09);
     ctx.fill();
   };
   if (!o.helmet) {
-    antennae(hx + 0.22, hy - 0.46, false);
-    antennae(hx - 0.04, hy - 0.46, true);
+    antenna(hx + 0.2, hy - 0.44, -0.08, -0.3, false);
+    antenna(hx - 0.06, hy - 0.42, -0.1, -0.3, true);
   }
 
   const gb = 1 + b * 0.035;
+  const gaster = () => {
+    ctx.beginPath();
+    drop(ctx, AG.x, AG.y, AG.R * gb, AG.tip, AG.d * gb);
+  };
   ctx.fillStyle = lit(ctx, AG.x, AG.y, AG.R * 1.1, P.body, P.bodyS);
-  ctx.beginPath();
-  drop(ctx, AG.x, AG.y, AG.R * gb, AG.tip, AG.d * gb);
+  gaster();
   ctx.fill();
-  // one band across the gaster, in its own shade
+  // one segment band across the gaster
   ctx.save();
-  ctx.beginPath();
-  drop(ctx, AG.x, AG.y, AG.R * gb, AG.tip, AG.d * gb);
+  gaster();
   ctx.clip();
   ctx.fillStyle = P.cast;
   ctx.beginPath();
-  ctx.ellipse(AG.x + 0.5, AG.y - 0.02, 0.36, 0.62, 0.5, 0, TAU);
+  ctx.ellipse(AG.x + 0.48, AG.y - 0.04, 0.34, 0.6, 0.5, 0, TAU);
   ctx.fill();
   ctx.restore();
 
@@ -485,29 +500,31 @@ function ant(ctx: Ctx, P: Pal, p: number, ph: number, o: PetOpts, blink: boolean
   dot(ctx, AW.x, AW.y, AW.r);
   ctx.fill();
 
+  const thorax = () => {
+    ctx.beginPath();
+    cap(ctx, AT[0], AT[1], AT[2], AT[3], AT[4]);
+  };
   ctx.fillStyle = lit(ctx, (AT[0] + AT[2]) / 2, (AT[1] + AT[3]) / 2, 0.3, P.body, P.bodyS);
-  ctx.beginPath();
-  cap(ctx, AT[0], AT[1], AT[2], AT[3], AT[4]);
+  thorax();
   ctx.fill();
   // the head's shadow cast down on the thorax
   ctx.save();
-  ctx.beginPath();
-  cap(ctx, AT[0], AT[1], AT[2], AT[3], AT[4]);
+  thorax();
   ctx.clip();
   ctx.fillStyle = P.cast;
   ctx.beginPath();
-  dot(ctx, hx + LX * 0.14, hy + LY * 0.14, AH.r);
+  dot(ctx, hx + LX * 0.12, hy + LY * 0.12, AH.r);
   ctx.fill();
   ctx.restore();
   leave(ctx);
 
-  // the near legs: one terminator for the group
-  ctx.fillStyle = lit(ctx, 0, -0.62, 0.7, P.limb, P.limbS);
+  // the near legs: one terminator for the pair
+  ctx.fillStyle = lit(ctx, 0, -0.5, 0.6, P.limb, P.limbS);
   ctx.beginPath();
   for (let i = 0; i < 2; i++) {
     const h = bf(ANT_HIPS[i][0], ANT_HIPS[i][1]);
     const f = A.feet[i];
-    limb(ctx, h, joint(h[0], h[1], f[0], f[1], ANT_THIGH, ANT_SHIN, i === 0 ? 1 : -1), f, 0.068, 0.058);
+    limb(ctx, h, joint(h[0], h[1], f[0], f[1], ANT_THIGH, ANT_SHIN, i === 0 ? 1 : -1), f, 0.078, 0.066);
   }
   ctx.fill();
 
@@ -520,57 +537,45 @@ function ant(ctx: Ctx, P: Pal, p: number, ph: number, o: PetOpts, blink: boolean
   ctx.fill();
   glint(ctx, hx, hy, AH.r);
 
-  // mandibles: closed in a small V, gaping for a bite
-  const bite = p === 1 && !w;
-  const gape = bite ? 1 : p === 1 ? 0.45 : p === 2 ? 0.25 : 0;
-  const mx = hx + 0.38;
-  const my = hy + 0.36;
-  if (gape > 0) {
-    ctx.fillStyle = INK;
-    ctx.beginPath();
-    ctx.moveTo(mx - 0.02, my - 0.04);
-    ctx.lineTo(mx + 0.26 + gape * 0.06, my - 0.1 - gape * 0.14);
-    ctx.lineTo(mx + 0.22 + gape * 0.04, my + 0.12 + gape * 0.12);
-    ctx.closePath();
-    ctx.fill();
-  }
-  ctx.fillStyle = P.deep;
+  // mandibles: two rounded triangles jutting from under the face, closed to a V, gaping for a bite
+  const gape = p === 1 ? (w ? 0.5 : 1) : p === 2 ? 0.3 : 0;
+  ctx.fillStyle = P.limbS;
   ctx.beginPath();
-  tri(ctx, mx - 0.06, my - 0.12, mx + 0.08, my - 0.02, mx + 0.34 + gape * 0.06, my - 0.04 - gape * 0.26, 0.04);
-  tri(ctx, mx - 0.08, my + 0.02, mx + 0.06, my + 0.1, mx + 0.3 + gape * 0.02, my + 0.18 + gape * 0.2, 0.04);
+  tri(ctx, hx + 0.26, hy + 0.18, hx + 0.5, hy + 0.36, hx + 0.8 + gape * 0.02, hy + 0.28 - gape * 0.34, 0.07);
+  tri(ctx, hx + 0.2, hy + 0.34, hx + 0.4, hy + 0.52, hx + 0.68, hy + 0.5 + gape * 0.24, 0.07);
   ctx.fill();
   if (p === 0) {
-    // a little smirk above the jaws
+    // a little smirk
     ctx.strokeStyle = INK;
     ctx.lineWidth = 0.05;
     ctx.beginPath();
-    ctx.moveTo(hx + 0.18, hy + 0.22);
-    ctx.quadraticCurveTo(hx + 0.3, hy + 0.3, hx + 0.44, hy + 0.2);
+    ctx.moveTo(hx + 0.16, hy + 0.22);
+    ctx.quadraticCurveTo(hx + 0.28, hy + 0.3, hx + 0.42, hy + 0.2);
     ctx.stroke();
   }
 
   const state = p === 2 ? OUCH : blink ? SHUT : OPEN;
-  eyes(ctx, [hx + 0.1, hy - 0.04, 0.21, hx + 0.43, hy - 0.06, 0.15], headFill, p === 1 ? 0.36 : 0.14, p === 1 ? 0.42 : 0.08, state);
+  eyes(ctx, [hx + 0.1, hy - 0.04, 0.21, hx + 0.42, hy - 0.06, 0.15], headFill, p === 1 ? 0.36 : 0.14, p === 1 ? 0.42 : 0.08, state);
 
   if (o.helmet) {
-    hat(ctx, P, hx - 0.04, hy - 0.2, 0.6, 0.8, p === 2 ? -0.22 : -0.06);
-    // the antennae come out through the crown
-    antennae(hx + 0.26, hy - 0.56, false);
-    antennae(hx + 0.06, hy - 0.58, true);
+    hat(ctx, P, hx - 0.03, hy - 0.2, 0.58, 0.8, p === 2 ? -0.2 : -0.05);
+    // the antennae come out at the front of the crown
+    antenna(hx + 0.34, hy - 0.5, 0.06, -0.24, false);
+    antenna(hx + 0.14, hy - 0.56, 0.04, -0.24, true);
   }
   leave(ctx);
 
   // the near arm and what it holds
-  const el = joint(sh[0], sh[1], hand[0], hand[1], 0.36, 0.4, 1);
+  const el = joint(sh[0], sh[1], hand[0], hand[1], 0.34, 0.36, 1);
   ctx.fillStyle = lit(ctx, (sh[0] + hand[0]) / 2, (sh[1] + hand[1]) / 2, 0.4, P.limb, P.limbS);
   ctx.beginPath();
-  limb(ctx, sh, el, hand, 0.066, 0.056);
+  limb(ctx, sh, el, hand, 0.072, 0.062);
   ctx.fill();
   if (w) held(ctx, w, hand[0], hand[1], p, k);
   if (w !== 'shield') {
     ctx.fillStyle = P.limb;
     ctx.beginPath();
-    dot(ctx, hand[0], hand[1], 0.1);
+    dot(ctx, hand[0], hand[1], 0.105);
     ctx.fill();
   }
 }
@@ -590,6 +595,7 @@ const FDF = [0.66, -1.64, 0.28];
 const FM = [0.05, -1.02, 1.12];
 const THIGH = { x: -0.7, y: -0.46, R: 0.38, a: 0.4, d: 0.78 };
 const FROG_SHOULDER = [0.3, -0.84];
+const FROG_FAR_SHOULDER = [0.66, -0.8];
 interface FrogPose {
   lean: number;
   lunge: number;
@@ -603,21 +609,22 @@ interface FrogPose {
   jaw: number;
 }
 const FROG: FrogPose[] = [
-  { lean: 0, lunge: 0, px: 0.6, py: -0.9, heel: [-0.5, -0.08], toes: [0.2, -0.07], hand: [0.62, -0.06], arm: [0.98, -0.62], farHand: [0.96, -0.06], jaw: 0 },
-  { lean: 0.22, lunge: 0.14, px: 0.6, py: -0.9, heel: [-1.0, -0.08], toes: [-0.36, -0.05], hand: [1.0, -0.06], arm: [1.1, -0.78], farHand: [1.2, -0.06], jaw: 0.2 },
-  { lean: -0.2, lunge: -0.16, px: -0.8, py: 0, heel: [-0.62, -0.08], toes: [0.08, -0.07], hand: [0.98, -0.68], arm: [0.86, -0.9], farHand: [0.8, -0.06], jaw: 0.08 },
+  { lean: 0, lunge: 0, px: 0.6, py: -0.9, heel: [-0.5, -0.08], toes: [0.18, -0.08], hand: [0.6, -0.08], arm: [0.98, -0.6], farHand: [0.94, -0.08], jaw: 0 },
+  { lean: 0.22, lunge: 0.1, px: 0.6, py: -0.9, heel: [-1.0, -0.08], toes: [-0.38, -0.06], hand: [0.98, -0.08], arm: [0.84, -0.46], farHand: [1.16, -0.08], jaw: 0.2 },
+  { lean: -0.2, lunge: -0.16, px: -0.8, py: 0, heel: [-0.62, -0.08], toes: [0.06, -0.08], hand: [0.66, -0.5], arm: [0.8, -0.74], farHand: [0.9, -0.22], jaw: 0.08 },
 ];
 
-/** a three-pad frog hand at (x, y), the pads fanned forward */
+/** a three-pad frog hand at (x, y), the pads fanned forward with air between them */
 function pads(ctx: Ctx, x: number, y: number, s: number) {
-  dot(ctx, x, y, 0.085 * s);
+  dot(ctx, x, y, 0.1 * s);
   for (let i = 0; i < 3; i++) {
-    const a = -0.55 + i * 0.5;
-    dot(ctx, x + Math.cos(a) * 0.16 * s, y + Math.sin(a) * 0.12 * s, 0.062 * s);
+    const a = -0.6 + i * 0.52;
+    dot(ctx, x + Math.cos(a) * 0.17 * s, y + Math.sin(a) * 0.12 * s, 0.072 * s);
   }
 }
 
 function frog(ctx: Ctx, P: Pal, p: number, ph: number, o: PetOpts, blink: boolean, fx: boolean) {
+  PET = 'frog';
   const F = FROG[p];
   const w = o.weapon ?? null;
   const b = p === 0 ? Math.sin(ph) : 0;
@@ -625,16 +632,13 @@ function frog(ctx: Ctx, P: Pal, p: number, ph: number, o: PetOpts, blink: boolea
   const tongue = p === 1 && !w;
   frame(F.lunge, -b * 0.02, F.lean, F.px, F.py);
   const hand = w ? [F.arm[0], F.arm[1] + b * 0.015] : F.hand;
-  if (w === 'shield') {
-    hand[0] -= 0.02;
-    hand[1] += 0.06;
-  }
+  if (w === 'shield') hand[1] += 0.06;
   const k = w === 'shield' ? 0.52 : w === 'spear' ? 0.66 : w === 'bat' ? 0.66 : 0.64;
 
   if (fx) {
     if (p === 1) {
-      swing(ctx, w, hand[0], hand[1], k);
-      streaks(ctx, -1.18, -1.2, 0.5, 0.22, 2, 0.045);
+      swing(ctx, w, hand[0], hand[1], k, 1);
+      streaks(ctx, -1.24, -1.2, 0.5, 0.22, 2, 0.045);
     } else if (p === 2) {
       const [ix, iy] = bf(1.2, -1.66);
       impact(ctx, ix + 0.12, iy, 0.4);
@@ -646,10 +650,13 @@ function frog(ctx: Ctx, P: Pal, p: number, ph: number, o: PetOpts, blink: boolea
   ctx.lineJoin = 'round';
   light(0);
 
-  // the far hand peeking out beyond the belly
+  // the far arm, mostly behind the belly, its hand planted beyond it
+  const fs = bf(FROG_FAR_SHOULDER[0], FROG_FAR_SHOULDER[1]);
+  const fh = F.farHand;
   ctx.fillStyle = P.limbS;
   ctx.beginPath();
-  pads(ctx, F.farHand[0], F.farHand[1], 0.9);
+  limb(ctx, fs, joint(fs[0], fs[1], fh[0], fh[1], 0.4, 0.42, 1), fh, 0.09, 0.075);
+  pads(ctx, fh[0] + 0.04, fh[1] - 0.01, 0.9);
   ctx.fill();
 
   // the hind leg's shin and foot, under the thigh
@@ -732,12 +739,12 @@ function frog(ctx: Ctx, P: Pal, p: number, ph: number, o: PetOpts, blink: boolea
   // eyes in the domes, then the helmet seated on both domes like a pot lid
   const state = p === 2 ? OUCH : blink ? SHUT : OPEN;
   eyes(ctx, [FDN[0] + 0.04, FDN[1] - 0.02, 0.24, FDF[0] + 0.03, FDF[1] - 0.02, 0.2], massFill, p === 1 ? 0.36 : 0.12, p === 1 ? 0.42 : 0.06, state);
-  if (o.helmet) hat(ctx, P, 0.38, -1.79, 0.78, 0.72, p === 2 ? -0.16 : -0.05);
+  if (o.helmet) hat(ctx, P, 0.36, -1.86, 0.74, 0.64, p === 2 ? -0.14 : -0.04);
   leave(ctx);
 
   // the near arm: upper arm from the shoulder, forearm, a three-pad hand; its shadow falls on the belly
   const sh = bf(FROG_SHOULDER[0], FROG_SHOULDER[1]);
-  const el = joint(sh[0], sh[1], hand[0], hand[1], 0.42, 0.44, w ? 1 : 1);
+  const el = joint(sh[0], sh[1], hand[0], hand[1], 0.46, 0.46, 1);
   const arm = (c: Ctx, dx: number, dy: number) => {
     c.beginPath();
     limb(c, [sh[0] + dx, sh[1] + dy], [el[0] + dx, el[1] + dy], [hand[0] + dx, hand[1] + dy], 0.1, 0.085);

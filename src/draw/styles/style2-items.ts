@@ -60,20 +60,24 @@ function dot(ctx: Ctx, x: number, y: number, r: number) {
   ctx.moveTo(x + r, y);
   ctx.arc(x, y, r, 0, TAU);
 }
-/** a triangle with rounded corners, wound clockwise whatever order the corners come in */
+/** a triangle with rounded corners (each corner eased by up to rad), wound clockwise whatever order they come in */
 export function tri(ctx: Ctx, ax: number, ay: number, bx: number, by: number, cx: number, cy: number, rad: number) {
-  if ((bx - ax) * (cy - ay) - (by - ay) * (cx - ax) < 0) {
-    const tx = bx;
-    const ty = by;
-    bx = cx;
-    by = cy;
-    cx = tx;
-    cy = ty;
+  const P = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax) < 0 ? [ax, ay, cx, cy, bx, by] : [ax, ay, bx, by, cx, cy];
+  for (let i = 0; i < 3; i++) {
+    const x = P[i * 2];
+    const y = P[i * 2 + 1];
+    const px = P[((i + 2) % 3) * 2] - x;
+    const py = P[((i + 2) % 3) * 2 + 1] - y;
+    const nx = P[((i + 1) % 3) * 2] - x;
+    const ny = P[((i + 1) % 3) * 2 + 1] - y;
+    const lp = Math.hypot(px, py) || 1;
+    const ln = Math.hypot(nx, ny) || 1;
+    const tp = Math.min(rad, lp * 0.45) / lp;
+    const tn = Math.min(rad, ln * 0.45) / ln;
+    if (i === 0) ctx.moveTo(x + px * tp, y + py * tp);
+    else ctx.lineTo(x + px * tp, y + py * tp);
+    ctx.quadraticCurveTo(x, y, x + nx * tn, y + ny * tn);
   }
-  ctx.moveTo((ax + bx) / 2, (ay + by) / 2);
-  ctx.arcTo(bx, by, cx, cy, rad);
-  ctx.arcTo(cx, cy, ax, ay, rad);
-  ctx.arcTo(ax, ay, bx, by, rad);
   ctx.closePath();
 }
 
@@ -148,7 +152,7 @@ function spear(ctx: Ctx) {
   ctx.fill();
 }
 
-/** a round shield seen face on, radius 1: steel rim, slate face, a gold ring and a steel boss */
+/** a round shield seen face on, radius 1: steel rim, slate face, a gold four-point star, a steel boss */
 function shield(ctx: Ctx) {
   ctx.fillStyle = round(ctx, STEEL, 0, 0, 1);
   ctx.beginPath();
@@ -158,24 +162,26 @@ function shield(ctx: Ctx) {
   ctx.beginPath();
   dot(ctx, 0, 0, 0.8);
   ctx.fill();
-  ctx.fillStyle = round(ctx, GOLD, 0, 0, 1);
+  ctx.fillStyle = round(ctx, GOLD, 0, 0, 0.8);
   ctx.beginPath();
-  dot(ctx, 0, 0, 0.56);
+  for (let i = 0; i < 8; i++) {
+    const a = -PI / 2 + (i * PI) / 4;
+    const r = i % 2 ? 0.2 : 0.74;
+    if (i === 0) ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+    else ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+  }
+  ctx.closePath();
   ctx.fill();
-  ctx.fillStyle = round(ctx, SLATE, 0, 0, 1);
+  ctx.fillStyle = round(ctx, STEEL, 0, 0, 0.3);
   ctx.beginPath();
-  dot(ctx, 0, 0, 0.42);
+  dot(ctx, 0, 0, 0.27);
   ctx.fill();
-  ctx.fillStyle = round(ctx, STEEL, 0, 0, 0.26);
-  ctx.beginPath();
-  dot(ctx, 0, 0, 0.24);
-  ctx.fill();
-  // four gold studs on the rim
+  // four gold studs on the rim, between the star's points
   ctx.fillStyle = SIL ?? GOLD.lit;
   ctx.beginPath();
   for (let i = 0; i < 4; i++) {
     const a = PI / 4 + (i * PI) / 2;
-    dot(ctx, Math.cos(a) * 0.9, Math.sin(a) * 0.9, 0.065);
+    dot(ctx, Math.cos(a) * 0.9, Math.sin(a) * 0.9, 0.06);
   }
   ctx.fill();
 }
@@ -188,58 +194,72 @@ export function weapon(ctx: Ctx, w: WeaponType) {
   else shield(ctx);
 }
 
+const PLUME = { lit: '#ff8a3d', shade: '#d6531c' };
+
 /**
- * The gladiator helmet from the side, facing right: a steel dome on a gold brow band, a cheek guard hanging at
- * the side with a gap of air between it and the dome, a flared neck guard, and a plume of four stacked rounded
- * triangles swept back along the crown. Its rim sits on y = 0 and spans x -1..1; the dome rises to y -0.9, the
- * plume to about -1.4, the cheek guard hangs to 0.55. The plume takes the team's colours on a pet.
+ * The gladiator helmet from the side, facing right: a round steel dome on a gold brow band, a flared neck guard,
+ * and a plume of four stacked rounded triangles swept back along the crown. Its rim sits on y = 0 and spans
+ * x -1..1; the dome rises to y -0.92, the plume to about -1.55. With `face` (the lobby icon) it also gets a
+ * Corinthian face plate hanging to y 0.75, its eye hole and mouth slot cut out as negative space. On a pet the
+ * plume takes the team's colours.
  */
-export function helmet(ctx: Ctx, plume: Pair = GOLD, guard = true) {
-  // the plume, behind the dome: each blade rooted under the crown and swept back
-  ctx.fillStyle = round(ctx, plume, -0.2, -1.0, 0.7);
+export function helmet(ctx: Ctx, plume: Pair = PLUME, face = false) {
+  // the plume: each blade rooted under the crown, standing out from the dome and swept back
+  ctx.fillStyle = round(ctx, plume, -0.25, -1.1, 0.8);
   ctx.beginPath();
   for (let i = 0; i < 4; i++) {
-    const th = 1.18 + i * 0.36; // around the crown, front to back
-    const c = Math.cos(th);
-    const s = Math.sin(th);
-    const reach = 1.32 + i * 0.05;
-    const sw = th + 0.42; // the tip swept back
-    tri(ctx, Math.cos(th - 0.24) * 0.7, -Math.sin(th - 0.24) * 0.62, Math.cos(th + 0.26) * 0.7, -Math.sin(th + 0.26) * 0.62, c * 0.2 + Math.cos(sw) * reach, -s * 0.2 - Math.sin(sw) * reach * 0.94, 0.07);
+    const th = 1.2 + i * 0.38;
+    const ox = Math.cos(th);
+    const oy = -Math.sin(th);
+    const rx = ox * 0.8;
+    const ry = oy * 0.76;
+    const sw = th + 0.95;
+    const h = 0.62 + i * 0.05;
+    const tx = -oy * 0.34;
+    const ty = ox * 0.34;
+    tri(ctx, rx - tx, ry - ty, rx + tx, ry + ty, rx + Math.cos(sw) * h, ry - Math.sin(sw) * h, 0.15);
   }
   ctx.fill();
   // the neck guard flaring out at the back
-  ctx.fillStyle = bevel(ctx, IRON, 0.1);
+  ctx.fillStyle = bevel(ctx, IRON, 0.08);
   ctx.beginPath();
-  ctx.moveTo(-0.9, -0.3);
-  ctx.quadraticCurveTo(-1.02, 0.02, -1.2, 0.2);
-  ctx.quadraticCurveTo(-0.96, 0.28, -0.7, 0.16);
-  ctx.lineTo(-0.66, -0.1);
+  ctx.moveTo(-0.92, -0.32);
+  ctx.quadraticCurveTo(-1.0, 0.0, -1.22, 0.2);
+  ctx.quadraticCurveTo(-0.94, 0.3, -0.66, 0.14);
+  ctx.lineTo(-0.62, -0.1);
   ctx.closePath();
   ctx.fill();
   // the dome
-  ctx.fillStyle = round(ctx, STEEL, 0, -0.45, 0.95);
+  ctx.fillStyle = round(ctx, STEEL, 0, -0.46, 0.95);
   ctx.beginPath();
   ctx.moveTo(-1, 0);
-  ctx.ellipse(0, 0, 1, 0.9, 0, PI, TAU);
+  ctx.ellipse(0, 0, 1, 0.92, 0, PI, TAU);
   ctx.closePath();
   ctx.fill();
-  // the cheek guard, hung below the band with air between
-  if (guard) {
-    ctx.fillStyle = round(ctx, IRON, -0.4, 0.28, 0.32);
+  if (face) {
+    // the face plate: nose guard down the front, cheek guard below, an almond eye hole and a mouth slot
+    ctx.fillStyle = round(ctx, STEEL, 0.4, 0.2, 0.7, 0.2);
     ctx.beginPath();
-    ctx.moveTo(-0.74, 0.12);
-    ctx.lineTo(-0.2, 0.12);
-    ctx.quadraticCurveTo(-0.18, 0.44, -0.4, 0.56);
-    ctx.quadraticCurveTo(-0.7, 0.6, -0.74, 0.34);
+    ctx.moveTo(-0.2, 0);
+    ctx.lineTo(1.0, 0);
+    ctx.quadraticCurveTo(1.08, 0.22, 1.0, 0.42);
+    ctx.lineTo(0.66, 0.46);
+    ctx.lineTo(0.94, 0.56);
+    ctx.quadraticCurveTo(0.9, 0.78, 0.6, 0.8);
+    ctx.quadraticCurveTo(0.1, 0.8, -0.14, 0.48);
     ctx.closePath();
-    ctx.fill();
+    ctx.moveTo(0.92, 0.18);
+    ctx.quadraticCurveTo(0.68, 0.06, 0.4, 0.2);
+    ctx.quadraticCurveTo(0.68, 0.32, 0.92, 0.18);
+    ctx.closePath();
+    ctx.fill('evenodd');
   }
-  // the brow band, running out into a short peak at the front
-  ctx.fillStyle = bevel(ctx, GOLD, -0.02);
+  // the brow band
+  ctx.fillStyle = bevel(ctx, GOLD, -0.03);
   ctx.beginPath();
   ctx.moveTo(-1.03, -0.15);
-  ctx.lineTo(0.92, -0.15);
-  ctx.quadraticCurveTo(1.18, -0.12, 1.24, 0.07);
+  ctx.lineTo(0.96, -0.15);
+  ctx.quadraticCurveTo(1.12, -0.12, 1.12, 0.06);
   ctx.lineTo(-1.03, 0.08);
   ctx.closePath();
   ctx.fill();
@@ -336,9 +356,9 @@ function place(ctx: Ctx, type: ItemType, h: number) {
     ctx.scale(h * 0.8, h * 0.8);
     shield(ctx);
   } else if (type === 'helmet') {
-    ctx.translate(h * 0.04, h * 0.2);
-    ctx.scale(h * 0.66, h * 0.66);
-    helmet(ctx);
+    ctx.translate(h * 0.06, h * 0.12);
+    ctx.scale(h * 0.64, h * 0.64);
+    helmet(ctx, PLUME, true);
   } else if (type === 'sneakers') {
     ctx.translate(0, -h * 0.04);
     ctx.scale(h * 0.84, h * 0.84);
