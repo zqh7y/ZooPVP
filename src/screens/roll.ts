@@ -2,11 +2,12 @@ import { sfx } from '../audio/engine';
 import { MAX_LEVEL, PET_INFO, PIECE_NAME, PIECE_TYPES, cls, isPet, tierOf } from '../data';
 import { Fx } from '../draw/fx';
 import { drawPiece, type PieceLike } from '../draw/pieces';
-import { classBadge, classBadgeSize, fitLabel, rungBadge } from '../draw/ui';
+import { classBadge, classBadgeSize, fitLabel } from '../draw/ui';
+import { badgeLine } from './panels';
 import { fpick, frand } from '../rng';
 import { CLASS_FX, COLOR, H, TIER, TYPE, UI, W } from '../theme';
 import type { PetType, RollResult } from '../types';
-import { clamp, easeOutBack, easeOutCubic, label, rr, type Ctx, type Rect } from '../util';
+import { clamp, easeOutBack, easeOutCubic, label, rr, textWidth, type Ctx, type Rect } from '../util';
 
 /*
  * The roll: plain, no slot machine and no case art. The screen dims to a soft empty background and the prize spins
@@ -160,8 +161,8 @@ export class RollOverlay {
     ctx.save();
     ctx.globalAlpha = fade;
     const g = ctx.createRadialGradient(PRIZE.x, PRIZE.y, 40, PRIZE.x, PRIZE.y, H * 0.7);
-    g.addColorStop(0, 'rgba(250, 248, 244, 0.97)');
-    g.addColorStop(1, 'rgba(214, 210, 202, 0.96)');
+    g.addColorStop(0, '#f8f6f2');
+    g.addColorStop(1, '#d8d4cc');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, H);
     ctx.restore();
@@ -236,7 +237,7 @@ export class RollOverlay {
       ctx.globalAlpha = 0.18;
       ctx.fillStyle = '#3c372e';
       ctx.beginPath();
-      ctx.ellipse(PRIZE.x, PRIZE.y + size * 0.62, size * 0.42 * Math.max(0.35, sx), size * 0.08, 0, 0, Math.PI * 2);
+      ctx.ellipse(PRIZE.x, PRIZE.y + size * 0.56, size * 0.4 * Math.max(0.35, sx), size * 0.06, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
@@ -253,7 +254,7 @@ export class RollOverlay {
     if (a <= 0) return;
     ctx.save();
     ctx.globalAlpha = a;
-    const top = PRIZE.y + PRIZE.size / 2 + 36;
+    const top = PRIZE.y + PRIZE.size / 2 + 52;
     const lift = (1 - easeOutCubic(a)) * 14;
     const name = PIECE_NAME[r.type].toUpperCase();
     if (r.fresh) {
@@ -268,15 +269,15 @@ export class RollOverlay {
     const y2 = top + 52 + lift;
     if (isPet(r.type)) {
       const info = PET_INFO[r.type as PetType];
-      const text = `RUNG ${r.rung} OF 12  ·  ${info.role.toUpperCase()}`;
-      rungBadge(ctx, r.rung, PRIZE.x - 150, y2, 1.1);
-      fitLabel(ctx, text, PRIZE.x + 14, y2 + 1, TYPE.lead, 270, { color: UI.textDim, weight: 700, track: 1 });
+      badgeLine(ctx, r.rung, `RUNG ${r.rung} OF 12  ·  ${info.role.toUpperCase()}`, PRIZE.x, y2, W - 60);
       fitLabel(ctx, info.trait, PRIZE.x, y2 + 40, TYPE.body, W - 80, { color: UI.text });
     } else {
       const bs = classBadgeSize(r.level, 1.3);
       const text = cls(r.level).toUpperCase();
-      classBadge(ctx, r.level, PRIZE.x - bs.w - 10, y2, 1.3, t);
-      label(ctx, text, PRIZE.x + 2, y2 + 1, TYPE.lead, { align: 'left', color: UI.tierText[Math.min(6, r.level - 1)], weight: 700, track: 1.5 });
+      const tw = textWidth(ctx, text, TYPE.lead, 700, 1.5);
+      const x0 = PRIZE.x - (bs.w + 10 + tw) / 2;
+      classBadge(ctx, r.level, x0, y2, 1.3, t);
+      label(ctx, text, x0 + bs.w + 10, y2 + 1, TYPE.lead, { align: 'left', color: UI.tierText[Math.min(6, r.level - 1)], weight: 700, track: 1.5 });
     }
     if (r.pity) label(ctx, 'LUCKY ROLL', PRIZE.x, top - 18 + lift, TYPE.caption, { color: UI.rewardDark, weight: 700, track: 2 });
     // tap to collect, breathing

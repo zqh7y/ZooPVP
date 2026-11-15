@@ -1,231 +1,237 @@
-import type { App, Screen } from '../screen';
-import type { Ctx, Rect } from '../util';
-import type { LinkEdge, Piece, PetType, SaveState, SquadSpec } from '../types';
-import type { Target } from '../logic/inventory';
-import { shapeCells, cellsOf } from '../logic/inventory';
-import { W, S, TYPE, TOPBAR, STAGE, UI } from '../theme';
-import { clamp, easeOutBack, easeOutCubic, easeOutElastic, inRect, label, rr } from '../util';
-import { BENCH_SLOTS, GRID, PIECE_DESC, PIECE_NAME, TROPHY_ROAD, TUTORIAL_DONE, cls, footprint, gearPct, isGear, isPet, leagueOf, squadPower } from '../data';
-import { button, cell, classBadge, classBadgeSize, classColor, fitLabel, gridFrame, hint, panel, pill, powerBadge, progressBar, toast } from '../draw/ui';
-import type { ButtonOpts, IconFn } from '../draw/ui';
-import { leagueBadge, rollToken, speaker, trash, trophy, wand } from '../draw/icons';
-import { drawPiece } from '../draw/pieces';
-import { petArt } from '../draw/pets';
-import { restPose } from '../draw/petTypes';
-import type { PetLook } from '../draw/petTypes';
-import { STAGE_GROUND_Y } from '../draw/arena';
+import { music, sfx } from '../audio/engine';
+import {
+  AUTO_START, BENCH_SLOTS, GRID, PIECE_DESC, PIECE_NAME, PITY, TUTORIAL_DONE, WAVES,
+  cls, footprint, formatPower, gearPct, isGear, isPet, koCash, rungOf,
+} from '../data';
+import { setView } from '../draw/camera';
 import { Fx } from '../draw/fx';
+import { bars, bolt, cash, cycle, gem, koStar, lock, speaker, trash, wand } from '../draw/icons';
+import { drawPiece } from '../draw/pieces';
+import {
+  button, cell, classBadge, classBadgeSize, classColor, fitLabel, gridFrame, hint, progressBar, rungBadge, scoreBug,
+  tickTo, toast, type ButtonOpts,
+} from '../draw/ui';
 import { autoArrange } from '../logic/auto';
-import { sfx, music } from '../audio/engine';
+import { LOCKED, cellsOf, shapeCells, type Target } from '../logic/inventory';
+import { applyWave, cellLock, cellProgress, unlockCell } from '../logic/progress';
+import { caseBlock, casePrice, openCase } from '../logic/rolls';
+import { FRESH_START_TOAST } from '../logic/save';
+import { fightSeed, nextWave, stageBoss, type WaveInfo } from '../logic/waves';
 import { frand } from '../rng';
+import type { App, Screen } from '../screen';
+import { COLOR, H, S, TEAM, TYPE, UI, W } from '../theme';
+import type { ArmySpec, CaseKind, LinkEdge, PetType, Piece, WaveResult } from '../types';
+import { clamp, easeInOutCubic, easeOutBack, easeOutCubic, easeOutElastic, inRect, label, rr, type Ctx, type Rect } from '../util';
+import { BattleView, type WaveSetup } from './battle';
+import { Defeat, Evolve, Ladder, NewUnit, StageClear, WaveClear, drawUnit, type Overlay } from './panels';
+import { RollOverlay } from './roll';
 
-// ------------------------------------------------------------------ layout (shared with the roll screen)
+/*
+ * The one main screen, like Bunny Brigade's, in ZooPVP's own look. Top to bottom: the top bar (cash, the WAVE m/10
+ * bar with the stage boss's head at its end, gems; the STAGE n tab under it), the arena (it owns the battle view:
+ * during prep a short view with your army in its rows and START WAVE over it; in a wave the view grows to most of the
+ * screen while the grid slides down, locked, and it shrinks back when the outcome is in), then the power tab, the
+ * 5 x 5 grid with its locked cells, the tray between the stats button and TRASH, and CASE / ELITE. The roll and every
+ * panel are overlays on it.
+ */
 
-/** One grid cell (and one bench slot), px. */
-export const CELL = 90;
-/** The power plate: centred on the army strip's lower edge, where the eye goes from the army to the grid. */
-const POWER = { cx: W / 2, cy: STAGE.y + STAGE.h + 6, w: 280, h: 76 };
-export const GRID_RECT: Rect = { x: (W - CELL * GRID.cols) / 2, y: POWER.cy + POWER.h / 2 + 24, w: CELL * GRID.cols, h: CELL * GRID.rows };
-/** The bench: one row of BENCH_SLOTS slots under the grid. */
-export const BENCH_RECT: Rect = { x: (W - CELL * BENCH_SLOTS) / 2, y: GRID_RECT.y + GRID_RECT.h + 36, w: CELL * BENCH_SLOTS, h: CELL };
-/** Where a bench slot sits on screen. */
-export const benchSlotRect = (slot: number): Rect => ({ x: BENCH_RECT.x + slot * CELL, y: BENCH_RECT.y, w: CELL, h: CELL });
+// ------------------------------------------------------------------ layout
+
+export const ARENA_PREP: Rect = { x: 0, y: 90, w: W, h: 470 };
+export const ARENA_FIGHT: Rect = { x: 0, y: 90, w: W, h: 930 };
+/** how far the lower part (grid, tray, cases) slides down while a wave is fought */
+const SLIDE = ARENA_FIGHT.h - ARENA_PREP.h;
+const GROW_TIME = 0.75;
+
+const TOP = {
+  cash: { x: 12, y: 14, w: 128, h: 44 },
+  wave: { x: 150, y: 14, w: 240, h: 44 },
+  gems: { x: 400, y: 14, w: 128, h: 44 },
+} satisfies Record<string, Rect>;
+const STAGE_TAB: Rect = { x: 205, y: 56, w: 120, h: 30 };
+const SOUND: Rect = { x: 12, y: 102, w: 54, h: 52 };
+const AUTO: Rect = { x: 474, y: 102, w: 54, h: 52 };
+const START: Rect = { x: 130, y: 230, w: 280, h: 92 };
+const HUD: Rect = { x: 76, y: 104, w: 388, h: 44 };
+
+/** One grid cell, px. */
+export const CELL = 66;
+export const GRID_RECT: Rect = { x: (W - CELL * GRID.cols) / 2, y: 620, w: CELL * GRID.cols, h: CELL * GRID.rows };
+const POWER_TAB: Rect = { x: W / 2 - 86, y: 568, w: 172, h: 40 };
+const ARRANGE: Rect = { x: GRID_RECT.x + GRID_RECT.w - 46, y: 570, w: 54, h: 38 };
+/** The tray: BENCH_SLOTS slots under the grid. */
+export const SLOT = 74;
+const SLOT_GAP = 10;
+export const TRAY: Rect = { x: (W - (SLOT * BENCH_SLOTS + SLOT_GAP * (BENCH_SLOTS - 1))) / 2, y: 978, w: SLOT * BENCH_SLOTS + SLOT_GAP * (BENCH_SLOTS - 1), h: SLOT };
+const STATS: Rect = { x: 18, y: 980, w: 70, h: 70 };
+const TRASH: Rect = { x: W - 18 - 70, y: 980, w: 70, h: 70 };
+const CASE_BTN: Rect = { x: 18, y: 1070, w: 300, h: 80 };
+const ELITE_BTN: Rect = { x: 330, y: 1070, w: 192, h: 80 };
+/** the card over the arena's bottom while a piece is held */
+const CARD: Rect = { x: S.pad, y: 446, w: W - S.pad * 2, h: 108 };
+const HINT: Rect = { x: 40, y: 160, w: W - 80, h: 58 };
+
+export const benchSlotRect = (slot: number): Rect => ({ x: TRAY.x + slot * (SLOT + SLOT_GAP), y: TRAY.y, w: SLOT, h: SLOT });
 const cellRect = (col: number, row: number): Rect => ({ x: GRID_RECT.x + col * CELL, y: GRID_RECT.y + row * CELL, w: CELL, h: CELL });
-/** The rect a piece's whole footprint covers on the grid, with its top-left cell at col, row. */
 const shapeRect = (p: Piece, col: number, row: number): Rect => {
   const f = footprint(p);
   return { x: GRID_RECT.x + col * CELL, y: GRID_RECT.y + row * CELL, w: CELL * f.w, h: CELL * f.h };
 };
-/** The tile a bench piece is drawn on: its footprint's shape, shrunk to fit its slot. */
-export function benchPieceRect(p: { type: Piece['type']; count: number; turned?: boolean }, slot: number): Rect {
+/** The tile a tray piece is drawn on: its footprint's shape, shrunk to fit its slot. */
+function benchPieceRect(p: { type: Piece['type']; count: number }, slot: number): Rect {
   const s = benchSlotRect(slot);
   const f = footprint({ ...p, turned: false });
   const k = 1 / Math.max(f.w, f.h);
-  const w = CELL * f.w * k;
-  const h = Math.max(CELL * f.h * k, f.w > f.h ? CELL * 0.62 : 0);
-  return { x: s.x + (CELL - w) / 2, y: s.y + (CELL - h) / 2, w, h };
+  const w = SLOT * f.w * k;
+  const h = Math.max(SLOT * f.h * k, f.w > f.h ? SLOT * 0.64 : 0);
+  return { x: s.x + (SLOT - w) / 2, y: s.y + (SLOT - h) / 2, w, h };
 }
+const homeRect = (p: Piece): Rect => (p.slot >= 0 ? benchPieceRect(p, p.slot) : shapeRect(p, p.col, p.row));
+const centreOf = (r: Rect) => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
+const inset = (r: Rect, m = 3): Rect => ({ x: r.x + m, y: r.y + m, w: r.w - m * 2, h: r.h - m * 2 });
+const linkKey = (e: LinkEdge) => `${e.c1},${e.r1},${e.c2},${e.r2},${e.active ? 1 : 0}`;
 
-const BTN_Y = BENCH_RECT.y + BENCH_RECT.h + 22;
-const SMALL_Y = BTN_Y + S.btnH + S.pad;
-const BTN = {
-  roll: { x: S.pad + 2, y: BTN_Y, w: 196, h: S.btnH },
-  battle: { x: S.pad + 2 + 196 + S.pad, y: BTN_Y, w: W - S.pad * 3 - 4 - 196, h: S.btnH },
-  auto: { x: S.pad + 2, y: SMALL_Y, w: 160, h: S.btnSmallH },
-  trash: { x: (W - 160) / 2, y: SMALL_Y, w: 160, h: S.btnSmallH },
-  mute: { x: W - S.pad - 2 - 160, y: SMALL_Y, w: 160, h: S.btnSmallH },
-} satisfies Record<string, Rect>;
-type BtnId = keyof typeof BTN;
-
-/** The top bar's three pills: name, trophies, rolls. Every screen that shows them uses these places, so they never jump. */
-export const TOP_PILLS = {
-  name: { x: S.pad, y: TOPBAR.y, w: 236, h: TOPBAR.h },
-  trophies: { x: S.pad + 236 + S.gap, y: TOPBAR.y, w: 134, h: TOPBAR.h },
-  rolls: { x: S.pad + 236 + S.gap + 134 + S.gap, y: TOPBAR.y, w: W - S.pad * 2 - 236 - 134 - S.gap * 2, h: TOPBAR.h },
-} satisfies Record<string, Rect>;
-const PILL = TOP_PILLS;
-
-/** The player's name (with the league badge), trophies and rolls, in the TOP_PILLS places. */
-export function drawTopPills(ctx: Ctx, state: SaveState) {
-  const lg = leagueOf(state.trophies);
-  pill(ctx, PILL.name, { icon: (c, x, y, s) => leagueBadge(c, x, y, s, lg), text: state.name });
-  pill(ctx, PILL.trophies, { icon: (c, x, y, s) => trophy(c, x, y, s, UI.accentDark), text: String(state.trophies) });
-  pill(ctx, PILL.rolls, { icon: (c, x, y, s) => rollToken(c, x, y, s, UI.text), text: String(state.rolls) });
-}
-
-const ROAD_BAR: Rect = { x: S.pad + 4, y: TOPBAR.y + TOPBAR.h + 12, w: W - S.pad * 2 - 92, h: 8 };
-/** The card over the stage while a piece is held: flush with the stage's top edge. */
-const CARD: Rect = { x: S.pad, y: STAGE.y + 4, w: W - S.pad * 2, h: 112 };
-const HINT_W = W - 64;
-const HINT_H = 60;
-/** At most this many fighters stand on the stage: fewer and larger than the whole army. */
-const ARMY_CAP = 6;
-const DRAG_LIFT = 1.08; // the lifted piece is drawn this much larger
-const DRAG_UP = 30; // and this far above the finger
+const DRAG_LIFT = 1.08;
+const DRAG_UP = 30;
 const SLIDE_BACK = 0.2;
 const TURN_TIME = 0.32;
 
-const btnIcon = (f: (ctx: Ctx, x: number, y: number, s: number) => void): IconFn => f;
+type BtnId = 'sound' | 'auto' | 'start' | 'stats' | 'trash' | 'case' | 'elite' | 'arrange';
+const BTN: Record<BtnId, Rect> = { sound: SOUND, auto: AUTO, start: START, stats: STATS, trash: TRASH, case: CASE_BTN, elite: ELITE_BTN, arrange: ARRANGE };
+/** buttons in the lower part (they slide with the grid) */
+const LOWER: ReadonlySet<BtnId> = new Set(['stats', 'trash', 'case', 'elite', 'arrange']);
 
-interface Drag {
-  piece: Piece;
-  x: number;
-  y: number;
-  sx: number;
-  sy: number;
-  /** where the finger holds the piece, from the piece's centre (grid pieces keep their grip) */
-  ox: number;
-  oy: number;
-  moved: boolean;
-}
-interface Slide {
-  piece: Piece;
-  x: number;
-  y: number;
-  age: number;
-}
-interface Toast {
-  text: string;
-  x: number;
-  y: number;
-  age: number;
-}
+interface Drag { piece: Piece; x: number; y: number; sx: number; sy: number; ox: number; oy: number; moved: boolean }
+interface Slide { piece: Piece; x: number; y: number; age: number }
+interface Toast { text: string; x: number; y: number; age: number; life: number }
+type Mode = 'prep' | 'fight' | 'after';
 
-const linkKey = (e: LinkEdge) => `${e.c1},${e.r1},${e.c2},${e.r2},${e.active ? 1 : 0}`;
-/** Where a piece is drawn when it rests: its footprint on the grid, or its shrunk tile on the bench. */
-const homeRect = (p: Piece): Rect => (p.slot >= 0 ? benchPieceRect(p, p.slot) : shapeRect(p, p.col, p.row));
-const centreOf = (r: Rect) => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
-/** The tile inside a footprint rect: a small gap all round, so neighbours read as separate blocks. */
-const inset = (r: Rect, m = 3): Rect => ({ x: r.x + m, y: r.y + m, w: r.w - m * 2, h: r.h - m * 2 });
-
-export function createLobby(app: App): Screen {
-  const fx = new Fx();
+export function createLobby(app: App, opts: { freshStart?: boolean } = {}): Screen {
   const inv = app.inv;
+  const state = app.state;
+  const fx = new Fx();
+  const view = new BattleView(app);
+  const roll = new RollOverlay();
   let t = 0;
+  let mode: Mode = 'prep';
+  let grow = 0; // 0 = the prep view, 1 = the wave view
+  let setup: WaveSetup | null = null;
   let drag: Drag | null = null;
   let slide: Slide | null = null;
   let pressed: BtnId | null = null;
-  const pops = new Map<number, number>(); // piece id -> age of its fuse pop
-  const hops = new Map<number, number>(); // piece id -> age of its tap hop
-  const turns = new Map<number, number>(); // piece id -> age of its turn
+  let downCell: { col: number; row: number } | null = null;
+  let idle = 0; // seconds of untouched prep (AUTO)
+  let startAge = 0; // seconds START WAVE has been showing
+  let lastKills = 0;
+  const pops = new Map<number, number>();
+  const hops = new Map<number, number>();
+  const turns = new Map<number, number>();
   const toasts: Toast[] = [];
+  const panels: Overlay[] = []; // modal, one at a time
+  const ribbons: Overlay[] = []; // not modal
+  let pendingCells: { col: number; row: number }[] = [];
   let links = inv.links();
+  let army: ArmySpec = inv.army();
+  let power = inv.power();
   let shownStep = -1;
   let stepAge = 0;
+  let waveCache: { key: string; info: WaveInfo } | null = null;
+  let bossCache: { stage: number; pet: PetType } | null = null;
 
-  const say = (text: string, x = W / 2, y = BTN_Y - 26) => {
-    toasts.push({ text, x, y, age: 0 });
-  };
+  const say = (text: string, y = TRAY.y - 22, life = 1.6) => toasts.push({ text, x: W / 2, y, age: 0, life });
+  // for the play-check script: where the wave flow is
+  if (import.meta.env.DEV) Object.assign(window as object, { __mode: () => (panels.length ? 'panel' : roll.active ? 'roll' : mode) });
+
+  function wave(): WaveInfo {
+    const key = `${state.stage},${state.wave},${state.tries},${state.seed}`;
+    if (!waveCache || waveCache.key !== key) waveCache = { key, info: nextWave(state) };
+    return waveCache.info;
+  }
+  function boss(): PetType {
+    if (!bossCache || bossCache.stage !== state.stage) bossCache = { stage: state.stage, pet: stageBoss(state.stage, state.seed) };
+    return bossCache.pet;
+  }
+  const slideY = () => SLIDE * easeInOutCubic(grow);
+  const arenaRect = (): Rect => ({ ...ARENA_PREP, h: ARENA_PREP.h + slideY() });
+  const busy = () => roll.active || panels.length > 0;
+  const prep = () => mode === 'prep';
 
   // -------------------------------------------------------------- the guide
 
   const pets = () => inv.pieces.filter((p) => isPet(p.type));
   const gridPets = () => pets().filter((p) => p.slot < 0);
-  const tut = () => app.state.tutorial;
+  const tut = () => state.tutorial;
 
   function stepDone(step: number): boolean {
     const sq = inv.squads();
     switch (step) {
       case 0:
-        return gridPets().some((p) => p.type === 'ant');
+        return gridPets().length > 0;
       case 1:
-        return sq.some((s) => s.weapon === 'knife');
+        return sq.some((s) => s.weapon !== null);
       case 2:
-        return sq.some((s) => s.helmet > 0);
+        return sq.some((s) => s.helmet > 0 || s.sneakers > 0 || s.chili > 0);
       case 3:
-        return app.state.matches > 0;
+        return state.fights > 0;
       case 4:
-        return false; // advanced by pressing ROLL
+        return state.rolled > 0 && !roll.active;
       case 5:
-        return pets().some((p) => p.type === 'ant' && p.count >= 2);
+        return pets().some((p) => p.type === 'sprout' && p.count >= 2) || pets().some((p) => rungOf(p.type as PetType) > 1);
       default:
         return false;
     }
   }
 
   function advanceGuide() {
-    let changed = false;
+    let moved = false;
     while (tut() < TUTORIAL_DONE && stepDone(tut())) {
-      app.state.tutorial = tut() >= 5 ? TUTORIAL_DONE : tut() + 1;
-      changed = true;
+      state.tutorial = tut() >= 5 ? TUTORIAL_DONE : tut() + 1;
+      moved = true;
     }
-    if (changed) app.save();
+    if (moved) app.save();
     if (tut() !== shownStep) {
       shownStep = tut();
       stepAge = 0;
-      if (tut() < TUTORIAL_DONE && t > 0) sfx.play('hint');
+      if (tut() < TUTORIAL_DONE && t > 0.2) sfx.play('hint');
     }
   }
 
-  /** What the guide points at now: the piece (or button) to touch and where it should go. */
+  /** What the guide points at now: the thing to touch and where it should go. */
   function guideTarget(): { text: string; at: Rect; to?: Rect } | null {
     const step = tut();
-    const find = (type: string, bench?: boolean) => inv.pieces.find((p) => p.type === type && (bench === undefined || (p.slot >= 0) === bench));
-    const ant = gridPets().find((p) => p.type === 'ant');
-    const beside = () => {
-      if (!ant) return undefined;
-      const f = footprint(ant);
+    if (!prep() || busy()) return null;
+    const onTray = (type: string) => inv.pieces.find((p) => p.type === type && p.slot >= 0);
+    const unit = gridPets()[0];
+    const beside = (): Rect | undefined => {
+      if (!unit) return undefined;
+      const f = footprint(unit);
       for (const [dc, dr] of [[f.w, 0], [-1, 0], [0, f.h], [0, -1]]) {
-        const c = ant.col + dc;
-        const r = ant.row + dr;
-        if (c >= 0 && r >= 0 && c < GRID.cols && r < GRID.rows && !inv.at(c, r)) return cellRect(c, r);
+        const c = unit.col + dc;
+        const r = unit.row + dr;
+        if (inv.isOpen(c, r) && !inv.at(c, r)) return cellRect(c, r);
       }
       return undefined;
     };
     if (step === 0) {
-      const p = find('ant', true);
-      return p ? { text: 'Drag your ant onto the grid', at: homeRect(p), to: cellRect(2, 2) } : null;
+      const p = onTray('sprout');
+      return p ? { text: 'Drag your Sprout onto the grid', at: homeRect(p), to: cellRect(2, 2) } : null;
     }
     if (step === 1) {
-      const p = find('knife');
-      return p ? { text: 'Put the knife right next to the ant', at: homeRect(p), to: beside() } : null;
+      const p = onTray('knife');
+      return p ? { text: 'Put the knife right next to it', at: homeRect(p), to: beside() } : null;
     }
     if (step === 2) {
-      const p = find('helmet');
-      return p ? { text: 'Now the helmet next to the ant too', at: homeRect(p), to: beside() } : null;
+      const p = onTray('helmet');
+      return p ? { text: 'And the helmet next to it too', at: homeRect(p), to: beside() } : null;
     }
-    if (step === 3) return { text: 'Ready! Press BATTLE', at: BTN.battle };
-    if (step === 4) return { text: 'You won rolls. Press ROLL', at: BTN.roll };
+    if (step === 3) return { text: 'Ready! Tap START WAVE', at: START };
+    if (step === 4) return { text: 'You earned cash. Open a CASE', at: CASE_BTN };
     if (step === 5) {
-      const p = inv.pieces.find((q) => q.type === 'ant' && q.slot >= 0);
-      return p ? { text: 'Drop the new ant onto your ant to double it', at: homeRect(p), to: ant ? homeRect(ant) : undefined } : null;
+      const p = inv.pieces.find((q) => q.type === 'sprout' && q.slot >= 0);
+      const mate = gridPets().find((q) => q.type === 'sprout');
+      return p ? { text: 'Drop the new Sprout on your Sprout to fuse them', at: homeRect(p), to: mate ? homeRect(mate) : undefined } : null;
     }
     return null;
-  }
-
-  /**
-   * Where the guide's callout sits: in an empty row of the grid when one is clear of the target (the top row,
-   * else the bottom one), else at the top of the army strip.
-   */
-  function hintRect(to?: Rect): Rect {
-    const x = (W - HINT_W) / 2;
-    const clear = (r: Rect) => (!to || to.y > r.y + r.h + S.gap || to.y + to.h < r.y - S.gap) && !inv.pieces.some((p) => p.slot < 0 && p.row <= Math.floor((r.y + r.h - GRID_RECT.y) / CELL) && p.row + footprint(p).h - 1 >= Math.floor((r.y - GRID_RECT.y) / CELL));
-    const top = { x, y: GRID_RECT.y + (CELL - HINT_H) / 2, w: HINT_W, h: HINT_H };
-    const bottom = { x, y: GRID_RECT.y + GRID_RECT.h - CELL + (CELL - HINT_H) / 2, w: HINT_W, h: HINT_H };
-    if (clear(top) && to) return top;
-    if (clear(bottom)) return bottom;
-    if (clear(top)) return top;
-    return { x, y: STAGE.y + S.pad, w: HINT_W, h: HINT_H };
   }
 
   // -------------------------------------------------------------- changes
@@ -236,7 +242,7 @@ export function createLobby(app: App): Screen {
     return { x: (a.x + b.x) / 2 + CELL / 2, y: (a.y + b.y) / 2 + CELL / 2 };
   }
 
-  /** After any change: links that lit up spark, links that broke go quiet, the guide moves on, the game saves. */
+  /** After any change to the grid or tray: links spark, the army and power update, the guide moves, the game saves. */
   function changed() {
     const before = new Set(links.filter((e) => e.active).map(linkKey));
     const now = inv.links();
@@ -253,6 +259,9 @@ export function createLobby(app: App): Screen {
     if (gained) sfx.play('link', 0, { delay: 0.06 });
     else if (lost) sfx.play('unlink', 0, { delay: 0.04 });
     links = now;
+    army = inv.army();
+    power = inv.power();
+    if (prep()) view.showPrep(army, wave().army);
     advanceGuide();
     app.save();
   }
@@ -269,51 +278,55 @@ export function createLobby(app: App): Screen {
     const c = centreOf(homeRect(at));
     if (res.kind === 'fused' && res.piece) {
       pops.set(res.piece.id, 0);
-      fx.fuseBurst(c.x, c.y, res.piece.level);
-      if (res.fuse === 'stack') sfx.play('stack', res.piece.count, { x: c.x });
-      else sfx.play('merge', res.piece.level, { x: c.x });
+      if (res.fuse === 'evolve' && res.from && res.to) {
+        const to = res.to;
+        const fresh = !!res.fresh;
+        panels.push(new Evolve(res.from, to, homeRect(res.piece), () => {
+          if (res.piece) pops.set(res.piece.id, 0);
+          fx.fuseBurst(c.x, c.y, 5);
+          if (fresh) panels.push(new NewUnit(to, state, true));
+        }));
+      } else {
+        fx.fuseBurst(c.x, c.y, isPet(res.piece.type) ? 1 + res.piece.count : res.piece.level);
+        if (res.fuse === 'stack') sfx.play('stack', res.piece.count, { x: c.x });
+        else sfx.play('merge', res.piece.level, { x: c.x });
+      }
     } else sfx.play('drop', 0, { x: c.x });
     changed();
   }
 
-  /** A tapped bench piece goes to the first free spot next to something it can use (else the free spot nearest the middle). */
-  function quickPlace(p: Piece) {
-    const f = footprint(p);
-    const free: { col: number; row: number }[] = [];
-    for (let r = 0; r + f.h <= GRID.rows; r++) for (let c = 0; c + f.w <= GRID.cols; c++) if (inv.preview(p, { col: c, row: r }).kind === 'moved') free.push({ col: c, row: r });
-    if (!free.length) {
-      say('No room on the grid');
-      sfx.play('denied');
+  function tapTray(p: Piece) {
+    const res = inv.autoPlace(p);
+    const from = centreOf(homeRect(p));
+    if (res.kind === 'denied') {
+      sfx.play('denied', 0, { x: from.x });
+      say(res.reason ?? 'No room on the grid');
+      hops.set(p.id, 0);
       return;
     }
-    const useful = (c0: number, r0: number) =>
-      shapeCells(f.w, f.h, c0, r0).some(({ col, row }) =>
-        [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dc, dr]) => {
-          const n = inv.at(col + dc, row + dr);
-          return !!n && n !== p && (isPet(p.type) ? !isPet(n.type) : isPet(n.type));
-        }),
-      );
-    const mid = (GRID.cols - 1) / 2;
-    const centre = (q: { col: number; row: number }) => Math.abs(q.col + (f.w - 1) / 2 - mid) + Math.abs(q.row + (f.h - 1) / 2 - mid);
-    const spot = [...free].sort((a, b) => Number(useful(b.col, b.row)) - Number(useful(a.col, a.row)) || centre(a) - centre(b))[0];
-    const from = centreOf(homeRect(p));
-    drop(p, spot, from.x, from.y);
-    hops.set(p.id, 0);
+    hops.set((res.piece ?? p).id, 0);
+    const c = centreOf(homeRect(res.piece ?? p));
+    if (res.kind === 'fused' && res.piece) {
+      pops.set(res.piece.id, 0);
+      fx.fuseBurst(c.x, c.y, res.piece.level);
+      sfx.play(res.fuse === 'stack' ? 'stack' : 'merge', res.fuse === 'stack' ? res.piece.count : res.piece.level, { x: c.x });
+    } else sfx.play('drop', 0, { x: c.x });
+    changed();
   }
 
-  function discard(p: Piece) {
-    if (isPet(p.type) && pets().length <= 1) {
-      say('Keep at least one pet');
+  function sell(p: Piece) {
+    const res = inv.trash(p);
+    const cx = TRASH.x + TRASH.w / 2;
+    const cy = TRASH.y + TRASH.h / 2;
+    if (!res.ok) {
+      say(res.reason ?? 'Cannot sell that');
       sfx.play('denied');
-      slide = { piece: p, x: BTN.trash.x + BTN.trash.w / 2, y: BTN.trash.y, age: 0 };
+      slide = { piece: p, x: cx, y: cy, age: 0 };
       return;
     }
-    const cx = BTN.trash.x + BTN.trash.w / 2;
-    const cy = BTN.trash.y + BTN.trash.h / 2;
-    inv.remove(p);
-    fx.burst(cx, cy - 20, { colors: [UI.textDim, UI.borderStrong, '#ffffff'], n: 10, speed: 140, shape: 'shard', gravity: 500 });
-    fx.word(cx, cy - 50, 'REMOVED', { color: UI.text, size: TYPE.body });
-    sfx.play('drop', 0, { x: cx });
+    fx.burst(cx, cy - 16, { colors: [UI.textDim, UI.borderStrong, COLOR.white], n: 10, speed: 140, shape: 'shard', gravity: 500 });
+    fx.floatText(cx, cy - 46, `+${res.cash}`, UI.text, TYPE.h3);
+    sfx.play('sell', res.cash, { x: cx });
     changed();
   }
 
@@ -332,15 +345,114 @@ export function createLobby(app: App): Screen {
     changed();
   }
 
+  function buyCell(col: number, row: number) {
+    const lockOf = cellLock(state, col, row);
+    if (!lockOf) return;
+    const r = cellRect(col, row);
+    const c = centreOf(r);
+    const res = unlockCell(state, col, row);
+    if (!res.ok) {
+      sfx.play('denied', 0, { x: c.x });
+      say(res.reason ?? 'Locked');
+      return;
+    }
+    openCellFx(col, row, 0);
+    if (res.cost > 0) fx.floatText(c.x, c.y - 30, `-${res.cost}`, UI.text, TYPE.h3);
+    changed();
+  }
+
+  function openCellFx(col: number, row: number, delay: number) {
+    const c = centreOf(cellRect(col, row));
+    sfx.play('cellUnlock', 0, { x: c.x, delay });
+    fx.ring(c.x, c.y, UI.accentLight, 10, 52, 0.4);
+    fx.burst(c.x, c.y, { colors: [UI.accent, UI.accentLight, COLOR.white], n: 14, speed: 200, size: 6, life: 0.6, gravity: 240, shape: 'star', stagger: delay });
+  }
+
+  // -------------------------------------------------------------- the wave
+
+  function startWave() {
+    if (!prep() || busy()) return;
+    if (!gridPets().length) {
+      say('Put a unit on the grid first', START.y + START.h + 30);
+      sfx.play('denied');
+      return;
+    }
+    const w = wave();
+    setup = { player: army, enemy: w.army, seed: fightSeed(state), stage: w.stage, wave: w.wave, boss: w.boss };
+    view.start(setup);
+    mode = 'fight';
+    lastKills = 0;
+    drag = null;
+    slide = null;
+    pressed = null;
+    idle = 0;
+    // the battle view plays the whistle, the boss sting and sets the wave music
+    if (tut() === 3) advanceGuide();
+  }
+
+  function backToPrep() {
+    mode = 'prep';
+    setup = null;
+    idle = 0;
+    view.showPrep(army, wave().army);
+    music.set('prep');
+    pendingCells.forEach((c, i) => openCellFx(c.col, c.row, 0.15 + i * 0.18));
+    pendingCells = [];
+    advanceGuide();
+  }
+
+  function finishWave() {
+    const out = view.outcome();
+    if (!out || !setup) return;
+    const res: WaveResult = applyWave(state, { won: out.won, kos: out.kills, boss: out.boss, survived: out.survived });
+    app.save();
+    mode = 'after';
+    pendingCells = res.cells;
+    if (res.won && !res.stageClear) {
+      ribbons.push(new WaveClear(res, ARENA_PREP.y + 150));
+      fx.burst(TOP.cash.x + 30, TOP.cash.y + 22, { colors: [UI.reward, UI.rewardLight, COLOR.white], n: 10, speed: 120, size: 5, life: 0.6, gravity: 100, shape: 'star' });
+      backToPrep();
+    } else if (res.stageClear) {
+      music.set('stageClear');
+      panels.push(new StageClear(res, state.auto, () => backToPrep()));
+    } else {
+      music.set('defeat');
+      panels.push(new Defeat(res, () => backToPrep()));
+    }
+    advanceGuide();
+  }
+
+  // -------------------------------------------------------------- cases
+
+  function openRoll(kind: CaseKind) {
+    if (!prep() || busy()) return;
+    const block = caseBlock(state, kind);
+    if (block) {
+      say(block);
+      sfx.play('denied');
+      return;
+    }
+    const res = openCase(state, kind);
+    if (!res) return;
+    app.save();
+    sfx.play('click');
+    roll.onDone = (r) => {
+      const c = centreOf(homeRect(r.piece));
+      pops.set(r.piece.id, 0);
+      fx.fuseBurst(c.x, c.y, isPet(r.type) ? 1 : r.level);
+      if (r.fresh && isPet(r.type)) panels.push(new NewUnit(r.type as PetType, state, false));
+      changed();
+    };
+    roll.start(res, benchPieceRect(res.piece, res.piece.slot));
+  }
+
   // -------------------------------------------------------------- hit tests
 
-  /** The piece's centre while it is held. */
   const heldCentre = (d: Drag) => ({ x: d.x + d.ox, y: d.y + d.oy - DRAG_UP });
 
-  /** Where a held piece would land: the grid anchor that puts its shape under it, or the bench slot under its centre. */
   function targetFor(p: Piece, c: { x: number; y: number }): Target | null {
-    if (inRect(c.x, c.y, { x: BENCH_RECT.x - 8, y: BENCH_RECT.y - 10, w: BENCH_RECT.w + 16, h: BENCH_RECT.h + 20 })) {
-      return { slot: clamp(Math.floor((c.x - BENCH_RECT.x) / CELL), 0, BENCH_SLOTS - 1) };
+    if (inRect(c.x, c.y, { x: TRAY.x - 8, y: TRAY.y - 10, w: TRAY.w + 16, h: TRAY.h + 20 })) {
+      return { slot: clamp(Math.floor((c.x - TRAY.x + SLOT_GAP / 2) / (SLOT + SLOT_GAP)), 0, BENCH_SLOTS - 1) };
     }
     if (!inRect(c.x, c.y, { x: GRID_RECT.x - 20, y: GRID_RECT.y - 20, w: GRID_RECT.w + 40, h: GRID_RECT.h + 40 })) return null;
     const f = footprint(p);
@@ -348,161 +460,246 @@ export function createLobby(app: App): Screen {
     const row = clamp(Math.round((c.y - GRID_RECT.y) / CELL - f.h / 2), 0, GRID.rows - f.h);
     return { col, row };
   }
+  function gridCellAt(x: number, y: number): { col: number; row: number } | null {
+    if (!inRect(x, y, GRID_RECT)) return null;
+    return { col: clamp(Math.floor((x - GRID_RECT.x) / CELL), 0, GRID.cols - 1), row: clamp(Math.floor((y - GRID_RECT.y) / CELL), 0, GRID.rows - 1) };
+  }
   function pieceAt(x: number, y: number): Piece | null {
-    if (inRect(x, y, GRID_RECT)) return inv.at(Math.floor((x - GRID_RECT.x) / CELL), Math.floor((y - GRID_RECT.y) / CELL));
-    if (inRect(x, y, BENCH_RECT)) return inv.benchAt(Math.floor((x - BENCH_RECT.x) / CELL));
+    const g = gridCellAt(x, y);
+    if (g) return inv.at(g.col, g.row);
+    for (let s = 0; s < BENCH_SLOTS; s++) if (inRect(x, y, benchSlotRect(s))) return inv.benchAt(s);
     return null;
   }
-  const btnAt = (x: number, y: number) => (Object.keys(BTN) as BtnId[]).find((k) => inRect(x, y, BTN[k])) ?? null;
-
-  // -------------------------------------------------------------- buttons
-
-  const benchFull = () => inv.freeBenchSlot() < 0;
-  const canRoll = () => app.state.rolls > 0 && !benchFull();
-  const canBattle = () => gridPets().length > 0;
+  function btnAt(x: number, y: number): BtnId | null {
+    const order: BtnId[] = ['sound', 'auto', 'start', 'arrange', 'stats', 'trash', 'case', 'elite'];
+    for (const id of order) {
+      if (id === 'start' && (!prep() || ribbons.length > 0 || grow > 0)) continue;
+      if (LOWER.has(id) && grow > 0.01) continue;
+      if (inRect(x, y, BTN[id])) return id;
+    }
+    return null;
+  }
 
   function press(id: BtnId) {
-    if (id === 'roll') {
-      if (!canRoll()) {
-        say(app.state.rolls <= 0 ? 'No rolls: knock foes out to earn them' : 'The bench is full');
-        sfx.play('denied');
-        return;
-      }
-      sfx.play('click');
-      if (tut() === 4) {
-        app.state.tutorial = 5;
-        app.save();
-      }
-      app.go('roll');
-    } else if (id === 'battle') {
-      if (!canBattle()) {
-        say('Put a pet on the grid first');
-        sfx.play('denied');
-        return;
-      }
-      sfx.play('click');
-      if (tut() === 3) {
-        app.state.tutorial = 4;
-        app.save();
-      }
-      app.go('match');
-    } else if (id === 'auto') {
-      sfx.play('click');
-      autoArrange(inv);
-      for (const p of inv.pieces) if (p.slot < 0) hops.set(p.id, -frand(0, 0.25));
-      sfx.play('drop', 0, { delay: 0.12 });
-      changed();
-    } else if (id === 'mute') {
-      sfx.play('click');
+    if (id === 'sound') {
       sfx.toggleMute();
-    } else {
       sfx.play('click');
-      say('Drag a piece here to throw it away', W / 2, BTN.trash.y - 20);
-    }
-  }
-
-  // -------------------------------------------------------------- drawing
-
-  function drawTopBar(ctx: Ctx) {
-    drawTopPills(ctx, app.state);
-    // the road toward the next reward
-    const i = Math.min(app.state.claimed, TROPHY_ROAD.length - 1);
-    const next = TROPHY_ROAD[i];
-    const prev = i > 0 ? TROPHY_ROAD[i - 1].at : 0;
-    progressBar(ctx, ROAD_BAR, clamp((app.state.trophies - prev) / (next.at - prev), 0, 1), { color: UI.accent });
-    const ex = W - S.pad - 4;
-    const ey = ROAD_BAR.y + ROAD_BAR.h / 2;
-    rollToken(ctx, ex - 9, ey, 18, UI.text);
-    label(ctx, `${next.at}`, ex - 26, ey + 1, TYPE.caption, { align: 'right', color: UI.text, weight: 700 });
-  }
-
-  /** The army on the strip: up to ARMY_CAP fighters, grouped by kind, each with its class plate over its head. */
-  function drawArmy(ctx: Ctx) {
-    const squads: SquadSpec[] = [...inv.squads()].sort((a, b) => (a.pet === b.pet ? squadPower(b) - squadPower(a) : a.pet < b.pet ? -1 : 1));
-    const total = squads.reduce((a, s) => a + s.count, 0);
-    // every squad shows at least one fighter (while there is room), the strongest fill the rest
-    const shown = new Map<SquadSpec, number>();
-    let left = ARMY_CAP;
-    for (const s of squads) if (left > 0) shown.set(s, 1), left--;
-    const byPower = [...squads].sort((a, b) => squadPower(b) - squadPower(a));
-    for (let pass = 0; left > 0 && pass < 8; pass++) for (const s of byPower) if (left > 0 && (shown.get(s) ?? 0) < s.count && shown.has(s)) shown.set(s, (shown.get(s) ?? 0) + 1), left--;
-    const fighters: { s: SquadSpec; i: number }[] = [];
-    for (const s of squads) for (let i = 0; i < (shown.get(s) ?? 0); i++) fighters.push({ s, i });
-    const n = fighters.length;
-    const ground = STAGE_GROUND_Y - 6;
-    if (!n) {
-      rr(ctx, W / 2 - 150, ground - 74, 300, 44, 22);
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
-      ctx.fill();
-      label(ctx, 'YOUR ARMY STANDS HERE', W / 2, ground - 51, TYPE.body, { weight: 700, track: 1.5, color: UI.textDim });
       return;
     }
-    const step = Math.min(n <= 3 ? 130 : 96, (W - 110) / Math.max(1, n - 1));
-    const scale = n <= 2 ? 1.55 : n <= 4 ? 1.35 : 1.12;
-    fighters.forEach(({ s, i }, k) => {
-      const x = W / 2 + (k - (n - 1) / 2) * step;
-      const r = (s.pet === 'frog' ? 21 : 18) * (1 + (s.level - 1) * 0.05) * scale;
-      const look: PetLook = { pet: s.pet as PetType, level: s.level, team: 0, weapon: s.weapon, weaponLevel: s.weaponLevel, helmet: s.helmet, sneakers: s.sneakers, chili: s.chili, seed: s.key * 5 + i };
-      const pose = restPose();
-      const ph = s.key * 1.7 + i * 0.9;
-      pose.t = t + ph;
-      pose.face = x < W / 2 - 4 ? 1 : x > W / 2 + 4 ? -1 : 1;
-      const hp = (t * 0.45 + ph * 0.31) % 3;
-      pose.hop = hp < 0.4 ? Math.sin((hp / 0.4) * Math.PI) * 0.5 : 0;
-      const gy = ground + (k % 2) * 8;
-      ctx.save();
-      ctx.translate(x, gy);
-      petArt.drawShadow(ctx, look, r, pose.hop);
-      petArt.drawPet(ctx, look, pose, r);
-      ctx.restore();
-      // the class plate floats over the head (only on the first of a squad, so a crowd does not turn into labels)
-      if (i === 0) {
-        const bs = classBadgeSize(s.level, 0.9);
-        const top = gy - Math.abs(petArt.headTop(look, r)) - 4 - pose.hop * r * 0.3;
-        classBadge(ctx, s.level, x - bs.w / 2, top, 0.9, t);
+    if (id === 'auto') {
+      state.auto = !state.auto;
+      app.save();
+      sfx.play('click');
+      say(state.auto ? 'AUTO: waves start by themselves' : 'AUTO off', ARENA_PREP.y + 190);
+      return;
+    }
+    if (!prep()) return;
+    if (id === 'start') startWave();
+    else if (id === 'case') openRoll('case');
+    else if (id === 'elite') openRoll('elite');
+    else if (id === 'stats') panels.push(new Ladder(state, app.ratio));
+    else if (id === 'trash') {
+      sfx.play('click');
+      say('Drag a piece here to sell it', TRASH.y - 22);
+    } else if (id === 'arrange') {
+      sfx.play('click');
+      const res = autoArrange(inv);
+      for (const p of inv.pieces) if (p.slot < 0) hops.set(p.id, -frand(0, 0.25));
+      sfx.play('drop', 0, { delay: 0.12 });
+      const evo = res.evolves[0];
+      if (evo) {
+        const made = inv.pieces.find((p) => p.type === evo.to && p.slot < 0) ?? inv.pieces.find((p) => p.type === evo.to);
+        if (made) panels.push(new Evolve(evo.from, evo.to, homeRect(made), () => { if (evo.fresh) panels.push(new NewUnit(evo.to, state, true)); }));
       }
-    });
-    if (total > n) {
-      const s = `+${total - n}`;
-      const x = W - S.pad - 30;
-      const y = ground - 4;
-      rr(ctx, x - 26, y - 15, 52, 30, 15);
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
-      ctx.fill();
-      label(ctx, s, x, y + 1, TYPE.body, { weight: 700, color: UI.text });
+      changed();
     }
   }
 
-  /** A link between two neighbours: a small rounded joint across their shared edge; gold when the pet uses it. */
+  // -------------------------------------------------------------- drawing: the top bar
+
+  function topPill(ctx: Ctx, r: Rect, icon: (c: Ctx, x: number, y: number, s: number) => void, value: number, key: string) {
+    rr(ctx, r.x, r.y + 2, r.w, r.h, r.h / 2);
+    ctx.fillStyle = 'rgba(60, 54, 44, 0.12)';
+    ctx.fill();
+    rr(ctx, r.x, r.y, r.w, r.h, r.h / 2);
+    ctx.fillStyle = UI.surface;
+    ctx.fill();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = UI.border;
+    ctx.stroke();
+    // the number sits in a recessed window, the icon on the left
+    const wr = { x: r.x + 40, y: r.y + 6, w: r.w - 46, h: r.h - 12 };
+    rr(ctx, wr.x, wr.y, wr.w, wr.h, wr.h / 2);
+    ctx.fillStyle = UI.surfaceAlt;
+    ctx.fill();
+    icon(ctx, r.x + 22, r.y + r.h / 2, 26);
+    const shown = tickTo(key, value);
+    fitLabel(ctx, formatPower(shown), wr.x + wr.w / 2, r.y + r.h / 2 + 1, TYPE.h3, wr.w - 12, { weight: 700, color: shown !== value ? UI.rewardDark : UI.text });
+  }
+
+  function drawTopBar(ctx: Ctx) {
+    // a soft band behind the bar
+    const g = ctx.createLinearGradient(0, 0, 0, ARENA_PREP.y);
+    g.addColorStop(0, '#ece9e3');
+    g.addColorStop(1, '#e3dfd7');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, ARENA_PREP.y);
+    const fightCash = mode === 'fight' ? view.live.kills * koCash(state.stage) : 0;
+    topPill(ctx, TOP.cash, (c, x, y, s) => cash(c, x, y, s), state.cash + fightCash, 'top:cash');
+    topPill(ctx, TOP.gems, (c, x, y, s) => gem(c, x, y, s), state.gems, 'top:gems');
+    // the STAGE tab hangs under the wave bar
+    const st = STAGE_TAB;
+    rr(ctx, st.x, st.y - 10, st.w, st.h + 10, 10);
+    ctx.fillStyle = UI.text;
+    ctx.fill();
+    label(ctx, `STAGE ${state.stage}`, st.x + st.w / 2, st.y + st.h / 2 + 1, TYPE.body, { weight: 700, color: '#ffffff', track: 2 });
+    // the wave bar: one line through the stage, the boss's head at its end
+    const r = TOP.wave;
+    rr(ctx, r.x, r.y + 2, r.w, r.h, r.h / 2);
+    ctx.fillStyle = 'rgba(60, 54, 44, 0.12)';
+    ctx.fill();
+    rr(ctx, r.x, r.y, r.w, r.h, r.h / 2);
+    ctx.fillStyle = UI.surface;
+    ctx.fill();
+    ctx.strokeStyle = UI.border;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    const bar = { x: r.x + 8, y: r.y + 8, w: r.w - 16 - 30, h: r.h - 16 };
+    const done = mode === 'fight' ? state.wave - 0.5 : state.wave - 1;
+    progressBar(ctx, bar, clamp(done / (WAVES - 1), 0, 1), { color: '#9cc3b8', back: UI.surfaceAlt });
+    label(ctx, `WAVE ${state.wave}/${WAVES}`, bar.x + bar.w / 2 + 2, r.y + r.h / 2 + 1, TYPE.lead, { weight: 700, color: UI.text, track: 1.5 });
+    // the boss head
+    const hx = r.x + r.w - 22;
+    const hy = r.y + r.h / 2;
+    const hr = 24;
+    ctx.beginPath();
+    ctx.arc(hx, hy, hr, 0, Math.PI * 2);
+    ctx.fillStyle = state.wave >= WAVES ? TEAM[1].light : '#efd9d5';
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = state.wave >= WAVES ? TEAM[1].main : '#d9b2ac';
+    ctx.stroke();
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(hx, hy, hr - 2.5, 0, Math.PI * 2);
+    ctx.clip();
+    drawUnit(ctx, boss(), hx, hy + 26, 15, t, { team: 1, boss: true, mood: 'angry', face: -1 });
+    ctx.restore();
+  }
+
+  /** a small square button over the arena's corner: its glyph, and a word under it inside the button */
+  function cornerBtn(ctx: Ctx, id: BtnId, icon: (c: Ctx, x: number, y: number, s: number, color?: string) => void, on: boolean, word?: string) {
+    const r = BTN[id];
+    const cy = button(ctx, r, { variant: on ? 'secondary' : 'quiet', text: '', pressed: pressed === id });
+    const ink = on ? UI.accentDark : UI.textDim;
+    if (word) {
+      icon(ctx, r.x + r.w / 2, cy - 7, 22, ink);
+      label(ctx, word, r.x + r.w / 2, cy + 14, TYPE.tag, { weight: 700, color: ink, track: 1 });
+    } else icon(ctx, r.x + r.w / 2, cy, 26, ink);
+  }
+
+  // -------------------------------------------------------------- drawing: the arena
+
+  function drawArena(ctx: Ctx) {
+    const r = arenaRect();
+    setView(r);
+    ctx.save();
+    rr(ctx, r.x, r.y - 20, r.w, r.h + 20, 22);
+    ctx.clip();
+    ctx.translate(fx.camera.x, fx.camera.y);
+    view.render(ctx);
+    ctx.restore();
+    // a soft edge where the arena meets the page
+    const g = ctx.createLinearGradient(0, r.y + r.h - 14, 0, r.y + r.h);
+    g.addColorStop(0, 'rgba(40, 46, 40, 0)');
+    g.addColorStop(1, 'rgba(40, 46, 40, 0.16)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, r.y + r.h - 14, W, 14);
+    const top = ctx.createLinearGradient(0, r.y, 0, r.y + 10);
+    top.addColorStop(0, 'rgba(40, 46, 40, 0.18)');
+    top.addColorStop(1, 'rgba(40, 46, 40, 0)');
+    ctx.fillStyle = top;
+    ctx.fillRect(0, r.y, W, 10);
+  }
+
+  function drawStart(ctx: Ctx) {
+    if (!prep() || busy() || ribbons.length || grow > 0) return;
+    const w = wave();
+    const enough = power >= w.recommended;
+    const intro = easeOutCubic(clamp(startAge / 0.3, 0, 1));
+    const autoK = state.auto && tut() >= TUTORIAL_DONE ? clamp(idle / AUTO_START, 0, 1) : 0;
+    const o: ButtonOpts = { variant: 'primary', text: '', pressed: pressed === 'start', breathe: t, pulse: tut() === 3 ? (t * 1.1) % 1 : 0 };
+    ctx.save();
+    ctx.globalAlpha *= intro;
+    const sc = 0.85 + 0.15 * easeOutBack(clamp(startAge / 0.3, 0, 1));
+    ctx.translate(W / 2, START.y + START.h / 2);
+    ctx.scale(sc, sc);
+    ctx.translate(-W / 2, -(START.y + START.h / 2));
+    const cy = button(ctx, START, o);
+    const title = w.boss ? 'FIGHT THE BOSS' : `START WAVE ${w.wave}`;
+    label(ctx, title, START.x + START.w / 2, cy - 12, TYPE.h2 + 3, { weight: 700, color: '#ffffff', track: 2 });
+    // the recommended power: pale when your army has it, warm when it does not
+    const rec = `RECOMMENDED ${formatPower(w.recommended)}`;
+    const col = enough ? 'rgba(255, 255, 255, 0.78)' : '#ffd9b0';
+    ctx.font = `700 ${TYPE.caption}px sans-serif`;
+    bolt(ctx, START.x + START.w / 2 - 70, cy + 20, 15, col);
+    label(ctx, rec, START.x + START.w / 2 + 8, cy + 20, TYPE.caption, { weight: 700, color: col, track: 1.5 });
+    if (autoK > 0) {
+      // AUTO: a ring fills round the button's corner
+      const ax = START.x + START.w - 8;
+      const ay = START.y + 8;
+      ctx.beginPath();
+      ctx.arc(ax, ay, 14, 0, Math.PI * 2);
+      ctx.fillStyle = UI.surface;
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.arc(ax, ay, 11, -Math.PI / 2, -Math.PI / 2 + autoK * Math.PI * 2);
+      ctx.closePath();
+      ctx.fillStyle = UI.accent;
+      ctx.fill();
+    }
+    // the line under the button, on the pitch
+    const line = !gridPets().length ? 'Drag a unit onto the grid to field it' : enough ? 'PREP TIME: open cases, merge and fuse!' : 'Below the recommended power: fuse or open a case';
+    label(ctx, line, W / 2, START.y + START.h + 22, TYPE.body, { weight: 700, color: enough ? '#ffffff' : '#ffe2c4', onPitch: true });
+    ctx.restore();
+  }
+
+  function drawHud(ctx: Ctx) {
+    if (mode !== 'fight' || !setup) return;
+    const a = clamp(grow * 2 - 0.4, 0, 1);
+    if (a <= 0) return;
+    const l = view.live;
+    const s = Math.floor(l.time);
+    ctx.save();
+    ctx.globalAlpha *= a;
+    scoreBug(ctx, HUD, { home: { name: 'You', score: l.mine }, away: { name: setup.boss ? 'Boss wave' : `Wave ${setup.wave}`, score: l.theirs }, clock: `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` });
+    ctx.restore();
+  }
+
+  // -------------------------------------------------------------- drawing: the grid, tray and buttons
+
   function drawLink(ctx: Ctx, e: LinkEdge) {
     const m = linkMid(e);
     const horiz = e.r1 === e.r2;
-    const len = 26;
-    const th = 10;
-    const w = horiz ? th : len;
-    const h = horiz ? len : th;
-    rr(ctx, m.x - w / 2 - 2, m.y - h / 2 - 1, w + 4, h + 4, 6);
-    ctx.fillStyle = 'rgba(90, 60, 20, 0.25)';
+    const w = horiz ? 9 : 22;
+    const h = horiz ? 22 : 9;
+    rr(ctx, m.x - w / 2 - 1.5, m.y - h / 2 - 0.5, w + 3, h + 3, 5);
+    ctx.fillStyle = e.active ? '#a9873f' : '#b9b2a6';
     ctx.fill();
-    rr(ctx, m.x - w / 2 - 1.5, m.y - h / 2 - 1.5, w + 3, h + 3, 6);
-    ctx.fillStyle = e.active ? '#b97c00' : '#b9ad99';
+    rr(ctx, m.x - w / 2, m.y - h / 2, w, h, 4.5);
+    ctx.fillStyle = e.active ? COLOR.joint : '#e2ded6';
     ctx.fill();
-    rr(ctx, m.x - w / 2, m.y - h / 2, w, h, 5);
-    ctx.fillStyle = e.active ? UI.accent : '#e8dfd0';
-    ctx.fill();
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-    if (horiz) ctx.fillRect(m.x - w / 2 + 2, m.y - h / 2 + 3, 2, h - 6);
-    else ctx.fillRect(m.x - w / 2 + 3, m.y - h / 2 + 2, w - 6, 2);
   }
 
-  function tileOf(ctx: Ctx, p: Piece, r: Rect, idle: boolean) {
+  function tileOf(ctx: Ctx, p: Piece, r: Rect, idleTile: boolean) {
     let y = r.y;
     const h = hops.get(p.id);
-    if (h !== undefined && h >= 0) y -= Math.sin(clamp(h / 0.35, 0, 1) * Math.PI) * 14;
+    if (h !== undefined && h >= 0) y -= Math.sin(clamp(h / 0.35, 0, 1) * Math.PI) * 12;
     const pa = pops.get(p.id);
     const pop = pa !== undefined ? 1 + 0.4 * (1 - easeOutElastic(clamp(pa / 0.6, 0, 1))) : 1;
     const ta = turns.get(p.id);
-    const tr = inset({ x: r.x, y, w: r.w, h: r.h }, p.slot >= 0 ? 4 : 3);
+    const tr = inset({ x: r.x, y, w: r.w, h: r.h }, 3);
     if (ta !== undefined) {
       const k = easeOutBack(clamp(ta / TURN_TIME, 0, 1));
       const c = centreOf(tr);
@@ -510,24 +707,192 @@ export function createLobby(app: App): Screen {
       ctx.translate(c.x, c.y);
       ctx.rotate((1 - k) * (p.turned ? -Math.PI / 2 : Math.PI / 2));
       ctx.translate(-c.x, -c.y);
-      drawPiece(ctx, p, tr, { idle, t, pop });
+      drawPiece(ctx, p, tr, { idle: idleTile, t, pop });
       ctx.restore();
       return;
     }
-    drawPiece(ctx, p, tr, { idle, t, pop });
+    drawPiece(ctx, p, tr, { idle: idleTile, t, pop });
   }
 
-  /** The cells a held piece would cover at its target, with the state to tint them. */
   function hoverCells(p: Piece, tg: Target): { cells: { col: number; row: number }[]; slot: number; state: 'ok' | 'bad' | 'fuse' } {
     const pv = inv.preview(p, tg);
-    const state = pv.kind === 'fused' ? 'fuse' : pv.kind === 'denied' ? 'bad' : 'ok';
-    if ('slot' in tg) return { cells: [], slot: tg.slot, state };
-    if (pv.kind === 'fused' && pv.piece && pv.piece.slot < 0) return { cells: cellsOf(pv.piece), slot: -1, state };
+    const st = pv.kind === 'fused' ? 'fuse' : pv.kind === 'denied' ? 'bad' : 'ok';
+    if ('slot' in tg) return { cells: [], slot: tg.slot, state: st };
+    if (pv.kind === 'fused' && pv.piece && pv.piece.slot < 0) return { cells: cellsOf(pv.piece), slot: -1, state: st };
     const f = footprint(p);
-    return { cells: shapeCells(f.w, f.h, tg.col, tg.row).filter((c) => c.col < GRID.cols && c.row < GRID.rows), slot: -1, state };
+    return { cells: shapeCells(f.w, f.h, tg.col, tg.row).filter((c) => c.col < GRID.cols && c.row < GRID.rows), slot: -1, state: st };
   }
 
-  /** The outline of the spot a held piece would take (or of the piece it would fuse with), in the state colour. */
+  function drawLocked(ctx: Ctx, col: number, row: number) {
+    const pr = cellProgress(state, col, row);
+    if (!pr) return;
+    const r = inset(cellRect(col, row), 4);
+    rr(ctx, r.x, r.y, r.w, r.h, S.radius.m);
+    ctx.fillStyle = '#cfc9be';
+    ctx.fill();
+    const cx = r.x + r.w / 2;
+    if (pr.lock.kind === 'cash') {
+      const can = state.cash >= pr.need;
+      ctx.save();
+      rr(ctx, r.x + 1.5, r.y + 1.5, r.w - 3, r.h - 3, S.radius.m - 1);
+      ctx.setLineDash([6, 5]);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = can ? UI.accent : '#b3ac9f';
+      ctx.stroke();
+      ctx.restore();
+      lock(ctx, cx, r.y + 18, 18, can ? UI.accentDark : '#8e877b');
+      cash(ctx, cx - 14, r.y + r.h - 18, 18);
+      label(ctx, String(pr.need), cx + 8, r.y + r.h - 17, TYPE.body, { weight: 700, color: can ? UI.accentDark : UI.textDim, track: 0 });
+    } else if (pr.lock.kind === 'stage') {
+      lock(ctx, cx, r.y + 20, 18, '#8e877b');
+      label(ctx, `STAGE ${pr.need}`, cx, r.y + r.h - 18, TYPE.small, { weight: 700, color: UI.textDim, track: 0.5 });
+    } else {
+      koStar(ctx, cx, r.y + 17, 18, '#8e877b');
+      fitLabel(ctx, `${Math.min(pr.have, pr.need)}/${pr.need}`, cx, r.y + r.h / 2 + 4, TYPE.small, r.w - 8, { weight: 700, color: UI.textDim, track: 0 });
+      progressBar(ctx, { x: r.x + 8, y: r.y + r.h - 13, w: r.w - 16, h: 6 }, pr.have / pr.need, { color: UI.accent, back: '#e2ddd4' });
+    }
+  }
+
+  function drawBoard(ctx: Ctx) {
+    const lifted = drag?.moved ? drag.piece : null;
+    const hidden = lifted ?? slide?.piece ?? null;
+    const tg = lifted && drag ? targetFor(lifted, heldCentre(drag)) : null;
+    const hov = lifted && tg ? hoverCells(lifted, tg) : null;
+    gridFrame(ctx, GRID_RECT);
+    for (let r = 0; r < GRID.rows; r++)
+      for (let c = 0; c < GRID.cols; c++) {
+        if (!inv.isOpen(c, r)) {
+          drawLocked(ctx, c, r);
+          continue;
+        }
+        const tint = hov && hov.cells.some((q) => q.col === c && q.row === r) ? hov.state : 'empty';
+        cell(ctx, cellRect(c, r), tint);
+      }
+    // the guide's destination
+    const g = !drag && tut() < TUTORIAL_DONE ? guideTarget() : null;
+    if (g?.to) {
+      const a = 0.5 + 0.5 * Math.sin(t * 5);
+      ctx.save();
+      rr(ctx, g.to.x + 5, g.to.y + 5, g.to.w - 10, g.to.h - 10, S.radius.m);
+      ctx.globalAlpha = 0.12 + 0.12 * a;
+      ctx.fillStyle = UI.accent;
+      ctx.fill();
+      ctx.globalAlpha = 0.6 + 0.4 * a;
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = UI.accentDark;
+      ctx.setLineDash([8, 6]);
+      ctx.stroke();
+      ctx.restore();
+    }
+    const onGrid = inv.pieces.filter((p) => p.slot < 0 && p !== hidden).sort((a, b) => a.row - b.row || a.col - b.col);
+    for (const p of onGrid) tileOf(ctx, p, homeRect(p), !isPet(p.type) && inv.servedBy(p).length === 0);
+    for (const e of links) if (!e.active) drawLink(ctx, e);
+    for (const e of links) if (e.active) drawLink(ctx, e);
+    // the tray
+    gridFrame(ctx, { x: TRAY.x + 2, y: TRAY.y + 2, w: TRAY.w - 4, h: TRAY.h - 4 });
+    for (let s = 0; s < BENCH_SLOTS; s++) cell(ctx, benchSlotRect(s), hov && hov.slot === s ? hov.state : 'empty');
+    for (const p of inv.pieces) if (p.slot >= 0 && p !== hidden && p.id !== roll.hiddenId) tileOf(ctx, p, homeRect(p), false);
+  }
+
+  function drawPowerTab(ctx: Ctx) {
+    const r = POWER_TAB;
+    const rec = wave().recommended;
+    const enough = power >= rec;
+    // a tab on the grid frame's top edge
+    ctx.beginPath();
+    ctx.moveTo(r.x - 14, r.y + r.h + 12);
+    ctx.lineTo(r.x + 4, r.y + 4);
+    ctx.quadraticCurveTo(r.x + 6, r.y, r.x + 12, r.y);
+    ctx.lineTo(r.x + r.w - 12, r.y);
+    ctx.quadraticCurveTo(r.x + r.w - 6, r.y, r.x + r.w - 4, r.y + 4);
+    ctx.lineTo(r.x + r.w + 14, r.y + r.h + 12);
+    ctx.closePath();
+    ctx.fillStyle = '#4b535d';
+    ctx.fill();
+    const shown = tickTo('power', power);
+    bolt(ctx, r.x + 34, r.y + r.h / 2 + 2, 22, enough ? '#cfe3dc' : '#f0c89c');
+    fitLabel(ctx, formatPower(shown), r.x + r.w / 2 + 12, r.y + r.h / 2 + 3, TYPE.h2, r.w - 70, { weight: 700, color: shown !== power ? '#f1e3bf' : '#ffffff', track: 1 });
+  }
+
+  function caseButton(ctx: Ctx, id: 'case' | 'elite') {
+    const kind: CaseKind = id;
+    const r = BTN[id];
+    const price = casePrice(state, kind);
+    const can = kind === 'case' ? state.cash >= price : state.gems >= price;
+    const cy = button(ctx, r, { variant: kind, text: '', pressed: pressed === id, pulse: id === 'case' && tut() === 4 ? (t * 1.1) % 1 : 0 });
+    const title = id === 'case' ? 'CASE' : 'ELITE';
+    const sub = id === 'case' ? `A+ IN ${Math.max(1, PITY - state.pity)}` : 'NO E-CLASS';
+    const ink = id === 'case' ? '#3d321f' : '#2c2647';
+    const left = r.x + 22;
+    label(ctx, title, left, cy - 9, TYPE.h2 + 2, { align: 'left', weight: 700, color: ink, track: 2 });
+    label(ctx, sub, left, cy + 17, TYPE.tag, { align: 'left', weight: 700, color: ink, track: 1.2 });
+    // the price on a chip at the right
+    const cw = id === 'case' ? 104 : 78;
+    const chip = { x: r.x + r.w - cw - 12, y: cy - 19, w: cw, h: 38 };
+    rr(ctx, chip.x, chip.y, chip.w, chip.h, 19);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.72)';
+    ctx.fill();
+    if (id === 'case') cash(ctx, chip.x + 22, chip.y + 19, 24);
+    else gem(ctx, chip.x + 20, chip.y + 19, 22);
+    label(ctx, String(price), chip.x + chip.w / 2 + 14, chip.y + 20, TYPE.h3, { weight: 700, color: can ? ink : UI.danger });
+  }
+
+  function drawLower(ctx: Ctx) {
+    const dy = slideY();
+    ctx.save();
+    ctx.translate(0, dy);
+    drawPowerTab(ctx);
+    drawBoard(ctx);
+    const overTrash = !!drag?.moved && inRect(drag.x, drag.y, TRASH);
+    button(ctx, STATS, { variant: 'secondary', icon: bars, pressed: pressed === 'stats' });
+    button(ctx, TRASH, { variant: overTrash ? 'danger' : 'quiet', icon: trash, pressed: pressed === 'trash' || overTrash });
+    if (drag?.moved) {
+      const v = inv.sellValue(drag.piece);
+      label(ctx, `SELL +${v}`, TRASH.x + TRASH.w / 2, TRASH.y - 12, TYPE.caption, { weight: 700, color: overTrash ? UI.danger : UI.textDim, track: 1 });
+    }
+    caseButton(ctx, 'case');
+    caseButton(ctx, 'elite');
+    button(ctx, ARRANGE, { variant: 'quiet', icon: wand, pressed: pressed === 'arrange' });
+    if (grow > 0) {
+      ctx.fillStyle = `rgba(231, 228, 221, ${(0.55 * clamp(grow * 1.5, 0, 1)).toFixed(3)})`;
+      ctx.fillRect(0, POWER_TAB.y - 4, W, H);
+    }
+    ctx.restore();
+  }
+
+  function drawCard(ctx: Ctx, p: Piece) {
+    const r = CARD;
+    rr(ctx, r.x, r.y + 3, r.w, r.h, S.radius.l);
+    ctx.fillStyle = 'rgba(40, 46, 40, 0.18)';
+    ctx.fill();
+    rr(ctx, r.x, r.y, r.w, r.h, S.radius.l);
+    ctx.fillStyle = UI.glass;
+    ctx.fill();
+    const x0 = r.x + 20;
+    const pet = isPet(p.type);
+    let nameX = x0;
+    if (pet) {
+      rungBadge(ctx, rungOf(p.type as PetType), x0, r.y + 30, 1);
+      nameX += 36;
+    } else {
+      classBadge(ctx, p.level, x0, r.y + 30, 1, t);
+      nameX += classBadgeSize(p.level, 1).w + 10;
+    }
+    label(ctx, PIECE_NAME[p.type].toUpperCase() + (pet && p.count > 1 ? ` x${p.count}` : ''), nameX, r.y + 31, TYPE.h3, { align: 'left', weight: 700, track: 1.5, color: UI.text });
+    label(ctx, pet ? `RUNG ${rungOf(p.type as PetType)} OF 12` : cls(p.level).toUpperCase(), r.x + r.w - 20, r.y + 31, TYPE.caption, { align: 'right', color: pet ? UI.textDim : classColor(p.level, t), weight: 700, track: 1.5 });
+    let desc = PIECE_DESC[p.type];
+    if (isGear(p.type)) desc = desc.replace('{v}', String(gearPct(p.type, p.level)));
+    fitLabel(ctx, desc, x0, r.y + 62, TYPE.body, r.w - 40, { align: 'left', color: UI.text });
+    const tg = drag ? targetFor(p, heldCentre(drag)) : null;
+    const pv = tg ? inv.preview(p, tg) : null;
+    let tip = 'Drop on an identical piece to fuse';
+    if (pv?.kind === 'fused') tip = pv.fuse === 'evolve' ? `Evolves into ${PIECE_NAME[pv.to ?? p.type]}!` : pv.fuse === 'stack' ? `Fuses into ${p.count * 2} ${PIECE_NAME[p.type]}s` : `Fuses to ${cls(p.level + 1)}`;
+    else if (pv?.kind === 'denied' && pv.reason) tip = pv.reason === LOCKED ? 'That cell is locked: tap it to see how it opens' : pv.reason;
+    else if (pet && tg && !('slot' in tg)) tip = p.count === 2 ? 'Touch weapons and gear. Tap it to turn it' : 'Two x4 squads evolve into the next unit';
+    else if (!pet) tip = 'Put it right next to a unit';
+    fitLabel(ctx, tip, x0, r.y + 90, TYPE.caption, r.w - 40, { align: 'left', color: pv?.kind === 'fused' ? UI.accentDark : pv?.kind === 'denied' ? UI.danger : UI.textDim, weight: 700 });
+  }
+
   function drawLanding(ctx: Ctx, d: Drag) {
     const tg = targetFor(d.piece, heldCentre(d));
     if (!tg) return;
@@ -553,85 +918,13 @@ export function createLobby(app: App): Screen {
     ctx.restore();
   }
 
-  function drawBoard(ctx: Ctx) {
-    gridFrame(ctx, GRID_RECT);
-    const lifted = drag?.moved ? drag.piece : null;
-    const hidden = lifted ?? slide?.piece ?? null;
-    const tg = lifted && drag ? targetFor(lifted, heldCentre(drag)) : null;
-    const hov = lifted && tg ? hoverCells(lifted, tg) : null;
-    const tint = (c: number, r: number) => (hov && hov.cells.some((q) => q.col === c && q.row === r) ? hov.state : 'empty');
-    for (let r = 0; r < GRID.rows; r++) for (let c = 0; c < GRID.cols; c++) cell(ctx, cellRect(c, r), tint(c, r));
-    // the guide's destination
-    const g = !drag && tut() < TUTORIAL_DONE ? guideTarget() : null;
-    if (g?.to) {
-      const a = 0.5 + 0.5 * Math.sin(t * 5);
-      ctx.save();
-      rr(ctx, g.to.x + 5, g.to.y + 5, g.to.w - 10, g.to.h - 10, S.radius.m);
-      ctx.globalAlpha = 0.14 + 0.14 * a;
-      ctx.fillStyle = UI.accent;
-      ctx.fill();
-      ctx.globalAlpha = 0.6 + 0.4 * a;
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = UI.accentDark;
-      ctx.setLineDash([8, 6]);
-      ctx.stroke();
-      ctx.restore();
-    }
-    // the pieces, top rows first, so a lower tile's thickness never paints over the one above it
-    const onGrid = inv.pieces.filter((p) => p.slot < 0 && p !== hidden).sort((a, b) => a.row - b.row || a.col - b.col);
-    for (const p of onGrid) tileOf(ctx, p, homeRect(p), !isPet(p.type) && inv.servedBy(p).length === 0);
-    for (const e of links) if (!e.active) drawLink(ctx, e);
-    for (const e of links) if (e.active) drawLink(ctx, e);
-    // the bench
-    gridFrame(ctx, BENCH_RECT);
-    for (let s = 0; s < BENCH_SLOTS; s++) cell(ctx, benchSlotRect(s), hov && hov.slot === s ? hov.state : 'empty');
-    for (const p of inv.pieces) if (p.slot >= 0 && p !== hidden) tileOf(ctx, p, homeRect(p), false);
-  }
-
-  function btn(ctx: Ctx, id: BtnId, o: ButtonOpts) {
-    button(ctx, BTN[id], { ...o, pressed: o.pressed || pressed === id });
-  }
-
-  function drawButtons(ctx: Ctx) {
-    const pulseOn = (step: number) => (tut() === step ? (t * 1.1) % 1 : 0);
-    btn(ctx, 'roll', { variant: 'roll', text: 'ROLL', icon: rollToken, badge: app.state.rolls > 0 ? app.state.rolls : undefined, disabled: !canRoll(), pulse: pulseOn(4) });
-    btn(ctx, 'battle', { variant: 'primary', text: 'BATTLE', disabled: !canBattle(), pulse: pulseOn(3), breathe: t });
-    btn(ctx, 'auto', { variant: 'secondary', text: 'AUTO', icon: btnIcon(wand) });
-    const overTrash = !!drag?.moved && inRect(drag.x, drag.y, BTN.trash);
-    btn(ctx, 'trash', { variant: overTrash ? 'danger' : 'quiet', text: 'TRASH', icon: btnIcon(trash), pressed: overTrash });
-    btn(ctx, 'mute', { variant: 'quiet', text: sfx.muted ? 'OFF' : 'SOUND', icon: (c, x, y, s) => speaker(c, x, y, s, sfx.muted) });
-  }
-
-  function drawCard(ctx: Ctx, p: Piece) {
-    panel(ctx, CARD);
-    const k = p.level;
-    const x0 = CARD.x + S.pad + S.base + 4;
-    const bs = classBadgeSize(k, 1);
-    classBadge(ctx, k, x0, CARD.y + 30, 1, t);
-    label(ctx, PIECE_NAME[p.type].toUpperCase(), x0 + bs.w + 10, CARD.y + 31, TYPE.h3, { align: 'left', weight: 700, track: 1.5, color: UI.text });
-    label(ctx, cls(k).toUpperCase(), CARD.x + CARD.w - S.pad - S.base - 4, CARD.y + 31, TYPE.caption, { align: 'right', color: classColor(k, t), weight: 700, track: 1.5 });
-    let desc = PIECE_DESC[p.type];
-    if (isGear(p.type)) desc = desc.replace('{v}', String(gearPct(p.type, k)));
-    if (isPet(p.type) && p.count > 1) desc = `${p.count} of them. ${desc}`;
-    fitLabel(ctx, desc, x0, CARD.y + 64, TYPE.body, CARD.w - (S.pad + S.base + 4) * 2, { align: 'left', color: UI.text });
-    const tg = drag ? targetFor(p, heldCentre(drag)) : null;
-    const pv = tg ? inv.preview(p, tg) : null;
-    let tip = 'Drop on an identical piece to fuse';
-    if (pv?.kind === 'fused') tip = pv.fuse === 'stack' ? `Fuses into ${p.count * 2} ${PIECE_NAME[p.type]}s` : `Fuses to ${cls(k + 1)}`;
-    else if (pv?.kind === 'denied' && pv.reason) tip = pv.reason;
-    else if (isPet(p.type) && tg && !('slot' in tg)) tip = p.count === 2 ? 'Touch weapons and gear. Tap it to turn it' : 'Touch weapons and gear to power up';
-    else if (!isPet(p.type)) tip = 'Put it right next to a pet';
-    fitLabel(ctx, tip, x0, CARD.y + 92, TYPE.caption, CARD.w - (S.pad + S.base + 4) * 2, { align: 'left', color: pv?.kind === 'fused' ? '#b97c00' : pv?.kind === 'denied' ? UI.danger : UI.textDim, weight: 700 });
-  }
-
   function drawGuide(ctx: Ctx) {
-    if (tut() >= TUTORIAL_DONE || drag?.moved) return;
+    if (tut() >= TUTORIAL_DONE || drag?.moved || ribbons.length || grow > 0) return;
     const g = guideTarget();
     if (!g) return;
     const a = clamp(stepAge / 0.3, 0, 1);
     ctx.save();
     ctx.globalAlpha = a;
-    // the pulse on the thing to touch
     const pr = 1 + 0.04 * Math.sin(t * 5);
     const cx = g.at.x + g.at.w / 2;
     const cy = g.at.y + g.at.h / 2;
@@ -640,7 +933,7 @@ export function createLobby(app: App): Screen {
     ctx.strokeStyle = UI.accentDark;
     ctx.stroke();
     const sc = 0.92 + 0.08 * easeOutCubic(clamp(stepAge / 0.25, 0, 1));
-    const hr = hintRect(g.to);
+    const hr = tut() === 3 ? { ...HINT, y: START.y - HINT.h - 26 } : HINT;
     ctx.translate(W / 2, hr.y + hr.h / 2);
     ctx.scale(sc, sc);
     ctx.translate(-W / 2, -(hr.y + hr.h / 2));
@@ -652,44 +945,64 @@ export function createLobby(app: App): Screen {
 
   return {
     enter() {
-      music.set('lobby');
+      music.set('prep');
       fx.clear();
       links = inv.links();
-      drag = null;
-      slide = null;
-      pressed = null;
+      army = inv.army();
+      power = inv.power();
+      view.showPrep(army, wave().army);
       shownStep = -1;
       advanceGuide();
-    },
-    leave() {
-      drag = null;
-      pressed = null;
+      if (opts.freshStart) say(FRESH_START_TOAST, ARENA_PREP.y + 200, 4);
     },
     update(dt) {
       t += dt;
       stepAge += dt;
       fx.update(dt);
+      roll.update(dt);
+      view.update(dt);
+      for (const o of panels.slice(0, 1)) o.update(dt);
+      for (const o of ribbons) o.update(dt);
+      while (panels.length && panels[0].done) panels.shift();
+      for (let i = ribbons.length - 1; i >= 0; i--) if (ribbons[i].done) ribbons.splice(i, 1);
       for (const [id, a] of pops) a + dt > 0.7 ? pops.delete(id) : pops.set(id, a + dt);
       for (const [id, a] of hops) a + dt > 0.4 ? hops.delete(id) : hops.set(id, a + dt);
       for (const [id, a] of turns) a + dt > TURN_TIME ? turns.delete(id) : turns.set(id, a + dt);
       for (const q of toasts) q.age += dt;
-      while (toasts.length && toasts[0].age > 1.6) toasts.shift();
+      for (let i = toasts.length - 1; i >= 0; i--) if (toasts[i].age > toasts[i].life) toasts.splice(i, 1);
       if (slide) {
         slide.age += dt;
         if (slide.age >= SLIDE_BACK) slide = null;
       }
+      // the arena grows for the wave and shrinks back once its outcome is in
+      const goal = mode === 'fight' ? 1 : 0;
+      grow = goal > grow ? Math.min(1, grow + dt / GROW_TIME) : Math.max(0, grow - dt / GROW_TIME);
+      if (mode === 'fight') {
+        const k = view.live.kills;
+        if (k > lastKills) {
+          sfx.play('cashKill', k);
+          lastKills = k;
+        }
+        if (view.outcome()) finishWave();
+      }
+      if (mode === 'after' && !panels.length) mode = 'prep';
+      // AUTO: the wave starts after a few untouched seconds of prep
+      if (prep() && !busy() && !ribbons.length && grow === 0) startAge += dt;
+      else startAge = 0;
+      if (prep() && state.auto && !busy() && !drag && !ribbons.length && tut() >= TUTORIAL_DONE && grow === 0) {
+        idle += dt;
+        if (idle >= AUTO_START) startWave();
+      } else idle = 0;
       advanceGuide();
     },
     render(ctx) {
-      app.arena.drawLobbyBack(ctx, t);
       ctx.save();
       ctx.translate(fx.camera.x, fx.camera.y);
-      app.arena.drawStage(ctx, t);
-      drawArmy(ctx);
-      drawBoard(ctx);
-      powerBadge(ctx, POWER.cx, POWER.cy, inv.power(), { w: POWER.w, h: POWER.h, key: 'lobby' });
+      drawArena(ctx);
+      drawLower(ctx);
       fx.drawUnder(ctx);
-      drawButtons(ctx);
+      drawStart(ctx);
+      drawHud(ctx);
       if (slide) {
         const home = homeRect(slide.piece);
         const k = easeOutCubic(clamp(slide.age / SLIDE_BACK, 0, 1));
@@ -700,39 +1013,52 @@ export function createLobby(app: App): Screen {
       }
       fx.drawOver(ctx);
       drawTopBar(ctx);
+      cornerBtn(ctx, 'sound', (c, x, y, s, col) => speaker(c, x, y, s, sfx.muted, col), !sfx.muted);
+      cornerBtn(ctx, 'auto', cycle, state.auto, 'AUTO');
       if (drag?.moved) {
         drawCard(ctx, drag.piece);
         const c = heldCentre(drag);
         const f = footprint(drag.piece);
         const w = (CELL * f.w - 6) * DRAG_LIFT;
         const h = (CELL * f.h - 6) * DRAG_LIFT;
-        // the held piece lets the tinted cells under it show through, and the spot it would take is outlined over it
         ctx.save();
-        ctx.globalAlpha = 0.82;
+        ctx.globalAlpha = 0.85;
         drawPiece(ctx, drag.piece, { x: c.x - w / 2, y: c.y - h / 2, w, h }, { t, lifted: true });
         ctx.restore();
         drawLanding(ctx, drag);
       }
       drawGuide(ctx);
-      for (const q of toasts) toast(ctx, q.text, q.x, q.y, q.age);
+      for (const o of ribbons) o.render(ctx, t);
+      for (const q of toasts) toast(ctx, q.text, q.x, q.y, Math.min(q.age, 0.9 + Math.max(0, q.age - (q.life - 0.5))));
       ctx.restore();
+      if (panels.length) panels[0].render(ctx, t);
+      roll.render(ctx, t);
       fx.drawScreen(ctx);
     },
     pointerDown(x, y) {
+      idle = 0;
+      if (roll.active) return;
+      if (panels.length) {
+        panels[0].down?.(x, y);
+        return;
+      }
       if (drag) return;
       const b = btnAt(x, y);
       if (b) {
         pressed = b;
         return;
       }
+      if (!prep() || grow > 0) return;
       const p = pieceAt(x, y);
       if (p && p !== slide?.piece) {
-        // a grid piece keeps the grip the finger took on it; a bench piece is held by its middle
         const c = centreOf(homeRect(p));
         const grip = p.slot < 0 ? { ox: c.x - x, oy: c.y - y + DRAG_UP } : { ox: 0, oy: 0 };
         drag = { piece: p, x, y, sx: x, sy: y, ...grip, moved: false };
         sfx.play('pick', 0, { x });
+        return;
       }
+      const g = gridCellAt(x, y);
+      downCell = g && !inv.isOpen(g.col, g.row) ? g : null;
     },
     pointerMove(x, y) {
       if (pressed && !inRect(x, y, BTN[pressed])) pressed = null;
@@ -741,16 +1067,31 @@ export function createLobby(app: App): Screen {
       drag.y = y;
       if (!drag.moved && Math.hypot(x - drag.sx, y - drag.sy) > 8) {
         drag.moved = true;
-        // once lifted, the piece floats just above the finger
         drag.ox *= 0.5;
-        drag.oy = drag.oy * 0.5;
+        drag.oy *= 0.5;
       }
     },
     pointerUp(x, y) {
+      idle = 0;
+      if (roll.active) {
+        roll.tap();
+        return;
+      }
+      if (panels.length) {
+        panels[0].up?.(x, y);
+        return;
+      }
       if (pressed) {
         const id = pressed;
         pressed = null;
         if (inRect(x, y, BTN[id])) press(id);
+        return;
+      }
+      if (downCell) {
+        const g = gridCellAt(x, y);
+        const dc = downCell;
+        downCell = null;
+        if (g && g.col === dc.col && g.row === dc.row) buyCell(g.col, g.row);
         return;
       }
       const d = drag;
@@ -759,7 +1100,7 @@ export function createLobby(app: App): Screen {
       d.x = x;
       d.y = y;
       if (!d.moved) {
-        if (d.piece.slot >= 0) quickPlace(d.piece);
+        if (d.piece.slot >= 0) tapTray(d.piece);
         else if (isPet(d.piece.type) && d.piece.count === 2) turn(d.piece);
         else {
           hops.set(d.piece.id, 0);
@@ -767,8 +1108,8 @@ export function createLobby(app: App): Screen {
         }
         return;
       }
-      if (inRect(x, y, BTN.trash)) {
-        discard(d.piece);
+      if (inRect(x, y, TRASH)) {
+        sell(d.piece);
         return;
       }
       const c = heldCentre(d);
@@ -784,6 +1125,10 @@ export function createLobby(app: App): Screen {
       if (drag?.moved) slide = { piece: drag.piece, ...heldCentre(drag), age: 0 };
       drag = null;
       pressed = null;
+      downCell = null;
+    },
+    resize() {
+      /* the arena rebuilds its own caches (app.ts calls arena.build) */
     },
   };
 }

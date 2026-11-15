@@ -27,7 +27,7 @@ export type FxShape = 'dot' | 'star' | 'petal' | 'shard' | 'confetti' | 'puff' |
 export type MarkKind = 'scuff' | 'divot' | 'flat';
 
 export interface BurstOpts {
-  colors: string[];
+  colors: readonly string[];
   n?: number;
   speed?: number;
   size?: number;

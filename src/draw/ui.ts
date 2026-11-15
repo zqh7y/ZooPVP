@@ -1,6 +1,6 @@
 import { CLASS_FX, H, S, TEAM, TYPE, UI, W } from '../theme';
 import { CLASSES } from '../data';
-import { clamp, font, label, poly, rr, textWidth, type Ctx, type FontWeight, type Rect } from '../util';
+import { clamp, label, poly, rr, textWidth, type Ctx, type FontWeight, type Rect } from '../util';
 import { bolt, iconTint } from './icons';
 
 /*

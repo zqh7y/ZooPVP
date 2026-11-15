@@ -1,4 +1,3 @@
-import { ARENA } from './data';
 
 /**
  * The one place for the game's shared look: canvas size, colours, type sizes, spacing and the regions more

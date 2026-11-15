@@ -1,5 +1,5 @@
 import { sfx } from '../audio/engine';
-import { CLASSES, PET_INFO, PET_TYPES, ROLL_KINDS, formatPower, isPet, petAt, recommendedPower, rungOf, tierOf } from '../data';
+import { CLASSES, PET_INFO, PET_TYPES, ROLL_KINDS, formatPower, petAt, recommendedPower, rungOf, tierOf } from '../data';
 import { Fx } from '../draw/fx';
 import { cash, gem, star } from '../draw/icons';
 import { restPose, type PetLook, type PetMood } from '../draw/petTypes';
@@ -10,7 +10,7 @@ import { caseOdds } from '../logic/rolls';
 import { fpick } from '../rng';
 import { CLASS_FX, COLOR, H, S, TIER, TYPE, UI, W } from '../theme';
 import type { PetType, SaveState, WaveResult } from '../types';
-import { clamp, easeInOutCubic, easeOutBack, easeOutCubic, inRect, label, rr, starPath, type Ctx, type Rect } from '../util';
+import { clamp, easeInOutCubic, easeOutBack, easeOutCubic, inRect, label, rr, starPath, textWidth, type Ctx, type Rect } from '../util';
 
 /*
  * The main screen's overlays: the wave-clear ribbon, the stage-clear party, the soft defeat panel, the NEW UNIT
@@ -283,7 +283,7 @@ export class Defeat implements Overlay {
         label(ctx, `+${this.res.koCash} for knock-outs`, cx - 60, y + 1, TYPE.body, { align: 'left', weight: 700, color: UI.text });
       }
       // the tip, on a calm card
-      const tr = { x: LOST.x + 28, y: LOST.y + 222, w: LOST.w - 56, h: 92 };
+      const tr = { x: LOST.x + 28, y: LOST.y + (this.res.koCash > 0 ? 222 : 176), w: LOST.w - 56, h: 92 };
       rr(ctx, tr.x, tr.y, tr.w, tr.h, S.radius.m);
       ctx.fillStyle = UI.sky;
       ctx.fill();
@@ -292,6 +292,15 @@ export class Defeat implements Overlay {
       button(ctx, this.again.r, { variant: 'primary', text: 'TRY AGAIN', pressed: this.again.pressed, breathe: t });
     });
   }
+}
+
+/** A unit's rung badge and a line of text after it, the pair centred on cx. */
+export function badgeLine(ctx: Ctx, rung: number, text: string, cx: number, y: number, maxW: number) {
+  const d = 29;
+  const tw = Math.min(maxW - d - 10, textWidth(ctx, text, TYPE.lead, 700, 1));
+  const x0 = cx - (d + 10 + tw) / 2;
+  rungBadge(ctx, rung, x0, y, 1.1);
+  fitLabel(ctx, text, x0 + d + 10, y + 1, TYPE.lead, tw, { align: 'left', weight: 700, color: UI.textDim, track: 1 });
 }
 
 /** Text wrapped to a width, the first line centred on y (lines go down from it). Returns the lines drawn. */
@@ -323,6 +332,7 @@ export class NewUnit implements Overlay {
   private fx = new Fx();
   private ok = new Btn({ x: CARD.x + 110, y: CARD.y + CARD.h - 102, w: CARD.w - 220, h: 76 });
   constructor(private pet: PetType, private state: SaveState, sound = true, private onClose?: () => void) {
+    // the audio set has no NEW UNIT sound of its own: the unit reveal (n = the rung) plays it
     if (sound) sfx.play('unitReveal', rungOf(pet));
     const i = tierOf(rungOf(pet)) - 1;
     this.fx.burst(W / 2, CARD.y + 250, { colors: [TIER.metalLight[i], CLASS_FX.spark, COLOR.white, UI.accentLight], n: 26, speed: 300, size: 7, life: 0.9, gravity: 80, shape: 'star', drag: 1.6 });
@@ -362,8 +372,7 @@ export class NewUnit implements Overlay {
       const hop = Math.max(0, Math.sin(t * 3)) * 0.35 * clamp(this.age - 0.4, 0, 1);
       drawUnit(ctx, this.pet, W / 2, fy, 74, t, { mood: 'cheer', hop });
       label(ctx, info.name.toUpperCase(), W / 2, CARD.y + 352, TYPE.title, { weight: 700, color: UI.text, track: 2 });
-      rungBadge(ctx, rung, W / 2 - 112, CARD.y + 406, 1.1);
-      fitLabel(ctx, `RUNG ${rung}  ·  ${info.role.toUpperCase()}`, W / 2 + 14, CARD.y + 407, TYPE.lead, 220, { weight: 700, color: UI.textDim, track: 1 });
+      badgeLine(ctx, rung, `RUNG ${rung}  ·  ${info.role.toUpperCase()}`, W / 2, CARD.y + 406, CARD.w - 60);
       wrap(ctx, info.trait, W / 2, CARD.y + 450, CARD.w - 80, TYPE.lead, UI.text);
       // the ladder: twelve dots, the owned ones filled, this one ringed
       const n = PET_TYPES.length;
@@ -480,8 +489,8 @@ export class Ladder implements Overlay {
         fitLabel(ctx, own ? PET_INFO[pet].name.toUpperCase() : '???', cx + cw / 2, cy + 128, TYPE.body, cw - 16, { weight: 700, color: own ? UI.text : UI.textMute, track: 1 });
         const c = caseO.rungs[i] * unitShare(caseO);
         const e = eliteO.rungs[i] * unitShare(eliteO);
-        label(ctx, `CASE ${pct(c)}`, cx + 10, cy + 154, TYPE.small, { align: 'left', color: UI.textDim, weight: 700 });
-        label(ctx, `ELITE ${pct(e)}`, cx + cw - 10, cy + 154, TYPE.small, { align: 'right', color: UI.gemDark, weight: 700 });
+        fitLabel(ctx, `CASE ${pct(c)}`, cx + 8, cy + 154, TYPE.small, cw / 2 - 10, { align: 'left', color: UI.textDim, weight: 700, track: 0 });
+        fitLabel(ctx, `ELITE ${pct(e)}`, cx + cw - 8, cy + 154, TYPE.small, cw / 2 - 10, { align: 'right', color: UI.gemDark, weight: 700, track: 0 });
       }
       // the item classes
       const ry = y0 + 4 * (ch + gy) + 10;
@@ -612,6 +621,3 @@ export class Evolve implements Overlay {
     this.fx.drawScreen(ctx);
   }
 }
-
-/** true for a piece type that is a unit (re-exported for the main screen). */
-export const unitType = isPet;
