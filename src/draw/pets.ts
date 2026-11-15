@@ -5,11 +5,11 @@ import { clamp, ellipse, smooth } from '../util';
 import { D, H2, R, STONE_INK, WHITE, bucketOf, pickFace, pickMouth, setChar, type CharDef, type Ctx } from './cast/kit';
 import { chick } from './cast/chick';
 import { scorp } from './cast/scorp';
-import { tabby } from './cast/tabby';
-import { dillo } from './cast/dillo';
+import { shroom } from './cast/shroom';
+import { tulip } from './cast/tulip';
 import { roo } from './cast/roo';
 import { cacto } from './cast/cacto';
-import { zip } from './cast/zip';
+import { dandy } from './cast/dandy';
 import { briar } from './cast/briar';
 import { angler } from './cast/angler';
 import { sumo } from './cast/sumo';
@@ -20,17 +20,18 @@ import { boulder } from './cast/boulder';
  * THE UNITS (docs/v5.md section 1): twelve fighters, one file each in src/draw/cast/, all drawn with the kit in
  * src/draw/cast/kit.ts (read its header first). This file maps the unit ids to them and is the contract the rest
  * of the game draws through (petArt). The ids are the old ones; the fighters are new:
- *   sprout = Chick, buzzy = Scorp, ninja = Tabby, snailor = Dillo, roo = Roo, cacto = Cacto, pogo = Zip,
- *   briar = Spike, angler = Inky, sumo = Waddles, rhino = Ram, boulder = Champ.
+ *   sprout = Chick, buzzy = Scorp, ninja = Shroom, snailor = Tulip, roo = Roo, cacto = Cacto, pogo = Dandy,
+ *   briar = Spike, angler = Snapper, sumo = Pumpkin, rhino = Bamboo, boulder = Oak.
+ * Roo and Cacto are the style guide (the player's favourites): keep them exactly as they are.
  */
 const CHARS: Record<PetType, CharDef> = {
   sprout: chick,
   buzzy: scorp,
-  ninja: tabby,
-  snailor: dillo,
+  ninja: shroom,
+  snailor: tulip,
   roo,
   cacto,
-  pogo: zip,
+  pogo: dandy,
   briar,
   angler,
   sumo,
@@ -120,6 +121,7 @@ function drawPetAt(ctx: Ctx, look: PetLook, pose: PetPose, r: number): void {
   R.stoneA = clamp(pose.stone * 1.25, 0, 1);
   R.flashA = hu > 0.02 ? hu * 0.8 : 0;
   R.grey = pose.stone > 0.5;
+  R.shell = clamp(pose.shell ?? 0, 0, 1);
   H2.on = false;
 
   ctx.save();

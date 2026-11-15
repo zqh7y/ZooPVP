@@ -1,4 +1,4 @@
-import { B, C, E, PATH, R, RR, aimHand, armsAndWeapon, blush, ch, chiliAt, chunk, clipIn, crownAt, eyes, glovePart, helmetAt, inkC, inner, mouth, paint, part, put, shoeAt, twoH } from './kit';
+import { B, C, E, PATH, R, RR, accent, aimHand, armsAndWeapon, blush, ch, chiliAt, chunk, clipIn, crownAt, eyes, glovePart, helmetAt, inkC, inner, mouth, paint, part, put, shoeAt, twoH } from './kit';
 // ---------------------------------------------------------------- 6 cacto: a potted cactus with two little boxing arms
 
 const CA = { green: '#80ad6b', rib: '#6a9758', pot: '#c98364', rim: '#d6967a' };

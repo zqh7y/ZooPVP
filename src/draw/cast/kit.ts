@@ -26,7 +26,8 @@ import { drawGear } from '../gear';
  *    C() turns a colour white for the hit flash and grey for stone, so every part gets those for free.
  *    accent() is the CORNER colour (blue / red) of the part being built: gloves, wraps, trunks, belts, masks.
  *  - THE CORNER KIT: glovePart (Roo's boxing glove), wrapPart (a taped fist), trunksIn (trunks with a white
- *    waistband, clipped into a body shape). Use them so the roster reads as one.
+ *    waistband, clipped into a body shape), bandTails (a headband's loose ends). Use them so the roster reads as one.
+ *  - R.shell (pose.shell, 0..1) is a unit's own defence pose: Tulip closes into its bud.
  *  - Per frame helpers: aimHand(x, y, reach) puts the near hand for the weapon swing or the bare-handed jab
  *    (result in H), armsAndWeapon(HAND) draws the weapon and the hand(s) on it, helmetAt, shoeAt, crownAt,
  *    chiliAt for the gear and the boss crown.
@@ -417,6 +418,8 @@ export const R = {
   stoneA: 0,
   flashA: 0,
   grey: false,
+  /** 0..1: curled up in its own defence (pose.shell): Tulip closes into its bud */
+  shell: 0,
 };
 export type Rig = typeof R;
 
@@ -701,6 +704,68 @@ export function glovePart(id: string, arm: string | null, size = 1): Part {
     g.fillStyle = C(mix(accent(), WHITE, 0.55));
     g.fill();
   });
+}
+
+/** A taped fist (wraps): the hand wound in corner-colour tape, a little forearm of `arm` colour behind it (or none). */
+export function wrapPart(id: string, arm: string | null, size = 1): Part {
+  return part(id, [-0.55 * size, -0.4 * size, 0.95 * size, 0.8 * size], (g) => {
+    const s = size;
+    const shapes: Sh[] = [];
+    if (arm) shapes.push([E(-0.27 * s, 0.02 * s, 0.15 * s, 0.09 * s), arm, 0.03]);
+    shapes.push([RR(-0.25 * s, -0.11 * s, 0.16 * s, 0.22 * s, 0.05 * s), accent(), 0.03]);
+    const fist = E(0.02 * s, 0.0, 0.2 * s, 0.18 * s);
+    shapes.push([fist, accent(), 0.07 * s]);
+    chunk(g, shapes);
+    // the turns of the tape, and the white tape end at the wrist
+    clipIn(g, fist, () => {
+      g.lineWidth = B.lw * 0.7;
+      g.strokeStyle = inkC();
+      g.beginPath();
+      for (const x of [-0.06, 0.07]) {
+        g.moveTo((x - 0.04) * s, -0.2 * s);
+        g.lineTo((x + 0.04) * s, 0.2 * s);
+      }
+      g.stroke();
+    });
+    g.beginPath();
+    g.ellipse(-0.04 * s, -0.08 * s, 0.06 * s, 0.03 * s, -0.5, 0, TAU);
+    g.fillStyle = C(mix(accent(), WHITE, 0.55));
+    g.fill();
+    paint(g, RR(-0.23 * s, -0.11 * s, 0.05 * s, 0.22 * s, 0.02 * s), '#f2ede3', 0);
+  });
+}
+/**
+ * Trunks in the corner colour with Roo's white waistband, painted inside a body shape: from the waistband at y0
+ * down to y1, between x0 and x1; `sag` bows the waistband down in the middle (a round belly).
+ */
+export function trunksIn(g: Ctx, body: Path2D, x0: number, x1: number, y0: number, y1: number, sag = 0.06) {
+  clipIn(g, body, () => {
+    const cx = (x0 + x1) / 2;
+    const t = PATH((p) => {
+      p.moveTo(x0, y0);
+      p.quadraticCurveTo(cx, y0 + sag * 2, x1, y0);
+      p.lineTo(x1, y1);
+      p.lineTo(x0, y1);
+      p.closePath();
+    });
+    paint(g, t, accent(), 0.06);
+    inner(g, t, 1);
+    const w = PATH((p) => {
+      p.moveTo(x0, y0);
+      p.quadraticCurveTo(cx, y0 + sag * 2, x1, y0);
+      p.lineTo(x1, y0 + 0.09);
+      p.quadraticCurveTo(cx, y0 + 0.09 + sag * 2, x0, y0 + 0.09);
+      p.closePath();
+    });
+    paint(g, w, '#f2ede3', 0);
+    inner(g, w, 0.8);
+  });
+}
+/** A headband's two loose ends, streaming back from the knot at the pivot (for a part of its own: they flutter). */
+export function bandTails(g: Ctx, s = 1) {
+  rope(g, PATH((p) => { p.moveTo(0, -0.02 * s); p.quadraticCurveTo(-0.3 * s, -0.14 * s, -0.6 * s, -0.04 * s); }), 0.11 * s, accent());
+  rope(g, PATH((p) => { p.moveTo(0, 0.04 * s); p.quadraticCurveTo(-0.26 * s, 0.08 * s, -0.48 * s, 0.22 * s); }), 0.1 * s, accent());
+  chunk(g, [[E(0, 0, 0.09 * s, 0.08 * s), accent(), 0]]);
 }
 
 // ------------------------------------------------------------------ the characters

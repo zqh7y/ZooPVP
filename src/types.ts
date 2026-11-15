@@ -4,7 +4,7 @@
  * tools can use it headless.
  */
 
-/** 0 = you (the bottom of the arena, blue), 1 = the enemy wave (the top, red). */
+/** 0 = you (the bottom of the arena, the blue corner), 1 = the opponent (the top, the red corner). */
 export type Team = 0 | 1;
 
 /** The twelve units, one per rung of the ladder (see PET_TYPES in data.ts for the order: sprout is rung 1, boulder 12). */
@@ -41,7 +41,7 @@ export interface Piece {
 
 /** One group of identical fighters: what a unit piece on the grid becomes, with everything it touches. */
 export interface SquadSpec {
-  /** id of the unit piece it comes from (0 for an enemy wave's squads) */
+  /** id of the unit piece it comes from (0 for a bot's squads) */
   key: number;
   /** the unit (its rung on the ladder comes from it: rungOf in data.ts) */
   pet: PetType;
@@ -55,7 +55,7 @@ export interface SquadSpec {
   helmet: number;
   sneakers: number;
   chili: number;
-  /** a boss (wave 10): a giant of its unit, BOSS.radius x its size, with much more health and a harder hit */
+  /** a boss (the crowned leader of a CHAMPION match): a giant of its unit, BOSS.radius x its size, with much more health and a harder hit */
   boss?: boolean;
 }
 
@@ -94,55 +94,107 @@ export interface RollResult {
   piece: Piece;
 }
 
-/** How a fought wave went, as applyWave reads it (outcomeOf in src/logic/progress.ts makes one from a SimSummary). */
-export interface WaveOutcome {
+/** The opponent themes matchmaking builds a bot army by (THEMES in data.ts has their names and lines). */
+export type ThemeId = 'mixed' | 'swarm' | 'heavy' | 'glass' | 'tanks' | 'mirror' | 'champion';
+
+/** The bot BATTLE found (findOpponent in src/logic/match.ts). Bots are always flagged: the UI shows a BOT tag. */
+export interface Opponent {
+  /** a fun bot name ("Punchy Panda"; a champion's is a title, "King Knockout") */
+  name: string;
+  bot: true;
+  theme: { id: ThemeId; name: string; blurb: string };
+  army: ArmySpec;
+  /** the army's POWER (armyPower of its squads) */
+  power: number;
+  /** fighters in the army, the boss included */
+  fighters: number;
+  /** a CHAMPION match: one squad is a crowned boss (SquadSpec.boss), the rewards are doubled */
+  champion: boolean;
+  /** the match this is for: state.matches + 1 (1 = the first) */
+  match: number;
+  /** the POWER it was built to is the player's POWER x this (see difficulty() in src/logic/match.ts) */
+  difficulty: number;
+}
+
+/** What one of the player's squads did in a fight (for the MVP). */
+export interface SquadScore {
+  /** SquadSpec.key: the id of the unit piece */
+  key: number;
+  pet: PetType;
+  /** enemy fighters it knocked out */
+  kos: number;
+  /** damage it dealt (hits, thorns and poison) */
+  dmg: number;
+}
+
+/** How a fought match went, as applyMatch reads it (outcomeOf in src/logic/progress.ts makes one from a SimSummary). */
+export interface MatchOutcome {
   won: boolean;
   /** enemy fighters knocked out (the boss included) */
   kos: number;
   /** the boss was knocked out */
   boss: boolean;
-  /** share of your fighters still standing at the end, 0..1 (gives the stage-clear stars) */
+  /** share of your fighters still standing at the end, 0..1 */
   survived: number;
+  /** your squads in army order with what each did; when present, applyMatch names the MVP */
+  squads?: SquadScore[];
+  /** overrides whether this was a champion match (default: isChampionMatch(state.matches + 1)) */
+  champion?: boolean;
 }
 
-/** What applyWave gave. */
-export interface WaveResult {
+/** What applyMatch gave (the result panel counts these up). Nothing is ever taken away. */
+export interface MatchResult {
   won: boolean;
-  /** the wave that was fought */
-  stage: number;
-  wave: number;
-  /** cash for the knock-outs (paid win or lose) */
+  champion: boolean;
+  /** the match that was fought (1 = the first) */
+  match: number;
+  /** cash for winning (or for trying, on a loss) */
+  baseCash: number;
+  /** cash for the knock-outs (the boss counts REWARD.bossKo) */
   koCash: number;
-  /** cash for clearing the wave (0 on a loss) */
-  clearCash: number;
-  /** koCash + clearCash */
+  /** the win-streak bonus (0 on a loss) */
+  streakCash: number;
+  /** all the cash: (base + KOs + streak), x CHAMPION.rewards on a champion win */
   cash: number;
-  /** wave 10 won: the stage is cleared */
-  stageClear: boolean;
-  /** 1..3 on a stage clear, else 0 */
-  stars: number;
-  /** gems earned (stage clears) */
   gems: number;
-  /** grid cells this opened (by reaching a stage or by knock-outs), for a reveal */
+  xp: number;
+  /** enemy fighters knocked out */
+  kos: number;
+  /** the level and XP into it before and after (the XP bar fills from one to the other) */
+  from: { level: number; xp: number; need: number };
+  to: { level: number; xp: number; need: number };
+  /** the new level when it rose, else null */
+  levelUp: number | null;
+  /** wins in a row after this match (0 after a loss) */
+  streak: number;
+  /** the squad with the most knock-outs (then damage), when the outcome carried squads and one scored */
+  mvp: SquadScore | null;
+  /** grid cells this opened (by level or by knock-outs), for a reveal */
   cells: { col: number; row: number }[];
-  /** where the player is now (the next wave to fight) */
-  next: { stage: number; wave: number };
 }
 
 /** Everything that is saved between sessions. */
 export interface SaveState {
-  /** 4 since stages and waves; any older save is replaced by a fresh start */
-  version: 4;
+  /** 5 since matched fights; a version-4 save is migrated, anything older is replaced by a fresh start */
+  version: 5;
   cash: number;
   gems: number;
-  /** the stage being played, 1.. */
-  stage: number;
-  /** the next wave to fight in it, 1..WAVES (WAVES is the boss wave) */
-  wave: number;
-  /** losses in a row on this wave (a retry rolls a new, slightly softer army: ENEMY.mercy) */
-  tries: number;
-  /** best stars of each stage cleared: stars[stage - 1] = 1..3 */
-  stars: number[];
+  /** the player level, 1..LEVEL.max (case odds, rewards and some cells go by it) */
+  level: number;
+  /** XP into the current level, 0 .. xpToNext(level) - 1 */
+  xp: number;
+  /** wins in a row (0 after a loss): a bonus on the cash, and matchmaking pushes a little harder */
+  streak: number;
+  /** losses in a row (0 after a win): matchmaking eases off */
+  slump: number;
+  /** the longest win streak so far */
+  bestStreak: number;
+  /** matches fought; the next is number matches + 1, and every CHAMPION.every-th is a champion match */
+  matches: number;
+  /** matches won */
+  wins: number;
+  /** champion matches won */
+  champs: number;
   /** CASEs opened (the CASE price climbs with it) */
   cases: number;
   /** ELITEs opened */
@@ -161,16 +213,13 @@ export interface SaveState {
   owned: number;
   /** evolves done so far (two x4 squads into the next rung's unit) */
   evolves: number;
-  /** AUTO: the wave starts by itself after a few untouched seconds of prep */
+  /** AUTO: the next match starts by itself after a few untouched seconds of prep */
   auto: boolean;
   /** step of the first-time guide; TUTORIAL_DONE once finished */
   tutorial: number;
   /** bitmask of the one-time tips already shown */
   tips: number;
-  /** waves fought and won in total */
-  fights: number;
-  wins: number;
-  /** this save's own seed: the waves' armies, the rolls and the fights come from it */
+  /** this save's own seed: the opponents, the rolls and the fights come from it */
   seed: number;
   pieces: Piece[];
   nextId: number;

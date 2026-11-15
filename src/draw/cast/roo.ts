@@ -1,4 +1,4 @@
-import { E, PATH, R, TAU, aimHand, armsAndWeapon, blush, C, chiliAt, chunk, crownAt, ch, clipIn, eyes, glovePart, helmetAt, mouth, paint, part, put, shoeAt, twoH, RR } from './kit';
+import { E, PATH, R, TAU, accent, aimHand, armsAndWeapon, blush, C, chiliAt, chunk, crownAt, ch, clipIn, eyes, glovePart, helmetAt, mouth, paint, part, put, shoeAt, twoH, RR } from './kit';
 // ---------------------------------------------------------------- 5 roo: a kangaroo in boxing gloves
 
 const RO = { fur: '#cf9d6e', light: '#f2ddbf', ear: '#e7b4a2', nose: '#5b3d35' };

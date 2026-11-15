@@ -1,4 +1,6 @@
-import type { GearType, PetType, PieceKind, PieceType, SquadSpec, WeaponType } from './types';
+import type { GearType, PetType, PieceKind, PieceType, SquadSpec, ThemeId, WeaponType } from './types';
+
+export type { ThemeId } from './types';
 
 /*
  * The game's numbers: classes, the twelve fighters, weapons, gear, cases, matchmaking, rewards and the player level,
@@ -94,18 +96,18 @@ export interface PetInfo {
   row: LineRow;
 }
 export const PET_INFO: Readonly<Record<PetType, PetInfo>> = {
-  sprout: { name: 'Pea', role: 'Swarm puncher', trait: 'Punches +10% harder per Pea nearby (up to +30%)', desc: 'Tiny but never alone. Hits harder next to other Peas.', row: 'middle' },
-  buzzy: { name: 'Stinger', role: 'Flying luchador', trait: 'Its stinger jab poisons for 80% more over 3 s; flies over its own lines', desc: 'Flies over friends. Its sting keeps hurting.', row: 'back' },
-  ninja: { name: 'Kit', role: 'Kickboxer', trait: 'Quick feet: dodges 30% of hits', desc: 'Light on its feet. Dodges almost a third of hits.', row: 'middle' },
-  snailor: { name: 'Dillo', role: 'Armoured boxer', trait: 'Once per life, curls into its armoured ball below half health', desc: 'Curls into a ball once when hurt, and heals a bit.', row: 'front' },
-  roo: { name: 'Roo', role: 'Hopping bruiser', trait: 'Punches knock foes back and interrupt lighter ones', desc: 'Its punches send foes flying.', row: 'front' },
+  sprout: { name: 'Chick', role: 'Speedy swarmer', trait: 'Tiny and quick: runs in fast and pecks +8% harder per Chick nearby', desc: 'Small, fast and never alone. Pecks harder in a flock.', row: 'middle' },
+  buzzy: { name: 'Scorp', role: 'Poison thrower', trait: 'Keeps its distance and lobs poison from its tail: 80% more over 3 s', desc: 'Throws poison from afar. Its glob keeps hurting.', row: 'back' },
+  ninja: { name: 'Shroom', role: 'Bouncy dodger', trait: 'Bounces aside in a puff of spores: dodges 30% of hits', desc: 'Boing! Dodges almost a third of hits.', row: 'middle' },
+  snailor: { name: 'Tulip', role: 'Budding tank', trait: 'Once per life, below half health, closes into a tight bud and takes far less damage', desc: 'Closes into its bud once when hurt, and heals a bit.', row: 'front' },
+  roo: { name: 'Roo', role: 'Hopping boxer', trait: 'Punches knock foes back and interrupt lighter ones', desc: 'Its punches send foes flying.', row: 'front' },
   cacto: { name: 'Cacto', role: 'Double-jab brawler', trait: 'Every attack is two jabs', desc: 'Two jabs every attack.', row: 'middle' },
-  pogo: { name: 'Leapo', role: 'Top-rope luchador', trait: 'Leaps onto the enemy back line at the bell; the landing stuns', desc: 'Leaps off the top rope onto the back line.', row: 'back' },
+  pogo: { name: 'Dandy', role: 'Floating ambusher', trait: 'Floats onto the enemy back line at the bell; the landing stuns', desc: 'Drifts on its seeds onto the back line.', row: 'back' },
   briar: { name: 'Spike', role: 'Spiky wrestler', trait: 'Thorns return 30% of every hit it takes', desc: 'Its spikes hurt whoever hits it.', row: 'front' },
-  angler: { name: 'Inky', role: 'Long-reach boxer', trait: 'Long reach; its gloves pull light foes in', desc: 'Four gloves, long reach. Reels light foes in.', row: 'back' },
-  sumo: { name: 'Walrus', role: 'Belly-slide wrestler', trait: 'Belly-slides at 3x speed and bowls foes over', desc: 'Belly-slides in and bowls foes over.', row: 'front' },
-  rhino: { name: 'Bull', role: 'Charger', trait: 'After a run-up, the next strike deals 2.5x with a big shove', desc: 'Charges in: its first strike hits huge.', row: 'front' },
-  boulder: { name: 'Champ', role: 'Armoured champion', trait: 'Armour cuts 35% of everything; its ground-pound hits up to 4 foes', desc: 'Armour cuts every hit. Its ground-pound hits all round.', row: 'front' },
+  angler: { name: 'Snapper', role: 'Long-vine snapper', trait: 'Long reach; its snapping vine pulls light foes in', desc: 'Snaps from afar and reels light foes in.', row: 'back' },
+  sumo: { name: 'Pumpkin', role: 'Rolling bowler', trait: 'Rolls in at 3x speed and bowls foes over', desc: 'Rolls like a bowling ball and knocks foes over.', row: 'front' },
+  rhino: { name: 'Bamboo', role: 'Staff dasher', trait: 'After a run-up, a dashing strike deals 2.5x with a big shove', desc: 'Dashes in: its first strike hits huge.', row: 'front' },
+  boulder: { name: 'Oak', role: 'Ancient giant', trait: 'Bark armour cuts 35% of everything; its root stomp hits up to 4 foes', desc: 'Bark armour cuts every hit. Its root stomp hits all round.', row: 'front' },
 };
 
 export const PIECE_NAME: Readonly<Record<PieceType, string>> = {
@@ -149,7 +151,7 @@ export const tierOf = (rung: number) => Math.max(1, Math.min(MAX_LEVEL, Math.rou
 /** The tier of a unit's rung (see tierOf). */
 export const petTier = (p: PetType) => tierOf(rungOf(p));
 
-/** How a unit gets about. The simulator walks every style but 'hop' and 'leap' (hops) and 'fly' (over its own side). */
+/** How a unit gets about (for the view; the simulator hops 'hop' and 'leap' and walks every other style). */
 export type MoveStyle = 'scurry' | 'fly' | 'dart' | 'glide' | 'hop' | 'scuttle' | 'leap' | 'roll' | 'creep' | 'slide' | 'charge' | 'plod';
 
 export interface PetDef {
@@ -179,8 +181,8 @@ export interface PetDef {
  * piece covers one cell per fighter, so POWER per cell doubles too. These numbers are internal and never shown.
  */
 export const PETS: Readonly<Record<PetType, PetDef>> = {
-  sprout:  { hp: 58,    dmg: 3.96,  cd: 0.6,  reach: 4,  speed: 56, radius: 16, mass: 1.0, move: 'scurry',  row: 'middle', power: 1.00 },
-  buzzy:   { hp: 89,    dmg: 5.54,  cd: 0.5,  reach: 5,  speed: 74, radius: 13, mass: 0.6, move: 'fly',     row: 'back',   power: 1.25 },
+  sprout:  { hp: 34,    dmg: 2.4,   cd: 0.42, reach: 3,  speed: 96, radius: 13, mass: 0.7, move: 'scurry',  row: 'middle', power: 1.45 },
+  buzzy:   { hp: 70,    dmg: 7.6,   cd: 0.85, reach: 115, speed: 58, radius: 14, mass: 0.8, move: 'scuttle', row: 'back',   power: 1.45 },
   ninja:   { hp: 177,   dmg: 14.6,  cd: 0.45, reach: 3,  speed: 68, radius: 14, mass: 0.8, move: 'dart',    row: 'middle', power: 1.03 },
   snailor: { hp: 413,   dmg: 61,    cd: 1.1,  reach: 4,  speed: 26, radius: 20, mass: 2.4, move: 'glide',   row: 'front',  power: 1.03 },
   roo:     { hp: 862,   dmg: 86.4,  cd: 1.0,  reach: 9,  speed: 40, radius: 24, mass: 2.6, move: 'hop',     row: 'front',  power: 1.15 },
@@ -195,10 +197,17 @@ export const PETS: Readonly<Record<PetType, PetDef>> = {
 
 /** Every trait number in one table, so tools/balance.ts can sweep them (docs/pets.md, section 3; rung k there = rung k here). */
 export const TRAIT = {
-  /** +per damage for each other friendly Sprout within range px, up to max of them */
-  sprout: { per: 0.1, max: 3, range: 100 },
-  /** a landed sting poisons for poison x its damage, drained over time s; a poison event at most every tickEvent s */
-  buzzy: { poison: 0.8, time: 3, tickEvent: 0.5 },
+  /** chick: +per damage for each other friendly Chick within range px, up to max of them (a light flock bonus) */
+  sprout: { per: 0.08, max: 3, range: 90 },
+  /**
+   * scorp: it keeps its distance and lobs a glob of poison from its tail. The glob flies flight + distance / speed s
+   * to where its target stood when it threw, and splats there: it hits the foes whose body is within splat px of
+   * that spot (the nearest first, at most its weapon's splash + 1), and each one hit is poisoned for poison x the
+   * damage, drained over time s (a poison event at most every tickEvent s). A target that moved far enough is
+   * missed. While its throw is not ready it backs off at back x its speed from a foe closer than keep px (body to
+   * body).
+   */
+  buzzy: { poison: 0.8, time: 3, tickEvent: 0.5, flight: 0.25, speed: 420, splat: 12, keep: 60, back: 0.75 },
   /** share of hits that miss it */
   ninja: { dodge: 0.3 },
   /** below this share of health it hides for time s: takes this share of damage, regrows regrow x its health, counts as massMul heavier */
@@ -444,7 +453,6 @@ export const isChampionMatch = (n: number) => n >= CHAMPION.every && n % CHAMPIO
  * The opponent themes, so fights stay interesting. fighters: x the player's fighter count; rungs: where its units
  * sit against the player's own (-1 a rung lower ...); kit: the kit it favours. weight: how often it comes up.
  */
-export type ThemeId = 'mixed' | 'swarm' | 'heavy' | 'glass' | 'tanks' | 'mirror' | 'champion';
 export interface ThemeDef {
   name: string;
   /** one line for the matchmaking card */

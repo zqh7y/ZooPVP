@@ -1,6 +1,6 @@
 import { COLOR } from '../../theme';
 import { lerp, smooth } from '../../util';
-import { E, PATH, R, RR, STONE_INK, TAU, accent, aimHand, armsAndWeapon, ch, chiliAt, chunk, clipIn, crownAt, eyes, handPart, helmetAt, inkC, inner, mouth, paint, part, put, shoeAt, stepX, stepY, twoH, B } from './kit';
+import { E, PATH, R, RR, STONE_INK, TAU, accent, aimHand, armsAndWeapon, ch, chiliAt, chunk, clipIn, crownAt, eyes, handPart, helmetAt, inkC, inner, mouth, paint, part, put, shoeAt, stepX, stepY, twoH, B, rope } from './kit';
 // ---------------------------------------------------------------- 9 angler: a fisherman in a rain hat with a rod
 
 const AN = { coat: '#dfbc5f', skin: '#f0cca4', beard: '#eeebe4', boot: '#5a7680', rod: '#9a6a44', reel: '#aab2bd', nose: '#e8a291', hair: '#d4d0c8', dark: '#4a4f5c' };

@@ -63,6 +63,11 @@ export interface PetPose {
   mood: PetMood;
   /** 0..1 */
   alpha: number;
+  /**
+   * 0..1: curled up in its own defence (optional, 0 when left out). Tulip (snailor) closes its petals into a
+   * tight bud; set it from the shell phase instead of drawing a shell over the unit.
+   */
+  shell?: number;
 }
 
 export const restPose = (): PetPose => ({
